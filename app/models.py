@@ -47,6 +47,7 @@ class Group(Base):
 
     registration_timeout: Mapped[int] = mapped_column(Integer, default=90)
     min_players: Mapped[int] = mapped_column(Integer, default=4)
+    role_preset: Mapped[str] = mapped_column(String(32), default="black23")
     premium_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -109,7 +110,10 @@ class GamePlayer(Base):
 
 class NightAction(Base):
     __tablename__ = "night_actions"
-    __table_args__ = (UniqueConstraint("game_id", "night_number", "actor_telegram_id", "action_type", name="uq_night_action"),)
+    __table_args__ = (
+        UniqueConstraint("game_id", "night_number", "actor_telegram_id", "action_type", name="uq_night_action"),
+        UniqueConstraint("game_id", "night_number", "actor_telegram_id", name="uq_night_actor_once"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
@@ -121,6 +125,19 @@ class NightAction(Base):
     action_type: Mapped[str] = mapped_column(String(32))
     resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class NightPrompt(Base):
+    __tablename__ = "night_prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    night_number: Mapped[int] = mapped_column(Integer, index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    cleared: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -149,6 +166,22 @@ class HangVote(Base):
     target_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     voter_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     approve: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SkipDecision(Base):
+    __tablename__ = "skip_decisions"
+    __table_args__ = (
+        UniqueConstraint("game_id", "phase", "day_number", "night_number", "user_telegram_id", name="uq_skip_decision"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    phase: Mapped[str] = mapped_column(String(32), index=True)
+    day_number: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    night_number: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

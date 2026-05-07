@@ -7,6 +7,7 @@ from aiogram.types import Message
 from app.game_engine import GameEngine
 from app.keyboards import settings_keyboard
 from app.texts import t
+from app.roles import role_preset_label, role_preset_max_players
 
 router = Router()
 
@@ -29,6 +30,8 @@ async def cmd_settings(message: Message, engine: GameEngine) -> None:
         f"{t(lang, 'settings_title')}\n\n"
         f"⏳ Registration timeout: <b>{group.registration_timeout}</b> soniya\n"
         f"👥 Minimum players: <b>{group.min_players}</b>\n\n"
+        f"🎭 Role preset: <b>{role_preset_label(group.role_preset)}</b> "
+        f"({role_preset_max_players(group.role_preset)} gacha)\n\n"
         "Timeoutni o'zgartirish: /settimeout 150"
     )
     await message.reply(text, reply_markup=settings_keyboard(lang))

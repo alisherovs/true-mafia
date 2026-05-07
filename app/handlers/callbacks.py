@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import CallbackQuery
 
 from app.game_engine import GameEngine
+from app.keyboards import role_preset_keyboard, settings_keyboard
+from app.roles import role_preset_label, role_preset_max_players
 from app.texts import t
 
 router = Router()
@@ -31,6 +33,79 @@ async def join_callback(callback: CallbackQuery, engine: GameEngine) -> None:
         return
 
     ok, text = await engine.join_game(callback.bot, game_id, callback.from_user)
+    show_alert = not ok
+    if ok:
+        try:
+            await callback.bot.send_message(
+                callback.from_user.id,
+                "✅ Siz o'yinga muvaffaqiyatli ro'yxatdan o'tdingiz.",
+                reply_markup=await engine.group_return_keyboard(callback.bot, callback.message.chat.id),
+            )
+            text = "✅ Siz o'yinga qo'shildingiz. Tasdiq xabari bot private chatiga yuborildi."
+        except TelegramForbiddenError:
+            text = f"{text}\n\nBotga o'tish tugmasini bosing va private chatni oching."
+            show_alert = True
+    await callback.answer(text, show_alert=show_alert)
+
+
+@router.callback_query(F.data.startswith("role:"))
+async def role_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer("Bad callback", show_alert=True)
+        return
+
+    ok, text = await engine.send_private_role_menu(
+        bot=callback.bot,
+        game_id=int(parts[1]),
+        telegram_id=callback.from_user.id,
+    )
+    if ok:
+        await callback.answer("Rol va tugmalar bot private chatiga yuborildi.", show_alert=True)
+    else:
+        await callback.answer(text, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("skip:"))
+async def skip_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+
+    _, scope, game_id_raw, owner_id_raw = parts
+    try:
+        game_id = int(game_id_raw)
+        owner_id = int(owner_id_raw)
+    except ValueError:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+
+    if scope in {"night", "judge"} and callback.from_user.id != owner_id:
+        await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+        return
+
+    ok, text = await engine.skip_choice(callback.bot, game_id, callback.from_user.id, scope)
+    if ok and callback.message:
+        if scope == "vote":
+            try:
+                await callback.message.delete()
+            except TelegramBadRequest:
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+                except TelegramBadRequest:
+                    pass
+        elif scope != "hang":
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
     await callback.answer(text, show_alert=not ok)
 
 
@@ -116,9 +191,12 @@ async def vote_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     ok, text = await engine.cast_vote(callback.bot, game_id, callback.from_user.id, target_id)
     if ok and callback.message:
         try:
-            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.delete()
         except TelegramBadRequest:
-            pass
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
     await callback.answer(text, show_alert=not ok)
 
 
@@ -138,13 +216,18 @@ async def hang_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     except ValueError:
         await callback.answer("Bad callback", show_alert=True)
         return
-    ok, text = await engine.confirm_hang(
+    ok, text, keyboard = await engine.confirm_hang(
         bot=callback.bot,
         game_id=game_id,
         target_id=target_id,
         confirmed=answer == "yes",
         voter_id=callback.from_user.id,
     )
+    if ok and callback.message and keyboard:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=keyboard)
+        except TelegramBadRequest:
+            pass
     await callback.answer(text, show_alert=not ok)
 
 
@@ -217,7 +300,35 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         await engine.update_group_setting(callback.message.chat.id, "min_players", 4)
         await callback.answer("Minimum players: 4", show_alert=True)
     elif action == "roles":
-        await callback.answer("Role settings keyingi relizda kengayadi.", show_alert=True)
+        group = await engine.group_settings(callback.message.chat.id)
+        await callback.message.edit_text(
+            engine.format_role_preset_settings(group),
+            reply_markup=role_preset_keyboard(group.role_preset),
+        )
+        await callback.answer()
+    elif action.startswith("rolepreset:"):
+        preset = action.split(":", maxsplit=1)[1]
+        if preset not in {"black23", "extended35"}:
+            await callback.answer("Noma'lum role preset.", show_alert=True)
+            return
+        await engine.update_group_setting(callback.message.chat.id, "role_preset", preset)
+        group = await engine.group_settings(callback.message.chat.id)
+        await callback.message.edit_text(
+            engine.format_role_preset_settings(group),
+            reply_markup=role_preset_keyboard(group.role_preset),
+        )
+        await callback.answer(f"Role preset: {role_preset_label(preset)}")
+    elif action == "back":
+        group = await engine.group_settings(callback.message.chat.id)
+        text = (
+            f"{t(lang, 'settings_title')}\n\n"
+            f"⏳ Registration timeout: <b>{group.registration_timeout}</b> soniya\n"
+            f"👥 Minimum players: <b>{group.min_players}</b>\n"
+            f"🎭 Role preset: <b>{role_preset_label(group.role_preset)}</b> "
+            f"({role_preset_max_players(group.role_preset)} gacha)"
+        )
+        await callback.message.edit_text(text, reply_markup=settings_keyboard(lang))
+        await callback.answer()
     elif action == "premium":
         await callback.answer("Premium status: disabled", show_alert=True)
     elif action == "logs":

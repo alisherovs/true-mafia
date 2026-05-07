@@ -17,23 +17,125 @@ class RoleMeta:
 
 
 ROLE_META: dict[Role, RoleMeta] = {
-    Role.CITIZEN: RoleMeta(Role.CITIZEN, Team.CITY, "👨🏼", "Tinch aholi", "Mafiyani topib, ovoz bilan chiqaradi."),
-    Role.MISTRESS: RoleMeta(Role.MISTRESS, Team.CITY, "💃", "Kezuvchi", "Tunda bitta o'yinchini block qiladi."),
-    Role.SERGEANT: RoleMeta(Role.SERGEANT, Team.CITY, "👮🏻‍♂", "Serjant", "Komissarga yordam beradi."),
-    Role.COMMISSAR: RoleMeta(Role.COMMISSAR, Team.CITY, "🕵🏻‍♂", "Komissar Katani", "Mafiyani tekshiradi, keyin otishi mumkin."),
-    Role.DOCTOR: RoleMeta(Role.DOCTOR, Team.CITY, "👨🏻‍⚕", "Doktor", "Tunda bitta o'yinchini davolaydi."),
-    Role.GUARD: RoleMeta(Role.GUARD, Team.CITY, "🛡", "Qo'riqchi", "Tunda bitta o'yinchini hujumdan himoya qiladi."),
-    Role.WATCHER: RoleMeta(Role.WATCHER, Team.CITY, "🔎", "Kuzatuvchi", "Bitta o'yinchiga kim kelganini kuzatadi."),
-    Role.JUDGE: RoleMeta(Role.JUDGE, Team.CITY, "🧑‍⚖️", "Sudya", "O'yinda bir marta kunduzgi osishni bekor qiladi."),
-    Role.BUM: RoleMeta(Role.BUM, Team.CITY, "🧙‍♂", "Daydi", "Bitta o'yinchini kuzatadi."),
-    Role.SORCERER: RoleMeta(Role.SORCERER, Team.CITY, "🧞‍♂️", "Afsungar", "Revenge mexanika."),
-    Role.DON: RoleMeta(Role.DON, Team.MAFIA, "🤵🏻", "Don", "Mafiya zarbasini boshqaradi."),
-    Role.MAFIA: RoleMeta(Role.MAFIA, Team.MAFIA, "🤵🏼", "Mafiya", "Don bilan tunda nishon tanlaydi."),
-    Role.LAWYER: RoleMeta(Role.LAWYER, Team.MAFIA, "👨‍💼", "Advokat", "Tekshiruvni yashiradi."),
-    Role.SPY: RoleMeta(Role.SPY, Team.MAFIA, "🕴", "Josus", "Komissarga oddiy shahar odamidek ko'rinadi."),
-    Role.KILLER: RoleMeta(Role.KILLER, Team.KILLER, "🔪", "Qotil", "Faqat o'zi qolsa yutadi."),
-    Role.WOLF: RoleMeta(Role.WOLF, Team.KILLER, "🐺", "Bo'ri", "Holatga qarab transform bo'ladi."),
-    Role.JESTER: RoleMeta(Role.JESTER, Team.NEUTRAL, "🎭", "Masxaraboz", "Kunduzgi ovoz bilan chiqarilsa alohida g'olib bo'ladi."),
+    Role.CITIZEN: RoleMeta(
+        Role.CITIZEN,
+        Team.CITY,
+        "👨🏼",
+        "Tinch axoli",
+        "Sizning vazifangiz mafiani topish va ovoz berish jarayonida ularni osish",
+    ),
+    Role.MISTRESS: RoleMeta(
+        Role.MISTRESS,
+        Team.CITY,
+        "💃",
+        "Kezuvchi",
+        "Bu shavqatsiz shaxarda tirik qolishingiz kerak. Siz mehmonga borgan odamingizga uyqu     💊dori berasiz va u bir kun uxlaydi :)",
+    ),
+    Role.SERGEANT: RoleMeta(
+        Role.SERGEANT,
+        Team.CITY,
+        "👮🏼",
+        "Serjant",
+        "🕵🏻‍♂ Komissar Katanining yordamchisi. U sizni o'zining qilayotgan ishlaridan xabardor qilib turadi. Agar komissar o'lsa uning o'rnini siz egallaysiz.",
+    ),
+    Role.COMMISSAR: RoleMeta(
+        Role.COMMISSAR,
+        Team.CITY,
+        "🕵🏼",
+        "Komissar katani",
+        "Shaharning asosiy ximoyachisi va mafia kushandasi...",
+    ),
+    Role.DOCTOR: RoleMeta(
+        Role.DOCTOR,
+        Team.CITY,
+        "👨🏼‍⚕️️",
+        "Doktor",
+        "Tunda kimnidir qutqarib qolishingiz mumkin...",
+    ),
+    Role.GUARD: RoleMeta(
+        Role.GUARD,
+        Team.CITY,
+        "🛡",
+        "Qo'riqchi",
+        "Tunda bitta o'yinchini himoya qilasiz va uning hayotini saqlab qolishingiz mumkin.",
+    ),
+    Role.WATCHER: RoleMeta(
+        Role.WATCHER,
+        Team.CITY,
+        "🔎",
+        "Kuzatuvchi",
+        "Tunda bir odamni kuzatasiz va uning oldiga kim kelganini bilib olasiz.",
+    ),
+    Role.JUDGE: RoleMeta(
+        Role.JUDGE,
+        Team.CITY,
+        "🧑‍⚖️",
+        "Sudya",
+        "Kunduzgi osish hukmini o'yinda bir marta bekor qilishingiz mumkin.",
+    ),
+    Role.BUM: RoleMeta(
+        Role.BUM,
+        Team.CITY,
+        "🧙‍♂️",
+        "Daydi",
+        "Siz xohlagan odamning uyiga ichkilik butilka olish uchun borishingiz va qotillikning guvoxi bo'lib qolishingiz mumkin.",
+    ),
+    Role.SORCERER: RoleMeta(
+        Role.SORCERER,
+        Team.CITY,
+        "💣",
+        "️Afsungar",
+        "Sizning maqsadingiz tinch fuqarolarga yordam berish.  Agar kechasi o'ldirilsang, seni o'ldirgan ham o'ladi.  Agar kunlik ovoz berishda o'ldirilsangiz, siz biron bir o'yinchini tanlashingiz va uni o'zingiz bilan birga jahannaga ravona bo'lishingiz mumkin.",
+    ),
+    Role.DON: RoleMeta(
+        Role.DON,
+        Team.MAFIA,
+        "🤵🏻",
+        "Don",
+        "Bu tunda kim o'lishini siz xal qilasiz. Siz (Mafialar sardori)siz.",
+    ),
+    Role.MAFIA: RoleMeta(
+        Role.MAFIA,
+        Team.MAFIA,
+        "🤵🏼",
+        "Mafia",
+        "Siz Mafiasiz, Donga bo'ysunasiz va sizga qarshilik qilganlarni o'ldirasiz. Don o'lsa siz yangi Don bo'lishingiz mumkin.",
+    ),
+    Role.LAWYER: RoleMeta(
+        Role.LAWYER,
+        Team.MAFIA,
+        "👨🏼‍💼",
+        "Advokat",
+        "Tunda kimni ximoya qilishni tanlaysiz. Agar siz mafiani tanlasangiz,  🕵 Komissar Katani uni taniy olmaydi va unga 👨🏼Tinch axoli bo'lib ko'rinadi. Siz mafia tarafdasiz.",
+    ),
+    Role.SPY: RoleMeta(
+        Role.SPY,
+        Team.MAFIA,
+        "🕴",
+        "Josus",
+        "Mafialar tarafida yashirin o'ynaysiz. Komissar sizni tekshirsa, oddiy shahar odamidek ko'rinasiz.",
+    ),
+    Role.KILLER: RoleMeta(
+        Role.KILLER,
+        Team.KILLER,
+        "🔪",
+        "Qotil",
+        "Shaxardagi xamma o'lishi kerak, sizdan tashqari albatta :)",
+    ),
+    Role.WOLF: RoleMeta(
+        Role.WOLF,
+        Team.KILLER,
+        "🐺",
+        "Bo'ri",
+        "Agar Mafiya sizni o'ldirsa, unda siz kelgusi tunda mafiya bo'lasiz.  Komissar sizni o'ldirsa, siz serjantga aylanasiz. Qotil sizni o'ldirsa siz shu zahoti o'lasiz...",
+    ),
+    Role.JESTER: RoleMeta(
+        Role.JESTER,
+        Team.NEUTRAL,
+        "🤦🏼",
+        "Suidsid",
+        "Seni osib o'ldirishsa sen yutasan! :)",
+    ),
 }
 
 
@@ -48,10 +150,10 @@ def role_team(role: Union[Role, str]) -> Team:
     return ROLE_META[role_enum].team
 
 
-def build_role_set(player_count: int) -> list[Role]:
-    C = Role.CITIZEN
-    M = Role.MAFIA
-    role_table: dict[int, list[Role]] = {
+C = Role.CITIZEN
+M = Role.MAFIA
+
+EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
         4: [Role.DON, Role.DOCTOR, Role.CITIZEN, Role.CITIZEN],
         5: [Role.DON, Role.DOCTOR, C, C, C],
         6: [Role.DON, Role.DOCTOR, Role.COMMISSAR, C, C, C],
@@ -84,12 +186,36 @@ def build_role_set(player_count: int) -> list[Role]:
         33: [Role.DON, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C],
         34: [Role.DON, M, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C],
         35: [Role.DON, M, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C, C],
-    }
+}
 
-    if player_count <= 35:
-        roles = role_table.get(player_count, role_table[4]).copy()
+ROLE_PRESET_LABELS = {
+    "black23": "Black 23",
+    "extended35": "Extended 35",
+}
+
+ROLE_PRESET_MAX_PLAYERS = {
+    "black23": 23,
+    "extended35": 35,
+}
+
+
+def role_preset_label(preset: str) -> str:
+    return ROLE_PRESET_LABELS.get(preset, ROLE_PRESET_LABELS["black23"])
+
+
+def role_preset_max_players(preset: str) -> int:
+    return ROLE_PRESET_MAX_PLAYERS.get(preset, ROLE_PRESET_MAX_PLAYERS["black23"])
+
+
+def build_role_set(player_count: int, preset: str = "black23") -> list[Role]:
+    max_players = role_preset_max_players(preset)
+    capped_count = min(player_count, max_players)
+    if capped_count <= 35:
+        roles = EXTENDED_ROLE_TABLE.get(capped_count, EXTENDED_ROLE_TABLE[4]).copy()
     else:
-        roles = role_table[35].copy()
+        roles = EXTENDED_ROLE_TABLE[35].copy()
+
+    if player_count > len(roles):
         extras = [Role.CITIZEN, Role.CITIZEN, Role.MAFIA, Role.CITIZEN]
         idx = 0
         while len(roles) < player_count:

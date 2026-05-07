@@ -70,6 +70,7 @@ class ActionType(str, Enum):
     WATCH = "watch"
     VISIT = "visit"
     REVENGE_PICK = "revenge_pick"
+    SKIP = "skip"
 
 
 class LogType(str, Enum):

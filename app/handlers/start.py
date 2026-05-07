@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.enums import GameStatus
 from app.game_engine import GameEngine
-from app.keyboards import language_keyboard, premium_groups_keyboard, start_menu_keyboard
+from app.keyboards import language_keyboard, premium_groups_keyboard, profile_dashboard_keyboard, start_menu_keyboard
 from app.texts import t
 
 router = Router()
@@ -24,37 +24,22 @@ async def cmd_start(
         return
     if message.chat.type != "private":
         lang = await engine.get_group_language(message.chat.id)
-        active_game = await engine.active_game_for_chat(message.chat.id)
-        if active_game and active_game.status == GameStatus.REGISTRATION.value:
-            allowed = await engine.is_admin_or_creator(
-                bot=message.bot,
-                chat_id=message.chat.id,
-                user_id=message.from_user.id,
-                game_creator_id=active_game.creator_telegram_id,
-            )
-            if not allowed:
-                await message.reply(t(lang, "no_permission"))
+        game = await engine.active_game_for_chat(message.chat.id)
+        if game is None:
+            await message.reply(t(lang, "group_start_no_game"))
+            return
+        if game.status == GameStatus.REGISTRATION.value:
+            if not await engine.bot_is_admin(message.bot, message.chat.id):
+                await message.reply(t(lang, "bot_not_admin"))
                 return
-            await message.reply("⏱ Ro'yxatdan o'tish qo'lda yakunlandi. O'yin boshlanmoqda...")
-            await engine.close_registration(message.bot, active_game.id)
+            await engine.close_registration(message.bot, game.id)
             return
-
-        if active_game and active_game.status == GameStatus.ACTIVE.value:
-            await message.reply("🎮 O'yin allaqachon boshlangan.")
+        if game.status == GameStatus.ACTIVE.value:
+            await message.reply(t(lang, "group_start_game_active"))
             return
-
         await message.reply(
-            "<b>🕵🏻 Mafia Bot guruh rejimi</b>\n\n"
-            "Asosiy buyruqlar:\n"
-            "/game - ro'yxatdan o'tishni boshlash\n"
-            "/leave - ro'yxatdan chiqish\n"
-            "/extend 30 yoki /extend 60 - vaqtni uzaytirish\n"
-            "/stop - o'yinni to'xtatish\n"
-            "/roles - qoidalar\n"
-            "/settings - admin panel\n"
-            "/top - reyting\n"
-            "/profile - profil\n"
-            "/lang - guruh tili"
+            "<b>🎮 O'yinni boshlash uchun /game buyrug'ini yuboring.</b>\n\n"
+            "Ro'yxatdan o'tish boshlangach, pastdagi tugma orqali o'yinga qo'shilasiz."
         )
         return
 
@@ -96,6 +81,32 @@ async def cmd_start(
             if not ok:
                 await message.answer(text)
             return
+
+    if payload.startswith("role_"):
+        parts = payload.split("_", maxsplit=1)
+        if len(parts) == 2 and parts[1].isdigit():
+            ok, text = await engine.send_private_role_menu(
+                bot=message.bot,
+                game_id=int(parts[1]),
+                telegram_id=message.from_user.id,
+            )
+            if not ok:
+                await message.answer(text)
+            return
+
+    if payload == "profile":
+        user = await engine.ensure_user(message.from_user)
+        if await engine.user_in_running_game(message.from_user.id):
+            await message.answer(
+                "🎮 <b>Siz hozir aktiv o'yindasiz.</b>\n\n"
+                "Profil statistikasi o'yin davomida ko'rsatilmaydi."
+            )
+            return
+        await message.answer(
+            engine.format_user_dashboard(user),
+            reply_markup=profile_dashboard_keyboard(settings, is_admin=message.from_user.id in settings.admin_ids),
+        )
+        return
 
     existing = await engine.get_user(message.from_user.id)
     user = await engine.ensure_user(message.from_user)

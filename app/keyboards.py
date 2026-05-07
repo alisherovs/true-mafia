@@ -108,13 +108,27 @@ def go_private_keyboard(settings: Settings) -> InlineKeyboardMarkup:
     )
 
 
-def go_vote_private_keyboard(settings: Settings, game_id: int) -> InlineKeyboardMarkup:
+def go_role_private_keyboard(settings: Settings, game_id: int, text: str = "Rol haqida") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Ovoz berish",
-                    url=f"https://t.me/{_clean_bot_username(settings.bot_username)}?start=vote_{game_id}",
+                    text=text,
+                    url=f"https://t.me/{_clean_bot_username(settings.bot_username)}",
+                )
+            ],
+        ]
+    )
+
+
+def go_vote_private_keyboard(settings: Settings, game_id: int) -> InlineKeyboardMarkup:
+    bot_username = _clean_bot_username(settings.bot_username)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"@{bot_username}",
+                    url=f"https://t.me/{bot_username}",
                 )
             ],
         ]
@@ -134,7 +148,7 @@ def go_group_keyboard(chat_id: int, group_url: Optional[str] = None) -> InlineKe
     url = group_url or group_url_from_chat_id(chat_id)
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="👥 Guruhga qaytish ↗", url=url)],
+            [InlineKeyboardButton(text="Guruhga o'tish", url=url)],
         ]
     )
 
@@ -149,6 +163,7 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
         ]
         for target_id, name in choices
     ]
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -156,7 +171,7 @@ def commissar_action_keyboard(game_id: int, actor_id: int, can_shoot: bool) -> I
     rows = [
         [
             InlineKeyboardButton(
-                text="🕵️ Tekshirish - kimning tomonini bilish",
+                text="🕵️ Uyiga borib tekshirish",
                 callback_data=f"commissar:check:{game_id}:{actor_id}",
             )
         ]
@@ -165,30 +180,32 @@ def commissar_action_keyboard(game_id: int, actor_id: int, can_shoot: bool) -> I
         rows.append(
             [
                 InlineKeyboardButton(
-                    text="🔫 Otish - shubhalini yo'q qilish",
+                    text="🔫 Gumondorni o'yindan chetlatish",
                     callback_data=f"commissar:shoot:{game_id}:{actor_id}",
                 )
             ]
         )
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def vote_keyboard(game_id: int, choices: list[tuple[int, str]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    rows = [
             [InlineKeyboardButton(text=name, callback_data=f"vote:{game_id}:{target_id}")]
             for target_id, name in choices
         ]
-    )
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:vote:{game_id}:0")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def confirm_hang_keyboard(game_id: int, target_id: int) -> InlineKeyboardMarkup:
+def confirm_hang_keyboard(game_id: int, target_id: int, yes_count: int = 0, no_count: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="👍", callback_data=f"hang:yes:{game_id}:{target_id}"),
-                InlineKeyboardButton(text="👎", callback_data=f"hang:no:{game_id}:{target_id}"),
-            ]
+                InlineKeyboardButton(text=f"👍 {yes_count}", callback_data=f"hang:yes:{game_id}:{target_id}"),
+                InlineKeyboardButton(text=f"👎 {no_count}", callback_data=f"hang:no:{game_id}:{target_id}"),
+            ],
+            [InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:hang:{game_id}:{target_id}")],
         ]
     )
 
@@ -201,7 +218,8 @@ def judge_cancel_keyboard(game_id: int, target_id: int, judge_id: int, confirm_m
                     text="🧑‍⚖️ Osishni bekor qilish",
                     callback_data=f"judgecancel:{game_id}:{target_id}:{judge_id}:{confirm_message_id}",
                 )
-            ]
+            ],
+            [InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:judge:{game_id}:{judge_id}")],
         ]
     )
 
@@ -219,6 +237,19 @@ def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboar
     ]
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=cb)] for cb, label in items]
+    )
+
+
+def role_preset_keyboard(current_preset: str = "black23") -> InlineKeyboardMarkup:
+    def label(preset: str, text: str) -> str:
+        return f"✅ {text}" if current_preset == preset else text
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=label("black23", "🎭 Black 23"), callback_data="settings:rolepreset:black23")],
+            [InlineKeyboardButton(text=label("extended35", "🎲 Extended 35"), callback_data="settings:rolepreset:extended35")],
+            [InlineKeyboardButton(text="◀️ Settings", callback_data="settings:back")],
+        ]
     )
 
 

@@ -33,7 +33,8 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
         chat_title=message.chat.title or "Group",
         creator_id=message.from_user.id,
     )
-    await message.reply(text)
+    if not ok:
+        await message.reply(text)
 
 
 @router.message(Command("leave"))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional, Union
+import json
 import logging
 import asyncio
 from html import escape
@@ -21,6 +22,7 @@ from app.keyboards import (
     confirm_hang_keyboard,
     commissar_action_keyboard,
     go_private_keyboard,
+    go_role_private_keyboard,
     go_vote_private_keyboard,
     go_group_keyboard,
     group_url_from_chat_id,
@@ -30,8 +32,8 @@ from app.keyboards import (
     target_keyboard,
     vote_keyboard,
 )
-from app.models import Game, GameLog, GamePlayer, Group, HangVote, NightAction, PremiumGroup, User, Vote
-from app.roles import ROLE_META, build_role_set, role_label, role_team
+from app.models import Game, GameLog, GamePlayer, Group, HangVote, NightAction, NightPrompt, PremiumGroup, SkipDecision, User, Vote
+from app.roles import ROLE_META, build_role_set, role_label, role_preset_label, role_preset_max_players, role_team
 from app.scheduler import scheduler
 from app.texts import t
 
@@ -80,8 +82,12 @@ class GameEngine:
     def _format_role_group(title: str, count: int, players: list[GamePlayer]) -> str:
         if count == 0:
             return ""
-        roles = ", ".join(role_label(player.role) for player in players)
-        return f"{title} - {count}\n{roles}"
+        role_counter = Counter(player.role for player in players)
+        role_lines = []
+        for role_value, role_count in role_counter.items():
+            suffix = f" - {role_count}" if role_count > 1 else ""
+            role_lines.append(f"{role_label(role_value)}{suffix}")
+        return f"{title} - <b>{count}</b>\n{', '.join(role_lines)}"
 
     def _format_death_line(self, player: GamePlayer, cause: Optional[str] = None) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
@@ -96,58 +102,114 @@ class GameEngine:
             return f"{base} Afsungar qasosi bilan o'ldirildi..."
         return f"{base} vaxshiylarcha o'ldirildi..."
 
-    def _build_day_result_text(
+    def _death_story_line(
         self,
-        day_number: int,
-        alive_players: list[GamePlayer],
+        player: GamePlayer,
+        cause: Optional[str] = None,
+        visitor_label: Optional[str] = None,
+    ) -> str:
+        name = self._tg_mention(player.telegram_id, player.display_name)
+        role = role_label(player.role)
+        if visitor_label:
+            visitor = visitor_label
+        elif cause == "mafia":
+            visitor = "🤵🏻 Don yoki Mafiya"
+        elif cause == "killer":
+            visitor = "🔪 Qotil"
+        elif cause == "commissar":
+            visitor = "🕵🏼 Komissar Katani"
+        elif cause == "sorcerer":
+            visitor = "🧙‍ Sehrgar qasosi"
+        else:
+            visitor = "noma'lum mehmon"
+        return f"Tunda {role} {name} vaxshiylarcha o'ldirildi. Aytishlaricha unikiga {visitor} kelgan."
+
+    def _build_alive_status_text(self, alive_players: list[GamePlayer]) -> str:
+        city_players = [player for player in alive_players if player.team == Team.CITY.value]
+        mafia_players = [player for player in alive_players if player.team == Team.MAFIA.value]
+        singleton_players = [
+            player
+            for player in alive_players
+            if player.team in {Team.KILLER.value, Team.NEUTRAL.value}
+        ]
+
+        group_blocks = [
+            self._format_role_group("🤵🏻 <b>Mafiya</b>", len(mafia_players), mafia_players),
+            self._format_role_group("👨🏼 <b>Singleton</b>", len(singleton_players), singleton_players),
+            self._format_role_group("🏘 <b>Tinch aholilar</b>", len(city_players), city_players),
+        ]
+        groups_text = "\n\n".join(block for block in group_blocks if block)
+        return (
+            "<b>Tirik o'yinchilar:</b>\n"
+            f"{self._format_alive_players(alive_players)}\n\n"
+            f"{groups_text}\n\n"
+            f"<b>Jami:</b> {len(alive_players)}"
+        )
+
+    @staticmethod
+    def _build_day_intro_text(day_number: int) -> str:
+        return (
+            "Xayrli tong🌝 \n"
+            f"🌄<b>Kun: {day_number}</b>\n"
+            "Shamollar tundagi mish-mishlarni butun shaharga yetkazmoqda..\n\n"
+            "Endi kechaning natijalarini muhokama qilish, sabablari va oqibatlarini tushunish vaqti keldi ..."
+        )
+
+    def _build_night_story_messages(
+        self,
         dead_players: list[GamePlayer],
         transformed: list[str],
         night_activity_lines: list[str],
         night_event_lines: list[str],
         death_causes: Optional[dict[int, str]] = None,
-    ) -> str:
+        death_visitors: Optional[dict[int, str]] = None,
+    ) -> list[str]:
         death_causes = death_causes or {}
+        death_visitors = death_visitors or {}
+        messages: list[str] = []
+
+        def add_once(line: str) -> None:
+            clean = line.strip()
+            if clean and clean not in messages:
+                messages.append(clean)
+
+        for line in night_activity_lines:
+            add_once(line)
         if dead_players:
-            night_result = "\n".join(
-                self._format_death_line(player, death_causes.get(player.telegram_id))
-                for player in dead_players
-            )
+            for player in dead_players:
+                add_once(
+                    self._death_story_line(
+                        player,
+                        death_causes.get(player.telegram_id),
+                        death_visitors.get(player.telegram_id),
+                    )
+                )
         else:
-            night_result = "Ishonish qiyin, lekin bu tunda hech kim o'lmadi..."
+            add_once("Ishonish qiyin, lekin bu tunda hech kim o'lmadi...")
 
-        city_players = [player for player in alive_players if player.team == Team.CITY.value]
-        mafia_players = [player for player in alive_players if player.team == Team.MAFIA.value]
-        killer_players = [player for player in alive_players if player.team == Team.KILLER.value]
-        neutral_players = [player for player in alive_players if player.team == Team.NEUTRAL.value]
+        for line in night_event_lines:
+            add_once(line)
+        for line in transformed:
+            add_once(f"🔁 {line}")
+        return messages
 
-        group_blocks = [
-            self._format_role_group("🏘 <b>Tinch aholilar</b>", len(city_players), city_players),
-            self._format_role_group("🤵🏻 <b>Mafiya</b>", len(mafia_players), mafia_players),
-            self._format_role_group("🔪 <b>Yolg'iz xavf</b>", len(killer_players), killer_players),
-            self._format_role_group("🎭 <b>Neytral</b>", len(neutral_players), neutral_players),
-        ]
-        groups_text = "\n\n".join(block for block in group_blocks if block)
-        transform_text = ""
-        if transformed:
-            transform_text = "\n\n" + "\n".join(f"🔁 {line}" for line in transformed)
-        activity_text = ""
-        if night_activity_lines:
-            activity_text = "\n\n" + "\n\n".join(night_activity_lines)
-        events_text = ""
-        if night_event_lines:
-            events_text = "\n\n" + "\n".join(night_event_lines)
-        night_story = f"{activity_text}\n\n{night_result}{events_text}{transform_text}".strip()
+    @staticmethod
+    def _private_role_text(role: Role) -> str:
+        meta = ROLE_META[role]
+        return f"Siz - {meta.emoji} <b>{meta.title_uz}</b>siz!\n{meta.short_desc_uz}"
 
+    def _commissar_check_result_text(self, target: GamePlayer, seen_team: str) -> str:
+        team_uz = {
+            Team.CITY.value: "Tinch aholi",
+            Team.MAFIA.value: "Mafiya",
+            Team.KILLER.value: "Xavfli neytral",
+            Team.NEUTRAL.value: "Neytral",
+        }.get(seen_team, seen_team)
         return (
-            "Xayrli tong🌝 \n"
-            f"🌄<b>Kun: {day_number}</b>\n"
-            "Shamollar tundagi mish-mishlarni butun shaharga yetkazmoqda..\n\n\n"
-            f"{night_story}\n\n\n"
-            "Tirik o'yinchilar: \n"
-            f"{self._format_alive_players(alive_players)}\n\n"
-            f"{groups_text}\n\n"
-            f"<b>Jami:</b> {len(alive_players)}\n\n"
-            "Endi kechaning natijalarini muhokama qilish, sabablari va oqibatlarini tushunish vaqti keldi ..."
+            "🕵🏼 <b>Komissar Katani tekshiruvi</b>\n\n"
+            f"Siz {self._tg_mention(target.telegram_id, target.display_name)}ning uyiga tashrif buyurdingiz.\n"
+            f"Topilgan ma'lumot: <b>{team_uz}</b>.\n\n"
+            "Bu ma'lumotni kunduzgi muhokamada ehtiyotkorlik bilan ishlating."
         )
 
     @staticmethod
@@ -177,45 +239,6 @@ class GameEngine:
         if role == Role.BUM:
             return "🧙🏼 Daydi kimnikigadir ichkilik butilka olish uchun ketdi..."
         return None
-
-    def _role_fall_line(self, player: GamePlayer) -> str:
-        name = self._tg_mention(player.telegram_id, player.display_name)
-        role = Role(player.role)
-        if role == Role.CITIZEN:
-            return f"👨🏼 {name} shaharning oddiy, ammo muhim ovozi edi..."
-        if role == Role.DOCTOR:
-            return f"👨🏼‍⚕️️ {name} endi hech kimni davolay olmaydi..."
-        if role == Role.GUARD:
-            return f"🛡 {name} himoya qalqonini yerga tashladi..."
-        if role == Role.WATCHER:
-            return f"🔎 {name}ning kuzatuvlari shu yerda tugadi..."
-        if role == Role.JUDGE:
-            return f"🧑‍⚖️ {name}ning oxirgi hukmi aytilmay qoldi..."
-        if role == Role.MISTRESS:
-            return f"💃 {name}ning sirli mehmonlari endi kelmaydi..."
-        if role == Role.SERGEANT:
-            return f"👮🏻‍♂ {name} Komissar Katani yo'lidagi sodiq yordamchi edi..."
-        if role == Role.COMMISSAR:
-            return f"🕵🏼 {name} yovuzlarni qidirayotgan izquvar edi..."
-        if role == Role.BUM:
-            return f"🧙🏼 {name} oxirgi bor tun ko'chalarida iz qoldirdi..."
-        if role == Role.SORCERER:
-            return f"🧙‍ Sehrgar {name} o'limida ham sehrini yo'qotmadi..."
-        if role == Role.DON:
-            return f"🤵🏻 Don {name} yiqildi, lekin mafiya soyasi hali tarqalmadi..."
-        if role == Role.MAFIA:
-            return f"🤵🏼 {name} mafiya oilasining jim askarlaridan biri edi..."
-        if role == Role.LAWYER:
-            return f"🤹🏻 Aferist {name} endi hech kimning izini yashira olmaydi..."
-        if role == Role.SPY:
-            return f"🕴 Josus {name} nihoyat fosh bo'ldi..."
-        if role == Role.KILLER:
-            return f"🔪 Qotil {name}ning pichog'i nihoyat jim qoldi..."
-        if role == Role.WOLF:
-            return f"🐺 {name} o'z qiyofasini topishga ulgurmay ketdi..."
-        if role == Role.JESTER:
-            return f"🎭 Masxaraboz {name} sahnadan tushdi..."
-        return f"{name} tun qurboni bo'ldi..."
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
         safe_words = escape(words.strip()[:500])
@@ -380,6 +403,56 @@ class GameEngine:
             session.add(GameLog(game_id=game_id, event_type=event_type, payload=payload))
             await session.commit()
 
+    @staticmethod
+    def _player_log_snapshot(player: Optional[GamePlayer]) -> Optional[dict[str, object]]:
+        if player is None:
+            return None
+        return {
+            "telegram_id": player.telegram_id,
+            "display_name": player.display_name,
+            "role": player.role,
+            "team": player.team,
+            "alive": player.alive,
+        }
+
+    def _build_log_payload(
+        self,
+        game: Game,
+        *,
+        actor: Optional[GamePlayer] = None,
+        target: Optional[GamePlayer] = None,
+        **metadata: object,
+    ) -> str:
+        payload = {
+            "chat_id": game.chat_id,
+            "status": game.status,
+            "phase": game.phase,
+            "day_number": game.day_number,
+            "night_number": game.night_number,
+            "actor": self._player_log_snapshot(actor),
+            "target": self._player_log_snapshot(target),
+            "metadata": metadata,
+        }
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    def _add_game_log(
+        self,
+        session: AsyncSession,
+        game: Game,
+        event_type: str,
+        *,
+        actor: Optional[GamePlayer] = None,
+        target: Optional[GamePlayer] = None,
+        **metadata: object,
+    ) -> None:
+        session.add(
+            GameLog(
+                game_id=game.id,
+                event_type=event_type,
+                payload=self._build_log_payload(game, actor=actor, target=target, **metadata),
+            )
+        )
+
     async def find_active_game(self, session: AsyncSession, chat_id: int) -> Optional[Game]:
         stmt = select(Game).where(
             Game.chat_id == chat_id,
@@ -439,6 +512,14 @@ class GameEngine:
                 ),
             )
             game.lobby_message_id = msg.message_id
+            self._add_game_log(
+                session,
+                game,
+                "registration_started",
+                creator_id=creator_id,
+                registration_timeout=timeout,
+                registration_ends_at=ends_at.isoformat(),
+            )
             await session.commit()
 
         try:
@@ -450,7 +531,6 @@ class GameEngine:
             await self.schedule_registration_jobs(bot, game.id)
         except Exception:
             logger.exception("Failed to schedule registration jobs for game_id=%s", game.id)
-        await self.log(game.id, LogType.GAME_EVENT.value, "Registration started")
         return True, t(await self.get_group_language(chat_id), "registration_started")
 
     async def _build_lobby_text(self, session: AsyncSession, game_id: int, lang: str, ended: bool) -> str:
@@ -459,10 +539,16 @@ class GameEngine:
                 select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
             )
         ).scalars().all()
+        if ended:
+            title = t(lang, "lobby_ended_title")
+        elif players:
+            title = t(lang, "lobby_title")
+        else:
+            return t(lang, "lobby_started_title")
+
         names = ", ".join(self._tg_mention(p.telegram_id, p.display_name) for p in players) if players else t(lang, "lobby_empty")
-        title_key = "lobby_ended_title" if ended else "lobby_title"
         return (
-            f"{t(lang, title_key)}\n\n"
+            f"{title}\n"
             f"{t(lang, 'lobby_registered')}\n\n"
             f"{names}\n\n"
             f"{t(lang, 'lobby_total', count=len(players))}"
@@ -558,6 +644,12 @@ class GameEngine:
             lang = await self.get_group_language(game.chat_id)
             if game.status != GameStatus.REGISTRATION.value:
                 return False, t(lang, "registration_closed_cb")
+            group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
+            preset = group.role_preset if group else "black23"
+            max_players = role_preset_max_players(preset)
+            current_count = await session.scalar(select(func.count(GamePlayer.id)).where(GamePlayer.game_id == game_id))
+            if (current_count or 0) >= max_players:
+                return False, f"Bu role preset uchun limit: {max_players} o'yinchi."
 
             exists = (
                 await session.execute(
@@ -578,6 +670,8 @@ class GameEngine:
             )
             session.add(player)
             try:
+                await session.flush()
+                self._add_game_log(session, game, "player_joined", actor=player)
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
@@ -628,6 +722,7 @@ class GameEngine:
             ).scalar_one_or_none()
             if player is None:
                 return False, t(lang, "not_joined")
+            self._add_game_log(session, game, "player_left", actor=player)
             await session.delete(player)
             await session.commit()
 
@@ -647,6 +742,13 @@ class GameEngine:
             if current_end < self._now_utc():
                 current_end = self._now_utc()
             game.registration_ends_at = current_end + timedelta(seconds=seconds)
+            self._add_game_log(
+                session,
+                game,
+                "registration_extended",
+                seconds=seconds,
+                registration_ends_at=game.registration_ends_at.isoformat(),
+            )
             await session.commit()
 
         try:
@@ -664,6 +766,7 @@ class GameEngine:
             game.phase = GamePhase.ENDED.value
             game.active_key = None
             game.ended_at = datetime.now(timezone.utc)
+            self._add_game_log(session, game, "game_cancelled", reason="manual_stop")
             await session.commit()
             lang = await self.get_group_language(game.chat_id)
 
@@ -704,6 +807,14 @@ class GameEngine:
                 game.phase = GamePhase.ENDED.value
                 game.active_key = None
                 game.ended_at = datetime.now(timezone.utc)
+                self._add_game_log(
+                    session,
+                    game,
+                    "game_cancelled",
+                    reason="insufficient_players",
+                    players_count=len(players),
+                    min_players=min_players,
+                )
                 await session.commit()
                 await self.update_lobby(bot, game_id, ended=True)
                 await bot.send_message(game.chat_id, t(lang, "insufficient_players"))
@@ -714,11 +825,24 @@ class GameEngine:
             game.phase = GamePhase.NIGHT.value
             game.started_at = datetime.now(timezone.utc)
             game.night_number = 1
+            self._add_game_log(
+                session,
+                game,
+                "registration_closed",
+                players_count=len(players),
+                min_players=min_players,
+            )
             await session.commit()
 
         await self.update_lobby(bot, game_id, ended=True)
-        await bot.send_message((await self._game_chat_id(game_id)), t(lang, "registration_ended"))
+        chat_id = await self._game_chat_id(game_id)
+        await bot.send_message(chat_id, t(lang, "registration_ended"))
         await self.assign_roles_and_notify(bot, game_id)
+        await bot.send_message(
+            chat_id,
+            "<b>O'yin boshlandi!</b>",
+            reply_markup=go_role_private_keyboard(self.settings, game_id),
+        )
         await self.start_night(bot, game_id)
 
     async def _game_chat_id(self, game_id: int) -> int:
@@ -731,7 +855,10 @@ class GameEngine:
             players = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc()))
             ).scalars().all()
-            roles = build_role_set(len(players))
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one()
+            group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
+            role_preset = group.role_preset if group else "black23"
+            roles = build_role_set(len(players), role_preset)
             users = {
                 user.telegram_id: user
                 for user in (
@@ -759,26 +886,144 @@ class GameEngine:
                 final_role = assigned[player.telegram_id]
                 player.role = final_role.value
                 player.team = role_team(final_role).value
+                self._add_game_log(
+                    session,
+                    game,
+                    "role_assigned",
+                    actor=player,
+                    role=final_role.value,
+                    team=player.team,
+                )
             await session.commit()
 
-            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one()
             lang = await self.get_group_language(game.chat_id)
 
         for player in players:
             role = Role(player.role)
             try:
-                text = (
-                    f"🎭 <b>Sizning rolingiz:</b> {role_label(role)}\n"
-                    f"{ROLE_META[role].short_desc_uz}\n"
-                    f"\nO'yin chatiga qayting va strategiyani boshlang."
+                await bot.send_message(
+                    player.telegram_id,
+                    self._private_role_text(role),
+                    reply_markup=await self.group_return_keyboard(bot, game.chat_id),
                 )
-                await bot.send_message(player.telegram_id, text)
             except TelegramForbiddenError:
                 await bot.send_message(game.chat_id, f"{player.display_name}: {t(lang, 'need_start_for_role')}")
 
-    async def _send_phase_media(self, bot: Bot, chat_id: int, is_night: bool, lang: str) -> None:
-        caption = t(lang, "night_title") if is_night else t(lang, "day_title")
-        kb = go_private_keyboard(self.settings)
+    def _night_prompt_for_player(
+        self,
+        game_id: int,
+        night_number: int,
+        player: GamePlayer,
+        alive_players: list[GamePlayer],
+    ) -> Optional[tuple[str, object]]:
+        role = Role(player.role)
+        all_choices = [(p.telegram_id, p.display_name) for p in alive_players]
+        targets = [(tid, name) for tid, name in all_choices if tid != player.telegram_id]
+        mafia_targets = [
+            (p.telegram_id, p.display_name)
+            for p in alive_players
+            if p.telegram_id != player.telegram_id and p.team != Team.MAFIA.value
+        ]
+
+        if role in {Role.MAFIA, Role.DON, Role.SPY}:
+            return "🌚 Kimni yo'q qilamiz?", target_keyboard("kill", game_id, player.telegram_id, mafia_targets)
+        if role == Role.DOCTOR:
+            return (
+                "💉 Kimni davolaysiz? (o'zingizni faqat 1 marta)",
+                target_keyboard("heal", game_id, player.telegram_id, all_choices),
+            )
+        if role == Role.GUARD:
+            return "🛡 Kimni tunda himoya qilasiz?", target_keyboard("guard", game_id, player.telegram_id, all_choices)
+        if role == Role.WATCHER:
+            return "🔎 Kimni kuzatasiz? Unga kim kelganini bilasiz.", target_keyboard("watch", game_id, player.telegram_id, targets)
+        if role == Role.COMMISSAR:
+            return (
+                "🕵🏼 <b>Komissar Katani navbati</b>\n\n"
+                "Bir o'yinchining uyiga borib tekshirishingiz mumkin. "
+                "Ikkinchi tundan boshlab gumondorni o'yindan chetlatish ham ochiladi.",
+                commissar_action_keyboard(
+                    game_id=game_id,
+                    actor_id=player.telegram_id,
+                    can_shoot=night_number >= 2,
+                ),
+            )
+        if role == Role.MISTRESS:
+            return "💃 Kimni harakatdan to'xtatasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
+        if role == Role.LAWYER:
+            return "👨‍💼 Kimni himoya qilasiz?", target_keyboard("defend", game_id, player.telegram_id, targets)
+        if role == Role.KILLER:
+            return "🔪 Kimni o'ldirasiz?", target_keyboard("killer", game_id, player.telegram_id, targets)
+        if role == Role.BUM:
+            return "🧙‍♂ Kimni kuzatasiz?", target_keyboard("visit", game_id, player.telegram_id, targets)
+        return None
+
+    async def send_private_role_menu(self, bot: Bot, game_id: int, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status not in {GameStatus.ACTIVE.value, GameStatus.COMPLETED.value}:
+                return False, "Bu o'yin topilmadi yoki hali boshlanmagan."
+
+            player = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == telegram_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if player is None or player.role is None:
+                return False, "Siz bu o'yinda ro'yxatdan o'tmagansiz."
+
+            alive = await self._alive_players(session, game_id)
+            prompt = None
+            if game.phase == GamePhase.NIGHT.value and player.alive:
+                existing_action = (
+                    await session.execute(
+                        select(NightAction.id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.night_number == game.night_number,
+                            NightAction.actor_telegram_id == telegram_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_action is None:
+                    prompt = self._night_prompt_for_player(game_id, game.night_number, player, alive)
+            is_night = game.phase == GamePhase.NIGHT.value
+            is_alive = player.alive
+            night_number = game.night_number
+
+        if prompt:
+            text, keyboard = prompt
+            prompt_message = await bot.send_message(telegram_id, text, reply_markup=keyboard)
+            await self._remember_night_prompt(
+                game_id=game_id,
+                night_number=night_number,
+                user_telegram_id=telegram_id,
+                message_id=prompt_message.message_id,
+            )
+        elif is_night and is_alive:
+            await bot.send_message(
+                telegram_id,
+                "🌚 Bu tun uchun faol tanlov mavjud emas yoki tanlovingiz allaqachon qabul qilingan.",
+            )
+        else:
+            await bot.send_message(
+                telegram_id,
+                "🎭 Rolingiz o'yin boshida bir marta yuborilgan. Hozir faol tanlov bosqichi emas.",
+            )
+        return True, "Bot private chatiga kerakli ma'lumot yuborildi."
+
+    async def _send_phase_media(
+        self,
+        bot: Bot,
+        chat_id: int,
+        is_night: bool,
+        lang: str,
+        game_id: Optional[int] = None,
+        caption_override: Optional[str] = None,
+    ) -> None:
+        caption = caption_override or (t(lang, "night_title") if is_night else t(lang, "day_title"))
+        kb = go_role_private_keyboard(self.settings, game_id, "Bot-ga o'tish ↗") if game_id else go_private_keyboard(self.settings)
         file_id = self.settings.night_media_file_id if is_night else self.settings.day_media_file_id
         local_path_str = self.settings.night_media_local if is_night else self.settings.day_media_local
 
@@ -827,16 +1072,36 @@ class GameEngine:
             await bot.send_message(chat_id=chat_id, text=caption, reply_markup=kb)
 
     async def start_night(self, bot: Bot, game_id: int) -> None:
+        winner = await self.check_winner(game_id)
+        if winner:
+            await self.finish_game(bot, game_id, winner)
+            return
+
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value:
                 return
             game.phase = GamePhase.NIGHT.value
-            await session.commit()
             chat_id = game.chat_id
             lang = await self.get_group_language(chat_id)
+            alive_players = await self._alive_players(session, game_id)
+            alive_status = self._build_alive_status_text(alive_players)
+            self._add_game_log(
+                session,
+                game,
+                "night_started",
+                alive_count=len(alive_players),
+            )
+            await session.commit()
 
-        await self._send_phase_media(bot, chat_id, is_night=True, lang=lang)
+        await self._send_phase_media(
+            bot,
+            chat_id,
+            is_night=True,
+            lang=lang,
+            game_id=game_id,
+        )
+        await bot.send_message(chat_id, alive_status)
         await self.send_night_prompts(bot, game_id)
         run_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.night_timeout)
         scheduler.add_job(
@@ -855,78 +1120,76 @@ class GameEngine:
             )
         ).scalars().all()
 
+    async def _remember_night_prompt(
+        self,
+        game_id: int,
+        night_number: int,
+        user_telegram_id: int,
+        message_id: int,
+    ) -> None:
+        async with self.session_factory() as session:
+            session.add(
+                NightPrompt(
+                    game_id=game_id,
+                    night_number=night_number,
+                    user_telegram_id=user_telegram_id,
+                    message_id=message_id,
+                )
+            )
+            await session.commit()
+
+    async def _clear_night_prompt_buttons(self, bot: Bot, game_id: int, night_number: int) -> None:
+        async with self.session_factory() as session:
+            prompts = (
+                await session.execute(
+                    select(NightPrompt).where(
+                        NightPrompt.game_id == game_id,
+                        NightPrompt.night_number == night_number,
+                        NightPrompt.cleared.is_(False),
+                    )
+                )
+            ).scalars().all()
+
+        for prompt in prompts:
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=prompt.user_telegram_id,
+                    message_id=prompt.message_id,
+                    reply_markup=None,
+                )
+            except TelegramBadRequest:
+                pass
+
+        if prompts:
+            async with self.session_factory() as session:
+                prompt_ids = [prompt.id for prompt in prompts]
+                rows = (
+                    await session.execute(select(NightPrompt).where(NightPrompt.id.in_(prompt_ids)))
+                ).scalars().all()
+                for row in rows:
+                    row.cleared = True
+                await session.commit()
+
     async def send_night_prompts(self, bot: Bot, game_id: int) -> None:
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one()
             night = game.night_number
             alive = await self._alive_players(session, game_id)
 
-        all_choices = [(p.telegram_id, p.display_name) for p in alive]
-
         for player in alive:
-            role = Role(player.role)
-            targets = [(tid, name) for tid, name in all_choices if tid != player.telegram_id]
+            prompt = self._night_prompt_for_player(game_id, night, player, alive)
+            if prompt is None:
+                continue
+            text, keyboard = prompt
 
             try:
-                if role in {Role.MAFIA, Role.DON, Role.SPY}:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🌚 Kimni yo'q qilamiz?",
-                        reply_markup=target_keyboard("kill", game_id, player.telegram_id, targets),
-                    )
-                elif role == Role.DOCTOR:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "💉 Kimni davolaysiz? (o'zingizni faqat 1 marta)",
-                        reply_markup=target_keyboard("heal", game_id, player.telegram_id, all_choices),
-                    )
-                elif role == Role.GUARD:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🛡 Kimni tunda himoya qilasiz?",
-                        reply_markup=target_keyboard("guard", game_id, player.telegram_id, all_choices),
-                    )
-                elif role == Role.WATCHER:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🔎 Kimni kuzatasiz? Unga kim kelganini bilasiz.",
-                        reply_markup=target_keyboard("watch", game_id, player.telegram_id, targets),
-                    )
-                elif role == Role.COMMISSAR:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🕵🏼 <b>Komissar Katani navbati</b>\n\n"
-                        "Bugun tunda qanday harakat qilasiz?",
-                        reply_markup=commissar_action_keyboard(
-                            game_id=game_id,
-                            actor_id=player.telegram_id,
-                            can_shoot=night >= 2,
-                        ),
-                    )
-                elif role == Role.MISTRESS:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "💃 Kimni harakatdan to'xtatasiz?",
-                        reply_markup=target_keyboard("block", game_id, player.telegram_id, targets),
-                    )
-                elif role == Role.LAWYER:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "👨‍💼 Kimni himoya qilasiz?",
-                        reply_markup=target_keyboard("defend", game_id, player.telegram_id, targets),
-                    )
-                elif role == Role.KILLER:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🔪 Kimni o'ldirasiz?",
-                        reply_markup=target_keyboard("killer", game_id, player.telegram_id, targets),
-                    )
-                elif role == Role.BUM:
-                    await bot.send_message(
-                        player.telegram_id,
-                        "🧙‍♂ Kimni kuzatasiz?",
-                        reply_markup=target_keyboard("visit", game_id, player.telegram_id, targets),
-                    )
+                prompt_message = await bot.send_message(player.telegram_id, text, reply_markup=keyboard)
+                await self._remember_night_prompt(
+                    game_id=game_id,
+                    night_number=night,
+                    user_telegram_id=player.telegram_id,
+                    message_id=prompt_message.message_id,
+                )
             except TelegramForbiddenError:
                 chat_id = (await self._game_chat_id(game_id))
                 await bot.send_message(chat_id, f"{player.display_name}: /start orqali botga kiring.")
@@ -956,8 +1219,11 @@ class GameEngine:
         if action_type is None:
             return False, "Unknown action"
 
-        announce_line: Optional[str] = None
+        success_text = t(self.settings.default_language, "action_saved")
         chat_id: Optional[int] = None
+        don_notice_ids: list[int] = []
+        don_notice_text: Optional[str] = None
+        group_activity_line: Optional[str] = None
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value or game.phase != GamePhase.NIGHT.value:
@@ -1009,8 +1275,17 @@ class GameEngine:
             ).scalar_one_or_none()
             if target is None or not target.alive:
                 return False, "Nishon noto'g'ri."
+            if action_key == "kill" and actor.team == Team.MAFIA.value and target.team == Team.MAFIA.value:
+                return False, "Mafiya o'z sherigiga zarar yetkaza olmaydi."
             if actor_role == Role.MISTRESS and Role(target.role) == Role.COMMISSAR:
                 return False, "Kezuvchi Komissarni qasddan uxlatmasligi kerak."
+            if actor_role == Role.COMMISSAR and action_key == "check":
+                success_text = f"Siz {target.display_name}ning uyiga tekshiruvga borishni tanladingiz."
+            elif actor_role == Role.COMMISSAR and action_key == "shoot":
+                success_text = f"Siz {target.display_name}ni o'yindan chetlatishni tanladingiz."
+            else:
+                success_text = f"Siz - {target.display_name} ni tanladingiz."
+            group_activity_line = self._night_activity_line(actor_role, action_key)
 
             existing = (
                 await session.execute(
@@ -1018,42 +1293,77 @@ class GameEngine:
                         NightAction.game_id == game_id,
                         NightAction.night_number == game.night_number,
                         NightAction.actor_telegram_id == actor_id,
-                        NightAction.action_type == action_type.value,
                     )
                 )
             ).scalar_one_or_none()
-            should_announce = True
             if existing is not None:
-                should_announce = existing.target_telegram_id != target_id or existing.details != action_key
-                existing.target_telegram_id = target_id
-                existing.details = action_key
-            else:
-                session.add(
-                    NightAction(
-                        game_id=game_id,
-                        night_number=game.night_number,
-                        actor_telegram_id=actor_id,
-                        target_telegram_id=target_id,
-                        action_type=action_type.value,
-                        details=action_key,
-                    )
+                return False, t(self.settings.default_language, "action_already")
+
+            session.add(
+                NightAction(
+                    game_id=game_id,
+                    night_number=game.night_number,
+                    actor_telegram_id=actor_id,
+                    target_telegram_id=target_id,
+                    action_type=action_type.value,
+                    details=action_key,
                 )
+            )
 
             if action_type == ActionType.HEAL and actor.telegram_id == target_id:
                 actor.self_heal_used = True
 
-            if should_announce:
-                announce_line = self._night_activity_line(actor_role, action_key)
+            self._add_game_log(
+                session,
+                game,
+                "night_action_saved",
+                actor=actor,
+                target=target,
+                action_type=action_type.value,
+                action_key=action_key,
+            )
+            if action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY}:
+                dons = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == game_id,
+                            GamePlayer.alive.is_(True),
+                            GamePlayer.role == Role.DON.value,
+                            GamePlayer.telegram_id != actor_id,
+                        )
+                    )
+                ).scalars().all()
+                don_notice_ids = [don.telegram_id for don in dons]
+                don_notice_text = f"{actor.display_name} -- {target.display_name} ga ovoz berdi"
 
-            await session.commit()
-
-        if announce_line and chat_id is not None:
             try:
-                await bot.send_message(chat_id, announce_line)
-            except TelegramBadRequest:
-                logger.warning("Unable to announce night action for game %s", game_id)
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return False, t(self.settings.default_language, "action_already")
 
-        return True, t(self.settings.default_language, "action_saved")
+        if chat_id is not None:
+            try:
+                await bot.send_message(
+                    actor_id,
+                    success_text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+            if group_activity_line:
+                await bot.send_message(chat_id, group_activity_line)
+            if don_notice_text:
+                for don_id in don_notice_ids:
+                    try:
+                        await bot.send_message(
+                            don_id,
+                            don_notice_text,
+                            reply_markup=await self.group_return_keyboard(bot, chat_id),
+                        )
+                    except TelegramForbiddenError:
+                        pass
+        return True, success_text
 
     async def commissar_targets_keyboard(
         self,
@@ -1080,11 +1390,151 @@ class GameEngine:
                 return False, "Bu amal faqat Komissar Katani uchun.", None
             if action_key == "shoot" and game.night_number < 2:
                 return False, "Komissar birinchi tunda ota olmaydi.", None
+            existing = (
+                await session.execute(
+                    select(NightAction.id).where(
+                        NightAction.game_id == game_id,
+                        NightAction.night_number == game.night_number,
+                        NightAction.actor_telegram_id == actor_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return False, t(self.settings.default_language, "action_already"), None
             alive = await self._alive_players(session, game_id)
 
         choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != actor_id]
-        title = "🕵️ Kimni tekshiramiz?" if action_key == "check" else "🔫 Kimni otamiz?"
+        title = (
+            "🕵️ Kimning uyiga borib tekshiramiz?"
+            if action_key == "check"
+            else "🔫 Kimni o'yindan chetlatamiz?"
+        )
         return True, title, target_keyboard(action_key, game_id, actor_id, choices)
+
+    async def skip_choice(
+        self,
+        bot: Bot,
+        game_id: int,
+        user_id: int,
+        scope: str,
+    ) -> tuple[bool, str]:
+        if scope not in {"night", "vote", "hang", "judge"}:
+            return False, "Noma'lum tanlov."
+
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status != GameStatus.ACTIVE.value:
+                return False, t(self.settings.default_language, "callback_expired")
+
+            player = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == user_id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if player is None:
+                return False, t(self.settings.default_language, "not_alive")
+
+            if scope == "night":
+                if game.phase != GamePhase.NIGHT.value:
+                    return False, t(self.settings.default_language, "callback_expired")
+                existing = (
+                    await session.execute(
+                        select(NightAction.id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.night_number == game.night_number,
+                            NightAction.actor_telegram_id == user_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    return False, t(self.settings.default_language, "action_already")
+                session.add(
+                    NightAction(
+                        game_id=game_id,
+                        night_number=game.night_number,
+                        actor_telegram_id=user_id,
+                        target_telegram_id=None,
+                        action_type=ActionType.SKIP.value,
+                        details="skip",
+                    )
+                )
+            elif scope == "vote":
+                if game.phase != GamePhase.DAY_VOTING.value:
+                    return False, t(self.settings.default_language, "callback_expired")
+                existing_vote = (
+                    await session.execute(
+                        select(Vote.id).where(
+                            Vote.game_id == game_id,
+                            Vote.day_number == game.day_number,
+                            Vote.voter_telegram_id == user_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_vote is not None:
+                    return False, t(self.settings.default_language, "vote_already")
+            elif scope == "hang":
+                if game.phase != GamePhase.DAY_CONFIRM.value:
+                    return False, t(self.settings.default_language, "callback_expired")
+                existing_hang = (
+                    await session.execute(
+                        select(HangVote.id).where(
+                            HangVote.game_id == game_id,
+                            HangVote.day_number == game.day_number,
+                            HangVote.voter_telegram_id == user_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing_hang is not None:
+                    return False, "Siz allaqachon tanlov qilgansiz."
+            elif scope == "judge":
+                if game.phase != GamePhase.DAY_CONFIRM.value:
+                    return False, t(self.settings.default_language, "callback_expired")
+                if Role(player.role) != Role.JUDGE:
+                    return False, "Bu tugma faqat Sudya uchun."
+
+            existing_skip = (
+                await session.execute(
+                    select(SkipDecision.id).where(
+                        SkipDecision.game_id == game_id,
+                        SkipDecision.phase == scope,
+                        SkipDecision.day_number == game.day_number,
+                        SkipDecision.night_number == game.night_number,
+                        SkipDecision.user_telegram_id == user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_skip is not None:
+                return False, "Siz allaqachon o'tkazib yuborgansiz."
+
+            session.add(
+                SkipDecision(
+                    game_id=game_id,
+                    phase=scope,
+                    day_number=game.day_number,
+                    night_number=game.night_number,
+                    user_telegram_id=user_id,
+                )
+            )
+            self._add_game_log(session, game, f"{scope}_skipped", actor=player)
+            await session.commit()
+            chat_id = game.chat_id
+            player_name = self._tg_mention(player.telegram_id, player.display_name)
+
+        group_text = f"{player_name} hech narsa qilmaslikka qaror qildi"
+        await bot.send_message(chat_id, group_text)
+        try:
+            await bot.send_message(
+                user_id,
+                "Siz hech narsa qilmaslikka qaror qildingiz.",
+                reply_markup=await self.group_return_keyboard(bot, chat_id),
+            )
+        except TelegramForbiddenError:
+            pass
+        return True, "O'tkazib yuborildi."
 
     async def resolve_night(self, bot: Bot, game_id: int) -> None:
         async with self.session_factory() as session:
@@ -1112,6 +1562,7 @@ class GameEngine:
             defended: set[int] = set()
             guarded: set[int] = set()
             healed: set[int] = set()
+            doctor_help_targets: set[int] = set()
             visited: dict[int, int] = {}
             watched: dict[int, int] = {}
             visitors_by_target: dict[int, list[int]] = defaultdict(list)
@@ -1130,6 +1581,7 @@ class GameEngine:
                     continue
                 if act.action_type == ActionType.HEAL.value and act.target_telegram_id:
                     healed.add(act.target_telegram_id)
+                    doctor_help_targets.add(act.target_telegram_id)
                 elif act.action_type == ActionType.DEFEND.value and act.target_telegram_id:
                     defended.add(act.target_telegram_id)
                 elif act.action_type == ActionType.GUARD.value and act.target_telegram_id:
@@ -1159,9 +1611,6 @@ class GameEngine:
                 if actor is None:
                     continue
                 role = Role(actor.role)
-                activity_line = self._night_activity_line(role, act.details)
-                if activity_line:
-                    night_activity_lines.append(activity_line)
                 target_id = act.target_telegram_id
                 if target_id is None:
                     continue
@@ -1178,6 +1627,7 @@ class GameEngine:
             dead: set[int] = set()
             death_causes: dict[int, str] = {}
             mafia_dead: set[int] = set()
+            death_visitors: dict[int, str] = {}
             transformed: list[str] = []
             night_event_lines: list[str] = []
             last_words_prompts: list[tuple[int, str]] = []
@@ -1194,15 +1644,22 @@ class GameEngine:
                     elif target not in healed and target not in guarded:
                         dead.add(target)
                         death_causes[target] = "mafia"
+                        killer_actor = next(
+                            (
+                                player_map.get(action.actor_telegram_id)
+                                for action in actions
+                                if action.action_type == ActionType.KILL.value
+                                and action.target_telegram_id == target
+                                and action.actor_telegram_id in player_map
+                                and Role(player_map[action.actor_telegram_id].role) in {Role.DON, Role.MAFIA, Role.SPY}
+                            ),
+                            None,
+                        )
+                        if killer_actor:
+                            death_visitors[target] = role_label(killer_actor.role)
                         mafia_dead.add(target)
                         night_event_lines.append(
                             f"🤵🏻 Mafiya {self._tg_mention(target_player.telegram_id, target_player.display_name)} iziga tushdi..."
-                        )
-                    elif target in guarded:
-                        night_event_lines.append("🛡 Qo'riqchi tunda kimningdir hayotini to'sib qoldi...")
-                    else:
-                        night_event_lines.append(
-                            f"👨🏼‍⚕️️Doktor kimningdir hayotini saqlab qoldi..."
                         )
 
             killer_target = Counter(killer_kills).most_common(1)
@@ -1222,13 +1679,10 @@ class GameEngine:
                         else:
                             dead.add(target)
                             death_causes[target] = "killer"
+                            death_visitors[target] = role_label(Role.KILLER.value)
                             night_event_lines.append(
                                 f"Bugun 🔪 Qotil {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni o'ldirishga urundi..."
                             )
-                    elif target in guarded:
-                        night_event_lines.append("🛡 Qo'riqchi Qotilning yo'lini to'sdi...")
-                    else:
-                        night_event_lines.append("👨🏼‍⚕️️Doktor qotilning rejasini buzdi...")
 
             for target in commissar_shots:
                 target_player = player_map.get(target)
@@ -1238,16 +1692,16 @@ class GameEngine:
                     target_player.role = Role.SERGEANT.value
                     target_player.team = Team.CITY.value
                     transformed.append(f"🐺 {target_player.display_name} serjantga aylandi")
-                elif target not in healed and target not in guarded:
+                    night_event_lines.append(
+                        f"🕵🏼 Komissar Katani {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni nishonga oldi, lekin u 🐺 Bo'ri bo'lgani uchun Serjantga aylandi..."
+                    )
+                else:
                     dead.add(target)
                     death_causes[target] = "commissar"
+                    death_visitors[target] = role_label(Role.COMMISSAR.value)
                     night_event_lines.append(
-                        f"🕵🏼 Komissar katani {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni otdi..."
+                        f"🕵🏼 Komissar Katani {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni o'yindan chetlatdi..."
                     )
-                elif target in guarded:
-                    night_event_lines.append("🛡 Qo'riqchi Komissarning o'qidan keyin ham bir jonni saqladi...")
-                else:
-                    night_event_lines.append("👨🏼‍⚕️️Doktor Komissar o'qidan keyin ham bir jonni saqladi...")
 
             # Daydi witness hint.
             witness_lines = []
@@ -1310,6 +1764,7 @@ class GameEngine:
                 if attacker in alive_ids:
                     dead.add(attacker)
                     death_causes[attacker] = "sorcerer"
+                    death_visitors[attacker] = role_label(Role.SORCERER.value)
                     attacker_player = player_map.get(attacker)
                     if attacker_player:
                         night_event_lines.append(
@@ -1321,7 +1776,6 @@ class GameEngine:
                 if pl:
                     pl.alive = False
                     pl.death_day = game.day_number + 1
-                    night_event_lines.append(self._role_fall_line(pl))
                     if dead_id in mafia_dead:
                         if pl.last_words:
                             night_event_lines.append(self._last_words_line(pl, pl.last_words))
@@ -1333,24 +1787,62 @@ class GameEngine:
 
             game.phase = GamePhase.DAY_DISCUSSION.value
             game.day_number += 1
+            self._add_game_log(
+                session,
+                game,
+                "night_resolved",
+                dead_ids=sorted(dead),
+                transformed=transformed,
+                blocked_ids=sorted(blocked),
+                healed_ids=sorted(healed),
+                guarded_ids=sorted(guarded),
+                actions_count=len(actions),
+            )
             await session.commit()
 
             chat_id = game.chat_id
             lang = await self.get_group_language(chat_id)
             alive_after_night = [player for player in alive_players if player.alive]
             dead_players = [player_map[player_id] for player_id in dead if player_id in player_map]
-            summary = self._build_day_result_text(
-                day_number=game.day_number,
-                alive_players=alive_after_night,
+            day_caption = self._build_day_intro_text(game.day_number)
+            alive_status = self._build_alive_status_text(alive_after_night)
+            story_messages = self._build_night_story_messages(
                 dead_players=dead_players,
                 transformed=transformed,
                 night_activity_lines=night_activity_lines,
                 night_event_lines=night_event_lines,
                 death_causes=death_causes,
+                death_visitors=death_visitors,
             )
+            doctor_help_ids = [
+                player_id
+                for player_id in doctor_help_targets
+                if player_id in player_map and player_id not in dead
+            ]
 
-        await self._send_phase_media(bot, chat_id, is_night=False, lang=lang)
-        await bot.send_message(chat_id, summary)
+        await self._clear_night_prompt_buttons(bot, game_id, night)
+        await self._send_phase_media(
+            bot,
+            chat_id,
+            is_night=False,
+            lang=lang,
+            game_id=game_id,
+            caption_override=day_caption,
+        )
+        await bot.send_message(chat_id, alive_status)
+        for story_message in story_messages:
+            await bot.send_message(chat_id, story_message)
+            await asyncio.sleep(0.15)
+
+        for telegram_id in doctor_help_ids:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    "Doktor sizga yordam berdi :)",
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
 
         for telegram_id, _ in last_words_prompts:
             try:
@@ -1375,14 +1867,8 @@ class GameEngine:
                 seen_team = Team.CITY.value
             if target_id in defended and target.team == Team.MAFIA.value:
                 seen_team = Team.CITY.value
-            team_uz = {
-                Team.CITY.value: "Tinch aholi",
-                Team.MAFIA.value: "Mafiya",
-                Team.KILLER.value: "Neytral",
-                Team.NEUTRAL.value: "Neytral",
-            }.get(seen_team, seen_team)
             try:
-                await bot.send_message(commissar_id, f"🕵🏻 Tekshiruv: {target.display_name} → <b>{team_uz}</b>")
+                await bot.send_message(commissar_id, self._commissar_check_result_text(target, seen_team))
             except TelegramForbiddenError:
                 pass
 
@@ -1403,7 +1889,6 @@ class GameEngine:
             await self.finish_game(bot, game_id, winner)
             return
 
-        await bot.send_message(chat_id, "🗣 Muhokama vaqti boshlandi.")
         scheduler.add_job(
             self.start_voting,
             "date",
@@ -1420,6 +1905,13 @@ class GameEngine:
                 return
             game.phase = GamePhase.DAY_VOTING.value
             alive = await self._alive_players(session, game_id)
+            self._add_game_log(
+                session,
+                game,
+                "voting_started",
+                alive_count=len(alive),
+                timeout=self.settings.day_voting_timeout,
+            )
             await session.commit()
             choices = [(p.telegram_id, p.display_name) for p in alive]
             lang = await self.get_group_language(game.chat_id)
@@ -1436,6 +1928,10 @@ class GameEngine:
             f"Ovoz berish uchun {self.settings.day_voting_timeout} sekund.",
             reply_markup=go_vote_private_keyboard(self.settings, game_id),
         )
+        for player_id, _ in choices:
+            ok, _ = await self.send_private_vote_menu(bot, game_id, player_id)
+            if not ok:
+                continue
         scheduler.add_job(
             self.resolve_voting,
             "date",
@@ -1468,10 +1964,31 @@ class GameEngine:
             if target is None or not target.alive:
                 return False, "Nishon o'lik yoki topilmadi."
             target_display_name = target.display_name or "Unknown"
+            skipped = (
+                await session.execute(
+                    select(SkipDecision.id).where(
+                        SkipDecision.game_id == game_id,
+                        SkipDecision.phase == "vote",
+                        SkipDecision.day_number == game.day_number,
+                        SkipDecision.night_number == game.night_number,
+                        SkipDecision.user_telegram_id == voter_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if skipped is not None:
+                return False, "Siz ovoz berishni o'tkazib yuborgansiz."
 
             user = (await session.execute(select(User).where(User.telegram_id == target_id))).scalar_one_or_none()
             if user and user.vote_protection > 0:
                 user.vote_protection -= 1
+                self._add_game_log(
+                    session,
+                    game,
+                    "vote_blocked_by_protection",
+                    actor=voter,
+                    target=target,
+                    remaining_vote_protection=user.vote_protection,
+                )
                 await session.commit()
                 return False, "Bu o'yinchi ovoz berishdan himoyalangan."
 
@@ -1495,13 +2012,22 @@ class GameEngine:
                     target_telegram_id=target_id,
                 )
             )
+            self._add_game_log(session, game, "vote_cast", actor=voter, target=target)
             await session.commit()
             chat_id = game.chat_id
             voter_name = self._tg_mention(voter.telegram_id, voter.display_name)
             target_name = self._tg_mention(target.telegram_id, target_display_name)
 
-        await bot.send_message(chat_id, f"{voter_name} -- {target_name} ga ovoz berdi")
-        return True, f"Siz {target_display_name} ga ovoz berdingiz."
+        await bot.send_message(chat_id, f"{voter_name} ovoz berdi {target_name} ga")
+        try:
+            await bot.send_message(
+                voter_id,
+                f"Siz - {escape(target_display_name)} ni tanladingiz.",
+                reply_markup=await self.group_return_keyboard(bot, chat_id),
+            )
+        except TelegramForbiddenError:
+            pass
+        return True, f"Siz {target_display_name} ni tanladingiz."
 
     async def send_private_vote_menu(self, bot: Bot, game_id: int, voter_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
@@ -1530,6 +2056,19 @@ class GameEngine:
             ).scalar_one_or_none()
             if already_voted is not None:
                 return False, t(self.settings.default_language, "vote_already")
+            already_skipped = (
+                await session.execute(
+                    select(SkipDecision.id).where(
+                        SkipDecision.game_id == game_id,
+                        SkipDecision.phase == "vote",
+                        SkipDecision.day_number == game.day_number,
+                        SkipDecision.night_number == game.night_number,
+                        SkipDecision.user_telegram_id == voter_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if already_skipped is not None:
+                return False, "Siz ovoz berishni o'tkazib yuborgansiz."
             alive = await self._alive_players(session, game_id)
 
         choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != voter_id]
@@ -1545,9 +2084,9 @@ class GameEngine:
         if not cleaned:
             return False, "Xabar bo'sh bo'lmasin."
         async with self.session_factory() as session:
-            player = (
+            row = (
                 await session.execute(
-                    select(GamePlayer)
+                    select(GamePlayer, Game)
                     .join(Game, Game.id == GamePlayer.game_id)
                     .where(
                         Game.status == GameStatus.ACTIVE.value,
@@ -1555,11 +2094,19 @@ class GameEngine:
                     )
                     .order_by(Game.id.desc())
                 )
-            ).scalars().first()
-            if player is None:
+            ).first()
+            if row is None:
                 return False, "Siz aktiv o'yinda emassiz."
+            player, game = row
             player.last_words = cleaned[:500]
             player.awaiting_last_words = False
+            self._add_game_log(
+                session,
+                game,
+                "last_words_saved",
+                actor=player,
+                text_length=len(player.last_words),
+            )
             await session.commit()
             return True, "So'nggi xabaringiz saqlandi."
 
@@ -1587,6 +2134,13 @@ class GameEngine:
             player.awaiting_last_words = False
             line = self._last_words_line(player, player.last_words)
             chat_id = game.chat_id
+            self._add_game_log(
+                session,
+                game,
+                "last_words_sent",
+                actor=player,
+                text_length=len(player.last_words),
+            )
             await session.commit()
 
         await bot.send_message(chat_id, line)
@@ -1611,10 +2165,11 @@ class GameEngine:
             counter = Counter(v.target_telegram_id for v in votes)
             chat_id = game.chat_id
             if not counter:
+                self._add_game_log(session, game, "voting_resolved", result="no_votes", votes_count=0)
                 await bot.send_message(
                     chat_id,
                     "<b>Ovoz berish natijalari:</b>\n"
-                    f"0 👍  |  {len(alive)} 👎\n\n"
+                    "0 👍  |  0 👎\n\n"
                     "Aholi janjallashib uylariga tarqashdi.",
                 )
                 await self._apply_inactivity_after_vote(bot, session, game, votes)
@@ -1631,6 +2186,14 @@ class GameEngine:
             top_count = counter.most_common(1)[0][1]
             top_targets = [target_id for target_id, count in counter.items() if count == top_count]
             if len(top_targets) > 1:
+                self._add_game_log(
+                    session,
+                    game,
+                    "voting_resolved",
+                    result="tie",
+                    top_targets=top_targets,
+                    top_count=top_count,
+                )
                 await bot.send_message(chat_id, "Aholi janjallashib uylariga tarqashdi.")
                 await self._apply_inactivity_after_vote(bot, session, game, votes)
                 winner = await self.check_winner(game_id)
@@ -1653,6 +2216,15 @@ class GameEngine:
                 if Role(player.role) == Role.JUDGE and not player.judge_cancel_used
             ]
             game.phase = GamePhase.DAY_CONFIRM.value
+            self._add_game_log(
+                session,
+                game,
+                "hang_confirmation_started",
+                target=target,
+                votes_count=len(votes),
+                top_count=top_count,
+                judges_count=len(judges),
+            )
             await session.commit()
             confirm_message = await bot.send_message(
                 chat_id,
@@ -1716,6 +2288,17 @@ class GameEngine:
                 )
             ).scalars().all()
         )
+        active_ids.update(
+            skip.user_telegram_id
+            for skip in (
+                await session.execute(
+                    select(SkipDecision).where(
+                        SkipDecision.game_id == game_id,
+                        SkipDecision.day_number == game.day_number,
+                    )
+                )
+            ).scalars().all()
+        )
 
         alive_after_vote = await self._alive_players(session, game_id)
         sleep_lines: list[str] = []
@@ -1727,6 +2310,13 @@ class GameEngine:
             if player.inactive_rounds >= 2:
                 player.alive = False
                 player.death_day = game.day_number
+                self._add_game_log(
+                    session,
+                    game,
+                    "player_removed_for_inactivity",
+                    actor=player,
+                    inactive_rounds=player.inactive_rounds,
+                )
                 sleep_lines.append(self._sleep_death_line(player))
         await session.commit()
 
@@ -1740,11 +2330,11 @@ class GameEngine:
         target_id: int,
         confirmed: bool,
         voter_id: int,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, Optional[object]]:
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value or game.phase != GamePhase.DAY_CONFIRM.value:
-                return False, t(self.settings.default_language, "callback_expired")
+                return False, t(self.settings.default_language, "callback_expired"), None
             voter = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -1755,7 +2345,7 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if voter is None:
-                return False, t(self.settings.default_language, "not_alive")
+                return False, "Siz bu o'yinda tirik ishtirokchi emassiz.", None
             target = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -1766,7 +2356,20 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if target is None:
-                return False, "Nomzod topilmadi yoki allaqachon o'lgan."
+                return False, "Nomzod topilmadi yoki allaqachon o'lgan.", None
+            skipped = (
+                await session.execute(
+                    select(SkipDecision.id).where(
+                        SkipDecision.game_id == game_id,
+                        SkipDecision.phase == "hang",
+                        SkipDecision.day_number == game.day_number,
+                        SkipDecision.night_number == game.night_number,
+                        SkipDecision.user_telegram_id == voter_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if skipped is not None:
+                return False, "Siz osish tanlovini o'tkazib yuborgansiz.", None
             existing = (
                 await session.execute(
                     select(HangVote).where(
@@ -1777,8 +2380,7 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if existing:
-                existing.approve = confirmed
-                existing.target_telegram_id = target_id
+                return False, "Siz ovoz berdingiz", None
             else:
                 session.add(
                     HangVote(
@@ -1789,8 +2391,40 @@ class GameEngine:
                         approve=confirmed,
                     )
                 )
+            hang_votes = (
+                await session.execute(
+                    select(HangVote).where(
+                        HangVote.game_id == game_id,
+                        HangVote.day_number == game.day_number,
+                        HangVote.target_telegram_id == target_id,
+                    )
+                )
+            ).scalars().all()
+            yes_count = sum(1 for vote in hang_votes if vote.approve)
+            no_count = sum(1 for vote in hang_votes if not vote.approve)
+            self._add_game_log(
+                session,
+                game,
+                "hang_vote_cast",
+                actor=voter,
+                target=target,
+                confirmed=confirmed,
+                yes_count=yes_count,
+                no_count=no_count,
+            )
+            chat_id = game.chat_id
+            target_display_name = target.display_name
             await session.commit()
-            return True, "Ovozingiz qabul qilindi."
+            keyboard = confirm_hang_keyboard(game_id, target_id, yes_count=yes_count, no_count=no_count)
+            try:
+                await bot.send_message(
+                    voter_id,
+                    "Siz ovoz berdingiz.",
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+            return True, "Ovozingiz qabul qilindi.", keyboard
 
     async def judge_cancel_hang(
         self,
@@ -1838,10 +2472,22 @@ class GameEngine:
             judge_name = self._tg_mention(judge.telegram_id, judge.display_name)
 
             await self._apply_inactivity_after_vote(bot, session, game, votes)
+            winner = await self.check_winner(game_id)
+            if winner:
+                await self.finish_game(bot, game_id, winner)
+                return True, "O'yin yakunlandi."
+
             judge.judge_cancel_used = True
             judge.inactive_rounds = 0
             game.phase = GamePhase.NIGHT.value
             game.night_number += 1
+            self._add_game_log(
+                session,
+                game,
+                "hang_cancelled_by_judge",
+                actor=judge,
+                target=target,
+            )
             await session.commit()
 
         job = scheduler.get_job(f"hang_confirm_{game_id}")
@@ -1861,6 +2507,14 @@ class GameEngine:
             f"🧑‍⚖️ Sudya {judge_name} kunduzgi hukmni bekor qildi.\n"
             f"{target_name} osilmadi. Aholi tarqaldi...",
         )
+        try:
+            await bot.send_message(
+                judge_id,
+                f"Siz {target.display_name} uchun kunduzgi hukmni bekor qildingiz.",
+                reply_markup=await self.group_return_keyboard(bot, chat_id),
+            )
+        except TelegramForbiddenError:
+            pass
         await self.start_night(bot, game_id)
         return True, "Sudya qarori qabul qilindi."
 
@@ -1912,12 +2566,20 @@ class GameEngine:
 
             if yes_confirm > no_confirm:
                 yes_votes = sum(1 for vote in votes if vote.target_telegram_id == target_id)
-                no_votes = max(0, len(await self._alive_players(session, game_id)) - yes_votes)
                 target.alive = False
                 target.death_day = game.day_number
+                self._add_game_log(
+                    session,
+                    game,
+                    "player_hanged",
+                    target=target,
+                    yes_confirm=yes_confirm,
+                    no_confirm=no_confirm,
+                    vote_count=yes_votes,
+                )
                 vote_text = (
                     "<b>Ovoz berish natijalari:</b>\n"
-                    f"{yes_votes} 👍  |  {no_votes} 👎\n\n"
+                    f"{yes_votes} 👍  |  {no_confirm} 👎\n\n"
                     f"{self._tg_mention(target.telegram_id, target.display_name)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
                     f"U edi {role_label(target.role)}.."
                 )
@@ -1939,9 +2601,24 @@ class GameEngine:
                         victim = alive_now[0]
                         victim.alive = False
                         victim.death_day = game.day_number
+                        self._add_game_log(
+                            session,
+                            game,
+                            "sorcerer_revenge_after_hang",
+                            actor=target,
+                            target=victim,
+                        )
                         await session.commit()
                         await bot.send_message(chat_id, f"🧞‍♂️ Afsungar bilan birga {victim.display_name} ham ketdi.")
             else:
+                self._add_game_log(
+                    session,
+                    game,
+                    "hang_rejected",
+                    target=target,
+                    yes_confirm=yes_confirm,
+                    no_confirm=no_confirm,
+                )
                 await bot.send_message(chat_id, "Aholi janjallashib uylariga tarqashdi.")
 
             await self._apply_inactivity_after_vote(bot, session, game, votes)
@@ -2037,9 +2714,23 @@ class GameEngine:
                         user.diamonds += self.settings.loser_reward_diamond
                 (winners if is_winner else losers).append(p)
 
+            self._add_game_log(
+                session,
+                game,
+                "game_finished",
+                winner_team=winner_team.value,
+                winners=[p.telegram_id for p in winners],
+                losers=[p.telegram_id for p in losers],
+                players_count=len(players),
+            )
             await session.commit()
             chat_id = game.chat_id
-            duration_seconds = int((game.ended_at - game.started_at).total_seconds()) if game.ended_at else 0
+            if game.ended_at and game.started_at:
+                ended_at = self._ensure_utc(game.ended_at)
+                started_at = self._ensure_utc(game.started_at)
+                duration_seconds = max(0, int((ended_at - started_at).total_seconds()))
+            else:
+                duration_seconds = 0
 
         self._cleanup_jobs(game_id)
 
@@ -2407,14 +3098,78 @@ class GameEngine:
         group = await self.get_or_create_group(chat_id, "Group")
         return group
 
-    async def update_group_setting(self, chat_id: int, field: str, value: int) -> None:
+    async def latest_group_game_logs_text(self, chat_id: int, limit: int = 15) -> str:
+        async with self.session_factory() as session:
+            game = (
+                await session.execute(
+                    select(Game)
+                    .where(Game.chat_id == chat_id)
+                    .order_by(Game.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if game is None:
+                return "🧾 <b>Game logs</b>\n\nBu guruhda hali o'yin topilmadi."
+
+            logs = (
+                await session.execute(
+                    select(GameLog)
+                    .where(GameLog.game_id == game.id)
+                    .order_by(GameLog.id.desc())
+                    .limit(max(1, min(limit, 30)))
+                )
+            ).scalars().all()
+
+        if not logs:
+            return f"🧾 <b>Game logs</b>\n\nO'yin #{game.id} uchun hali log yozilmagan."
+
+        lines = [
+            "🧾 <b>Game logs</b>",
+            f"O'yin: <b>#{game.id}</b> | Holat: <b>{game.status}</b> | Faza: <b>{game.phase}</b>",
+            "",
+        ]
+        for item in reversed(logs):
+            actor_name = "-"
+            target_name = "-"
+            try:
+                payload = json.loads(item.payload or "{}")
+                actor = payload.get("actor") or {}
+                target = payload.get("target") or {}
+                actor_name = actor.get("display_name") or "-"
+                target_name = target.get("display_name") or "-"
+                day = payload.get("day_number", 0)
+                night = payload.get("night_number", 0)
+            except (TypeError, ValueError, AttributeError):
+                day = 0
+                night = 0
+            created = item.created_at.strftime("%H:%M") if item.created_at else "--:--"
+            lines.append(
+                f"{created} | <code>{item.event_type}</code> | D:{day} N:{night} | {escape(str(actor_name))} -> {escape(str(target_name))}"
+            )
+        return "\n".join(lines)
+
+    async def update_group_setting(self, chat_id: int, field: str, value: object) -> None:
         async with self.session_factory() as session:
             group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
             if group is None:
                 group = Group(chat_id=chat_id, title="Group")
                 session.add(group)
             if field == "registration_timeout":
-                group.registration_timeout = max(10, value)
+                group.registration_timeout = max(10, int(value))
             elif field == "min_players":
-                group.min_players = max(4, min(value, 20))
+                group.min_players = max(4, min(int(value), 35))
+            elif field == "role_preset":
+                preset = str(value)
+                if preset in {"black23", "extended35"}:
+                    group.role_preset = preset
             await session.commit()
+
+    def format_role_preset_settings(self, group: Group) -> str:
+        preset = group.role_preset or "black23"
+        return (
+            "🎭 <b>Role settings</b>\n\n"
+            f"Joriy preset: <b>{role_preset_label(preset)}</b>\n"
+            f"Maksimal tavsiya qilingan o'yinchi: <b>{role_preset_max_players(preset)}</b>\n\n"
+            "<b>Black 23</b> - saytdagi ochiq ma'lumotga mos premium uslub: 23 o'yinchigacha role boshqaruvi.\n"
+            "<b>Extended 35</b> - siz so'ragan katta o'yinlar uchun kengaytirilgan variant."
+        )

@@ -46,45 +46,89 @@ TEXTS = {
     "premium_stub": "🎲 Premium guruhlar bo'limi tez orada kengayadi.",
     "settings_title": "⚙️ Guruh sozlamalari",
     "stop_hint": "Aktiv o'yinni to'xtatish uchun /stop ni bosing.",
-    "rules_text": """<b>O'yin qoidalari</b>
+    "rules_text": """<b>Universal Mafia Info:</b>
 
-🔴 🕵🏻‍♂ Komissar Kattanining maqsadi — shaharning asosiy himoyachisi va mafiya kushandasi. Vazifasi mafiyani topish va ovoz berish paytida ularni osish. Komissarga birinchi tunda tekshirmasdan otish taqiqlanadi.
+🤵🏻 <b>Don</b> -
+Bu tunda kim o'lishini siz xal qilasiz. Siz Mafialar sardorisiz.
 
-🔴 👨🏼 Tinch aholining maqsadi — mafiyani topish va ularni shahar yig'ilishida osish.
+🤵🏼 <b>Mafia</b> -
+Siz Mafiasiz, Donga bo'ysunasiz va sizga qarshilik qilganlarni o'ldirasiz. Don o'lsa siz yangi Don bo'lishingiz mumkin.
 
-🔴 💃 Kezuvchining maqsadi — tunda bir o'yinchini harakatdan to'xtatish. U Komissarni qasddan uxlatmasligi kerak.
+🕵🏼 <b>Komissar katani</b> -
+Shaharning asosiy ximoyachisi va mafia kushandasi.
 
-🔴 👮🏻‍♂ Serjantning maqsadi — Komissar Kattaniga yordam berish. Agar Komissar vafot etsa, Serjant uning o'rnini egallaydi.
+👨🏼‍⚕️️ <b>Doktor</b> -
+Tunda kimnidir qutqarib qolishingiz mumkin.
 
-🔴 👨🏻‍⚕ Doktorning maqsadi — o'yinchini davolash. Doktor o'zini faqat bir marta davolay oladi.
+👮🏼 <b>Serjant</b> -
+Komissar Katanining yordamchisi. U sizni o'zining qilayotgan ishlaridan xabardor qilib turadi. Agar komissar o'lsa uning o'rnini siz egallaysiz.
 
-🔴 🛡 Qo'riqchining maqsadi — tunda bitta o'yinchini hujumdan himoya qilish. U Doktorga o'xshaydi, lekin ko'proq himoya/blok roli sifatida ishlaydi.
+🎖 <b>Janob</b> -
+Kunduzgi ovoz berishda sizning ovozingiz ikkitaga teng bo'ladi va ovoz berish payti shaxsingiz oshkor bo'lmaydi.
 
-🔴 🔎 Kuzatuvchining maqsadi — tunda bitta o'yinchini kuzatish va uning oldiga kim kelganini bilish.
+👨🏼 <b>Tinch axoli</b> -
+Sizning vazifangiz mafiani topish va ovoz berish jarayonida ularni osish.
 
-🔴 🧑‍⚖️ Sudyaning maqsadi — o'yinda bir marta kunduzgi osish hukmini bekor qilish. Bu kuchli qaror, shuning uchun katta o'yinlarda paydo bo'ladi.
+🧙‍♂️ <b>Daydi</b> -
+Siz xohlagan odamning uyiga ichkilik butilka olish uchun borishingiz va qotillikning guvoxi bo'lib qolishingiz mumkin.
 
-🔴 🧙‍♂ Daydining maqsadi — tunda bir o'yinchi oldiga borish va qotillikka guvoh bo'lish.
+💃 <b>Kezuvchi</b> -
+Bu shavqatsiz shaxarda tirik qolishingiz kerak. Siz mehmonga borgan odamingizga uyqu dori berasiz va u bir kun uxlaydi :)
 
-🔴 🤵🏻 Don va 🤵🏼 Mafiyaning maqsadi — tunda kim o'ldirilishini tanlash. Don o'lsa, mafiya ichidan merosxo'r Don bo'ladi.
+👨🏼‍💼 <b>Advokat</b> -
+Tunda kimni ximoya qilishni tanlaysiz. Agar siz mafiani tanlasangiz, Komissar Katani uni taniy olmaydi va unga Tinch axoli bo'lib ko'rinadi. Siz mafia tarafdasiz.
 
-🔴 👨‍💼 Advokatning maqsadi — tunda bir o'yinchini himoya qilish. Agar u Mafiyani tanlasa, Komissar uni tekshirganda Tinch aholi sifatida ko'radi.
+🤦🏼 <b>Suidsid</b> -
+Seni osib o'ldirishsa sen yutasan! :)
 
-🔴 🕴 Josusning maqsadi — mafiya tomoniga yashirin yordam berish. Komissar uni tekshirganda oddiy shahar odamidek ko'radi.
+🤞🏼 <b>Omadli</b> -
+Qolganlaridan ko'ra omadli bo'lgan tinch axoli. Hayotiga suiqasd bo'lsa, omadi kulsa omon qolishi mumkin.
 
-🔴 🔪 Qotilning maqsadi — atrofdagilarni o'ldirish. Bir o'zi tirik qolsa g'olib bo'ladi.
+🐺 <b>Bo'ri</b> -
+Agar Mafiya sizni o'ldirsa, kelgusi tunda mafiya bo'lasiz. Komissar sizni o'ldirsa, serjantga aylanasiz. Qotil sizni o'ldirsa shu zahoti o'lasiz.
 
-🔴 🧞‍♂️ Afsungarning maqsadi — agar uni tunda kimdir o'ldirsa, u o'zini o'ldirgan odamni ham o'zi bilan olib ketadi. Agar u kunduzi ovoz berishda chiqarilsa, o'zi xohlagan bir o'yinchini o'ldiradi.
+🔪 <b>Qotil</b> -
+Shaxardagi xamma o'lishi kerak, sizdan tashqari albatta :)
 
-🔴 🐺 Bo'rining maqsadi — boshqa belgiga aylanish. Agar uni Mafiya o'ldirsa, keyingi kecha Mafiya bo'ladi. Agar Komissar otsa, Serjantga aylanadi. Agar Qotil o'ldirsa, o'ladi.
+🥷 <b>Yollanma qotil</b> -
+Mafialar tarafda o'ynaysiz. Har tun kimnidir yashirincha ovlaydi; ammo agar komissarni nishonga olsa, komissar uni o'ldiradi.
 
-🔴 🎭 Masxarabozning maqsadi — kunduzgi ovoz bilan o'yindan chiqarilish. Agar aholi uni osib yuborsa, u alohida g'olib bo'ladi.""",
-    "lobby_empty": "Hozircha hech kim ro'yxatdan o'tmagan.",
-    "lobby_title": "<b>Ro'yxatdan o'tish davom etmoqda</b>",
+💣 <b>Afsungar</b> -
+Sizning maqsadingiz tinch fuqarolarga yordam berish. Agar kechasi o'ldirilsang, seni o'ldirgan ham o'ladi. Agar kunlik ovoz berishda o'ldirilsangiz, siz biron bir o'yinchini tanlashingiz va uni o'zingiz bilan olib ketishingiz mumkin.
+
+🤹🏻 <b>Aferist</b> -
+Kechasi biron bir o'yinchiga tashrif buyurib, u bir kunlik ovoz berish uchun o'z ismini aldab qo'yishi mumkin.
+
+🧙‍ <b>Sehrgar</b> -
+O'z qonunlaringiz bilan yashaysiz. Agar Don, Qotil, Komissar katani sizni o'ldirmoqchi bo'lsa, bu urinish behuda bo'ladi va sizga tanlov beriladi: ularga rahm qilish yoki o'ldirish.
+
+🧟 <b>G'azabkor</b> -
+Har tunda 1 ta o'yinchini tanlaysiz. Agar o'zingizni tanlasangiz, oxirgi tunlarda tanlaganlaringiz bilan o'lasiz. Siz kamida 3 kishini tanlasangiz g'alaba qozonasiz.
+
+👩🏼‍💻 <b>Jurnalist</b> -
+Mafialarning agentisiz. Har tunda kimnikigadur intervyu olishga borasiz va unga kelgan har bir o'yinchini ko'rib qolishingiz mumkin hamda bu haqida mafialarga xabar berasiz.
+
+🤓 <b>Sotqin</b> -
+Siz tunda bir odamni tanlaysiz va agarda u don, mafia yoki qotil bo'lsa, uni odamlarga shaxsingizni ochiqlamasdan sota olasiz. Siz tinch tarafda o'ynaysiz va tirik qolsangiz yutasiz.
+
+🤡 <b>Joker</b> -
+Siz tunda kimgadir 4 ta karta yuborasiz. Ertaga kechgacha u kartalardan birini tanlashi kerak bo'ladi, aks holda u o'ladi.
+
+🧑🏻‍✈️ <b>Admiral</b> -
+Agar o'yinda Komissar Katani va serjant tirik bo'lsa sizni hech kim o'ltira olmaydi. Agar Komissar katani va serjant o'lsa siz Komissar katani roliga o'tasiz.
+
+👨‍🔬 <b>Kimyogar</b> -
+Siz erkinsiz. Hohlasangiz odamlarni davolaysiz, hohlasangiz ularni o'ldirasiz. G'alaba qilish uchun tirik qolsangiz bas!
+
+☠️ <b>Minior</b> -
+Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tunda kelgan Miniordan boshqalar o'ladi.""",
+    "lobby_empty": "ㅤㅤㅤㅤㅤ",
+    "lobby_started_title": "<b>Ro'yxatdan o'tish boshlandi!</b>",
+    "lobby_title": "<b>Ro'yxatdan o'tish davom etmoqda!</b>",
     "lobby_ended_title": "<b>Ro'yxatdan o'tish yakunlandi</b>",
-    "lobby_registered": "Ro'yxatdan o'tganlar:",
-    "lobby_total": "Jami {count}ta odam.",
-    "join_btn": "🧑‍💼 Qo'shilish",
+    "lobby_registered": "<b>Ro'yxatdan o'tganlar:</b>",
+    "lobby_total": "<b>Jami:</b> {count} ta",
+    "join_btn": "🤵 Qo'shilish",
     "profile_title": "👤 <b>Profil</b>",
     "profile_fmt": (
         "⭐ ID: <code>{telegram_id}</code>\n"
@@ -115,6 +159,11 @@ TEXTS = {
     "you_win": "<b>Siz yutdingiz!</b>\nYutganingiz uchun sizga 💵 {dollar}, 💎 {diamond} berildi!",
     "you_lose": "<b>Siz yutqazdingiz!</b>\nLekin o‘yinda qatnashganingiz uchun 💵 {dollar}, 💎 {diamond} berildi!",
     "command_in_group": "Bu buyruq guruhda ishlatiladi.",
+    "group_start_no_game": (
+        "<b>🎮 O'yin hali boshlanmagan.</b>\n\n"
+        "Ro'yxatdan o'tishni boshlash uchun /game buyrug'ini yuboring."
+    ),
+    "group_start_game_active": "🎮 <b>O'yin allaqachon boshlangan.</b>",
     "language_changed_group": "🌍 Guruh tili yangilandi.",
     "callback_expired": "Bu tugma eski yoki o'yin tugagan.",
     "action_saved": "Harakat qabul qilindi.",
