@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Union
 from dataclasses import dataclass
 from random import shuffle
 
@@ -36,13 +37,13 @@ ROLE_META: dict[Role, RoleMeta] = {
 }
 
 
-def role_label(role: Role | str) -> str:
+def role_label(role: Union[Role, str]) -> str:
     role_enum = role if isinstance(role, Role) else Role(role)
     meta = ROLE_META[role_enum]
     return f"{meta.emoji} {meta.title_uz}"
 
 
-def role_team(role: Role | str) -> Team:
+def role_team(role: Union[Role, str]) -> Team:
     role_enum = role if isinstance(role, Role) else Role(role)
     return ROLE_META[role_enum].team
 

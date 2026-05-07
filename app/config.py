@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,8 +33,8 @@ class Settings(BaseSettings):
     loser_reward_dollar: int = Field(default=10, alias="LOSER_REWARD_DOLLAR")
     loser_reward_diamond: int = Field(default=0, alias="LOSER_REWARD_DIAMOND")
 
-    night_media_file_id: str | None = Field(default=None, alias="NIGHT_MEDIA_FILE_ID")
-    day_media_file_id: str | None = Field(default=None, alias="DAY_MEDIA_FILE_ID")
+    night_media_file_id: Optional[str] = Field(default=None, alias="NIGHT_MEDIA_FILE_ID")
+    day_media_file_id: Optional[str] = Field(default=None, alias="DAY_MEDIA_FILE_ID")
     night_media_local: str = Field(default="media/night.gif", alias="NIGHT_MEDIA_LOCAL")
     day_media_local: str = Field(default="media/day.gif", alias="DAY_MEDIA_LOCAL")
 

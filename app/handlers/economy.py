@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
@@ -82,8 +83,8 @@ async def cmd_giveto(message: Message, command: CommandObject, engine: GameEngin
     sender = await engine.ensure_user(message.from_user)
     lang = sender.language
 
-    target_id: int | None = None
-    amount: int | None = None
+    target_id: Optional[int] = None
+    amount: Optional[int] = None
 
     if message.reply_to_message and command.args and command.args.strip().isdigit():
         target_id = message.reply_to_message.from_user.id

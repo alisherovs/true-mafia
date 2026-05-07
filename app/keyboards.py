@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.config import Settings
@@ -23,7 +24,7 @@ def _clean_bot_username(username: str) -> str:
     return username.strip().lstrip("@")
 
 
-def language_keyboard(scope: str = "user", chat_id: int | None = None) -> InlineKeyboardMarkup:
+def language_keyboard(scope: str = "user", chat_id: Optional[int] = None) -> InlineKeyboardMarkup:
     rows = []
     for code, label in LANGS:
         suffix = f"{scope}:{code}:{chat_id or 0}"
@@ -90,7 +91,7 @@ def lobby_keyboard(
     bot_username: str,
     chat_id: int,
     active: bool = True,
-) -> InlineKeyboardMarkup | None:
+) -> Optional[InlineKeyboardMarkup]:
     if not active:
         return None
     deep_link = f"https://t.me/{_clean_bot_username(bot_username)}?start=join_{game_id}_{chat_id}"
@@ -129,7 +130,7 @@ def group_url_from_chat_id(chat_id: int) -> str:
     return f"https://t.me/c/{internal_id}"
 
 
-def go_group_keyboard(chat_id: int, group_url: str | None = None) -> InlineKeyboardMarkup:
+def go_group_keyboard(chat_id: int, group_url: Optional[str] = None) -> InlineKeyboardMarkup:
     url = group_url or group_url_from_chat_id(chat_id)
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -205,7 +206,7 @@ def judge_cancel_keyboard(game_id: int, target_id: int, judge_id: int, confirm_m
     )
 
 
-def settings_keyboard(lang: str, game_id: int | None = None) -> InlineKeyboardMarkup:
+def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboardMarkup:
     items = [
         ("settings:lang", "🌍 Til sozlamasi"),
         ("settings:timeout", "⏳ Registration timeout"),

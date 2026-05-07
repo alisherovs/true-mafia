@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Union
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
@@ -11,7 +12,7 @@ from app.keyboards import owner_panel_keyboard, owner_premium_groups_keyboard, o
 
 router = Router()
 PENDING_OWNER_ACTIONS: dict[int, str] = {}
-PENDING_PREMIUM_GROUPS: dict[int, dict[str, str | int]] = {}
+PENDING_PREMIUM_GROUPS: dict[int, dict[str, Union[str, int]]] = {}
 
 
 def _is_owner(user_id: int, settings: Settings) -> bool:

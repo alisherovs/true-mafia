@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from typing import Optional, Union
 import logging
 import asyncio
 from html import escape
 from collections import Counter, defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot
@@ -44,13 +45,13 @@ class GameEngine:
 
     @staticmethod
     def _now_utc() -> datetime:
-        return datetime.now(UTC)
+        return datetime.now(timezone.utc)
 
     @staticmethod
     def _ensure_utc(dt: datetime) -> datetime:
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC)
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     @staticmethod
     def _tg_mention(user_id: int, display_name: str) -> str:
@@ -82,7 +83,7 @@ class GameEngine:
         roles = ", ".join(role_label(player.role) for player in players)
         return f"{title} - {count}\n{roles}"
 
-    def _format_death_line(self, player: GamePlayer, cause: str | None = None) -> str:
+    def _format_death_line(self, player: GamePlayer, cause: Optional[str] = None) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
         base = f"Tunda {role_label(player.role)} {name}"
         if cause == "mafia":
@@ -103,7 +104,7 @@ class GameEngine:
         transformed: list[str],
         night_activity_lines: list[str],
         night_event_lines: list[str],
-        death_causes: dict[int, str] | None = None,
+        death_causes: Optional[dict[int, str]] = None,
     ) -> str:
         death_causes = death_causes or {}
         if dead_players:
@@ -150,7 +151,7 @@ class GameEngine:
         )
 
     @staticmethod
-    def _night_activity_line(role: Role, action_key: str | None) -> str | None:
+    def _night_activity_line(role: Role, action_key: Optional[str]) -> Optional[str]:
         if role == Role.DOCTOR:
             return "👨🏼‍⚕️️Doktor tungi navbatchilikga ketdi..."
         if role == Role.GUARD:
@@ -266,7 +267,7 @@ class GameEngine:
 
         return lines
 
-    async def ensure_user(self, tg_user: TgUser, language: str | None = None) -> User:
+    async def ensure_user(self, tg_user: TgUser, language: Optional[str] = None) -> User:
         async with self.session_factory() as session:
             stmt = select(User).where(User.telegram_id == tg_user.id)
             user = (await session.execute(stmt)).scalar_one_or_none()
@@ -292,7 +293,7 @@ class GameEngine:
             await session.refresh(user)
             return user
 
-    async def get_user(self, telegram_id: int) -> User | None:
+    async def get_user(self, telegram_id: int) -> Optional[User]:
         async with self.session_factory() as session:
             return (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
 
@@ -379,7 +380,7 @@ class GameEngine:
             session.add(GameLog(game_id=game_id, event_type=event_type, payload=payload))
             await session.commit()
 
-    async def find_active_game(self, session: AsyncSession, chat_id: int) -> Game | None:
+    async def find_active_game(self, session: AsyncSession, chat_id: int) -> Optional[Game]:
         stmt = select(Game).where(
             Game.chat_id == chat_id,
             Game.status.in_([GameStatus.REGISTRATION.value, GameStatus.ACTIVE.value]),
@@ -662,7 +663,7 @@ class GameEngine:
             game.status = GameStatus.CANCELLED.value
             game.phase = GamePhase.ENDED.value
             game.active_key = None
-            game.ended_at = datetime.now(UTC)
+            game.ended_at = datetime.now(timezone.utc)
             await session.commit()
             lang = await self.get_group_language(game.chat_id)
 
@@ -702,7 +703,7 @@ class GameEngine:
                 game.status = GameStatus.CANCELLED.value
                 game.phase = GamePhase.ENDED.value
                 game.active_key = None
-                game.ended_at = datetime.now(UTC)
+                game.ended_at = datetime.now(timezone.utc)
                 await session.commit()
                 await self.update_lobby(bot, game_id, ended=True)
                 await bot.send_message(game.chat_id, t(lang, "insufficient_players"))
@@ -711,7 +712,7 @@ class GameEngine:
 
             game.status = GameStatus.ACTIVE.value
             game.phase = GamePhase.NIGHT.value
-            game.started_at = datetime.now(UTC)
+            game.started_at = datetime.now(timezone.utc)
             game.night_number = 1
             await session.commit()
 
@@ -737,7 +738,7 @@ class GameEngine:
                     await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
                 ).scalars().all()
             }
-            assigned = dict(zip([p.telegram_id for p in players], roles, strict=True))
+            assigned = dict(zip([p.telegram_id for p in players], roles))
 
             for player in players:
                 user = users.get(player.telegram_id)
@@ -754,7 +755,7 @@ class GameEngine:
                 assigned[holder.telegram_id], assigned[player.telegram_id] = assigned[player.telegram_id], desired
                 user.next_game_role = None
 
-            for player, role in zip(players, roles, strict=True):
+            for player, role in zip(players, roles):
                 final_role = assigned[player.telegram_id]
                 player.role = final_role.value
                 player.team = role_team(final_role).value
@@ -837,7 +838,7 @@ class GameEngine:
 
         await self._send_phase_media(bot, chat_id, is_night=True, lang=lang)
         await self.send_night_prompts(bot, game_id)
-        run_at = datetime.now(UTC) + timedelta(seconds=self.settings.night_timeout)
+        run_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.night_timeout)
         scheduler.add_job(
             self.resolve_night,
             "date",
@@ -955,8 +956,8 @@ class GameEngine:
         if action_type is None:
             return False, "Unknown action"
 
-        announce_line: str | None = None
-        chat_id: int | None = None
+        announce_line: Optional[str] = None
+        chat_id: Optional[int] = None
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value or game.phase != GamePhase.NIGHT.value:
@@ -1059,7 +1060,7 @@ class GameEngine:
         game_id: int,
         actor_id: int,
         action_key: str,
-    ) -> tuple[bool, str, object | None]:
+    ) -> tuple[bool, str, Optional[object]]:
         if action_key not in {"check", "shoot"}:
             return False, "Noma'lum amal.", None
         async with self.session_factory() as session:
@@ -1406,7 +1407,7 @@ class GameEngine:
         scheduler.add_job(
             self.start_voting,
             "date",
-            run_date=datetime.now(UTC) + timedelta(seconds=self.settings.day_discussion_timeout),
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=self.settings.day_discussion_timeout),
             args=[bot, game_id],
             id=f"discussion_end_{game_id}",
             replace_existing=True,
@@ -1438,7 +1439,7 @@ class GameEngine:
         scheduler.add_job(
             self.resolve_voting,
             "date",
-            run_date=datetime.now(UTC) + timedelta(seconds=self.settings.day_voting_timeout),
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=self.settings.day_voting_timeout),
             args=[bot, game_id],
             id=f"vote_end_{game_id}",
             replace_existing=True,
@@ -1661,7 +1662,7 @@ class GameEngine:
             scheduler.add_job(
                 self.resolve_hang_confirmation,
                 "date",
-                run_date=datetime.now(UTC) + timedelta(seconds=30),
+                run_date=datetime.now(timezone.utc) + timedelta(seconds=30),
                 args=[bot, game_id, target.telegram_id, confirm_message.message_id],
                 id=f"hang_confirm_{game_id}",
                 replace_existing=True,
@@ -1797,7 +1798,7 @@ class GameEngine:
         game_id: int,
         target_id: int,
         judge_id: int,
-        confirm_message_id: int | None = None,
+        confirm_message_id: Optional[int] = None,
     ) -> tuple[bool, str]:
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
@@ -1868,7 +1869,7 @@ class GameEngine:
         bot: Bot,
         game_id: int,
         target_id: int,
-        message_id: int | None = None,
+        message_id: Optional[int] = None,
     ) -> None:
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
@@ -1955,7 +1956,7 @@ class GameEngine:
 
         await self.start_night(bot, game_id)
 
-    async def check_winner(self, game_id: int) -> Team | None:
+    async def check_winner(self, game_id: int) -> Optional[Team]:
         async with self.session_factory() as session:
             alive = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.alive.is_(True)))
@@ -2013,7 +2014,7 @@ class GameEngine:
             game.phase = GamePhase.ENDED.value
             game.active_key = None
             game.winner_team = winner_team.value
-            game.ended_at = datetime.now(UTC)
+            game.ended_at = datetime.now(timezone.utc)
 
             winners: list[GamePlayer] = []
             losers: list[GamePlayer] = []
@@ -2129,7 +2130,7 @@ class GameEngine:
             ).scalar_one_or_none()
             return player_id is not None
 
-    async def active_game_for_chat(self, chat_id: int) -> Game | None:
+    async def active_game_for_chat(self, chat_id: int) -> Optional[Game]:
         async with self.session_factory() as session:
             return await self.find_active_game(session, chat_id)
 
@@ -2159,7 +2160,7 @@ class GameEngine:
                 game.status = GameStatus.CANCELLED.value
                 game.phase = GamePhase.ENDED.value
                 game.active_key = None
-                game.ended_at = datetime.now(UTC)
+                game.ended_at = datetime.now(timezone.utc)
             await session.commit()
 
     async def registration_watchdog(self, bot: Bot) -> None:
@@ -2177,7 +2178,7 @@ class GameEngine:
             if game.registration_ends_at and self._ensure_utc(game.registration_ends_at) <= now:
                 await self.close_registration(bot, game.id)
 
-    async def is_admin_or_creator(self, bot: Bot, chat_id: int, user_id: int, game_creator_id: int | None = None) -> bool:
+    async def is_admin_or_creator(self, bot: Bot, chat_id: int, user_id: int, game_creator_id: Optional[int] = None) -> bool:
         if game_creator_id and user_id == game_creator_id:
             return True
         try:
@@ -2210,7 +2211,7 @@ class GameEngine:
             return True, "ok"
 
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
-        prices: dict[str, tuple[int, str, int | str]] = {
+        prices: dict[str, tuple[int, str, Union[int, str]]] = {
             "protection": (120, "protection", 1),
             "killer_protection": (100, "killer_protection", 1),
             "vote_protection": (80, "vote_protection", 1),

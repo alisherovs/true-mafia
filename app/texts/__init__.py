@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Optional
 from app.texts import az, en, id, kz, ru, tr, ua, uz
 
 ALL_TEXTS = {
@@ -14,7 +15,7 @@ ALL_TEXTS = {
 }
 
 
-def t(lang: str | None, key: str, **kwargs: object) -> str:
+def t(lang: Optional[str], key: str, **kwargs: object) -> str:
     language = (lang or "uz").lower()
     value = ALL_TEXTS.get(language, ALL_TEXTS["uz"]).get(key)
     if value is None:
