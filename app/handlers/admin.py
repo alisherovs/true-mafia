@@ -8,7 +8,12 @@ from aiogram.types import CallbackQuery, Message
 
 from app.config import Settings
 from app.game_engine import GameEngine
-from app.keyboards import owner_panel_keyboard, owner_premium_groups_keyboard, owner_wait_keyboard
+from app.keyboards import (
+    owner_news_channel_keyboard,
+    owner_panel_keyboard,
+    owner_premium_groups_keyboard,
+    owner_wait_keyboard,
+)
 
 router = Router()
 PENDING_OWNER_ACTIONS: dict[int, str] = {}
@@ -182,6 +187,49 @@ async def owner_purchase_admin_callback(callback: CallbackQuery, engine: GameEng
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:news_channel")
+async def owner_news_channel_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    current = await engine.get_news_channel_url()
+    current_text = current or "<b>o'chirilgan</b>"
+    text = (
+        "📰 <b>Yangiliklar kanali</b>\n\n"
+        f"Joriy link: {current_text}\n\n"
+        "Link qo'shilsa user panel va start menyuda <b>Yangiliklar</b> tugmasi chiqadi. "
+        "O'chirilsa tugma ko'rinmaydi."
+    )
+    await _safe_edit(callback, text, reply_markup=owner_news_channel_keyboard(bool(current)))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:news_set")
+async def owner_news_set_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "news_channel_url"
+    await _safe_edit(
+        callback,
+        "📰 <b>Yangiliklar kanalini sozlash</b>\n\n"
+        "Kanal yoki guruh linkini yuboring.\n\n"
+        "Masalan:\n<code>@kanal</code>\n<code>https://t.me/kanal</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:news_clear")
+async def owner_news_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    text = await engine.clear_news_channel_url()
+    await _safe_edit(callback, text, reply_markup=owner_news_channel_keyboard(False))
+    await callback.answer("O'chirildi.")
+
+
 @router.callback_query(F.data == "owner:broadcast_users")
 async def owner_broadcast_users_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -243,6 +291,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "👤 Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
+            "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
             "📣 Userlarga reklama - keyingi oddiy xabarni userlarga tarqatadi.\n"
             "🏘 Guruhlarga reklama - keyingi oddiy xabarni guruhlarga tarqatadi.\n"
             "🎁 Kredit berish - user balansiga dollar/olmos qo'shadi.\n\n"
@@ -336,6 +385,15 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_panel_keyboard())
+        return True
+
+    if action == "news_channel_url":
+        ok, text = await engine.set_news_channel_url(message.text or "")
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "news_channel_url"
+            await message.answer(text, reply_markup=owner_wait_keyboard())
+            return True
+        await message.answer(text, reply_markup=owner_news_channel_keyboard(True))
         return True
 
     if action == "premium_block_user":

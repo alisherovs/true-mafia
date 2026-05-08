@@ -37,6 +37,7 @@ async def callback_start_back(callback: CallbackQuery, engine: GameEngine, setti
             lang,
             settings,
             is_admin=callback.from_user.id in settings.admin_ids,
+            news_url=await engine.get_news_channel_url(),
         ),
     )
     await callback.answer()

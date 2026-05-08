@@ -115,7 +115,12 @@ async def cmd_start(
             return
         await message.answer(
             engine.format_user_dashboard(user),
-            reply_markup=profile_dashboard_keyboard(settings, user=user, is_admin=message.from_user.id in settings.admin_ids),
+            reply_markup=profile_dashboard_keyboard(
+                settings,
+                user=user,
+                is_admin=message.from_user.id in settings.admin_ids,
+                news_url=await engine.get_news_channel_url(),
+            ),
         )
         return
 
@@ -129,7 +134,12 @@ async def cmd_start(
     lang = user.language or settings.default_language
     await message.answer(
         t(lang, "start_menu"),
-        reply_markup=start_menu_keyboard(lang, settings, is_admin=message.from_user.id in settings.admin_ids),
+        reply_markup=start_menu_keyboard(
+            lang,
+            settings,
+            is_admin=message.from_user.id in settings.admin_ids,
+            news_url=await engine.get_news_channel_url(),
+        ),
     )
 
 
@@ -162,7 +172,12 @@ async def back_to_start(callback: CallbackQuery, engine: GameEngine, settings: S
     
     await callback.message.edit_text(
         t(lang, "start_menu"),
-        reply_markup=start_menu_keyboard(lang, settings, is_admin=callback.from_user.id in settings.admin_ids),
+        reply_markup=start_menu_keyboard(
+            lang,
+            settings,
+            is_admin=callback.from_user.id in settings.admin_ids,
+            news_url=await engine.get_news_channel_url(),
+        ),
     )
     await callback.answer()
 

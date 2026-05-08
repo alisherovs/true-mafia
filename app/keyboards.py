@@ -32,19 +32,25 @@ def language_keyboard(scope: str = "user", chat_id: Optional[int] = None) -> Inl
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def start_menu_keyboard(lang: str, settings: Settings, is_admin: bool = False) -> InlineKeyboardMarkup:
+def start_menu_keyboard(
+    lang: str,
+    settings: Settings,
+    is_admin: bool = False,
+    news_url: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     add_url = f"https://t.me/{_clean_bot_username(settings.bot_username)}?startgroup=true"
     rows = [
         [InlineKeyboardButton(text=t(lang, "add_to_group"), url=add_url)],
         [InlineKeyboardButton(text=t(lang, "premium_groups"), callback_data="premium:info")],
         [InlineKeyboardButton(text="💎 Almaz sotib olish", callback_data="diamond:shop")],
-        [InlineKeyboardButton(text=t(lang, "news"), url=settings.news_channel_url)],
         [
             InlineKeyboardButton(text=t(lang, "lang"), callback_data="lang:menu:user:0"),
             InlineKeyboardButton(text=t(lang, "rules_btn"), callback_data="rules:show"),
         ],
         [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
     ]
+    if news_url:
+        rows.insert(3, [InlineKeyboardButton(text=t(lang, "news"), url=news_url)])
     if is_admin:
         rows.append([InlineKeyboardButton(text="🛡 Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -56,7 +62,12 @@ def _toggle_button(icon: str, field: str, user: object | None) -> InlineKeyboard
     return InlineKeyboardButton(text=f"{icon} - {state}", callback_data=f"invtoggle:{field}")
 
 
-def profile_dashboard_keyboard(settings: Settings, user: object | None = None, is_admin: bool = False) -> InlineKeyboardMarkup:
+def profile_dashboard_keyboard(
+    settings: Settings,
+    user: object | None = None,
+    is_admin: bool = False,
+    news_url: Optional[str] = None,
+) -> InlineKeyboardMarkup:
     rows = [
         [
             _toggle_button("📁", "use_fake_document", user),
@@ -80,8 +91,9 @@ def profile_dashboard_keyboard(settings: Settings, user: object | None = None, i
         ],
         [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
         [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
-        [InlineKeyboardButton(text="Yangiliklar ↗", url=settings.news_channel_url)],
     ]
+    if news_url:
+        rows.append([InlineKeyboardButton(text="Yangiliklar ↗", url=news_url)])
     if is_admin:
         rows.append([InlineKeyboardButton(text="🛡 Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -362,12 +374,18 @@ def diamond_shop_keyboard(admin_username: str) -> InlineKeyboardMarkup:
     admin_url = f"https://t.me/{_clean_bot_username(admin_username)}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 1 almaz - ⭐️7", callback_data="diamond:buy:1")],
-            [InlineKeyboardButton(text="💎 10 almaz - ⭐️476", callback_data="diamond:buy:10")],
-            [InlineKeyboardButton(text="💎 30 almaz - ⭐️1295", callback_data="diamond:buy:30")],
-            [InlineKeyboardButton(text="💎 50 almaz - ⭐️2009", callback_data="diamond:buy:50")],
-            [InlineKeyboardButton(text="💎 70 almaz - ⭐️2674", callback_data="diamond:buy:70")],
-            [InlineKeyboardButton(text="💎 100 almaz - ⭐️3591", callback_data="diamond:buy:100")],
+            [
+                InlineKeyboardButton(text="💎 1 - ⭐ 7", callback_data="diamond:buy:1"),
+                InlineKeyboardButton(text="💎 10 - ⭐ 70", callback_data="diamond:buy:10"),
+            ],
+            [
+                InlineKeyboardButton(text="💎 30 - ⭐ 200", callback_data="diamond:buy:30"),
+                InlineKeyboardButton(text="💎 70 - ⭐ 450", callback_data="diamond:buy:70"),
+            ],
+            [
+                InlineKeyboardButton(text="💎 250 - ⭐ 1300", callback_data="diamond:buy:250"),
+                InlineKeyboardButton(text="💎 1000 - ⭐ 5000", callback_data="diamond:buy:1000"),
+            ],
             [
                 InlineKeyboardButton(text="👤 Admin orqali", url=admin_url),
                 InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back"),
@@ -381,7 +399,9 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
-            [InlineKeyboardButton(text="👤 Xarid admini", callback_data="owner:purchase_admin")],
+            [InlineKeyboardButton(text="� Blacklist", callback_data="owner:blacklist")],
+            [InlineKeyboardButton(text="�👤 Xarid admini", callback_data="owner:purchase_admin")],
+            [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],
@@ -396,6 +416,14 @@ def owner_wait_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="owner:cancel")],
         ]
     )
+
+
+def owner_news_channel_keyboard(has_link: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="➕ Qo'shish / o'zgartirish", callback_data="owner:news_set")]]
+    if has_link:
+        rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:news_clear")])
+    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineKeyboardMarkup:

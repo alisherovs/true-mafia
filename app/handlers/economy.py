@@ -11,6 +11,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery, LabeledPrice
 from sqlalchemy import select
 
+from app.config import Settings
 from app.database import SessionLocal
 from app.game_engine import GameEngine
 from app.keyboards import dollar_exchange_keyboard, role_shop_keyboard, shop_keyboard, diamond_shop_keyboard
@@ -209,6 +210,51 @@ async def cmd_gsend(message: Message, command: CommandObject, engine: GameEngine
         diamonds=int(raw_amount),
     )
     await message.reply(text)
+
+
+@router.message(Command("gbust"))
+async def cmd_gbust(message: Message, engine: GameEngine) -> None:
+    if message.chat.type == "private":
+        return
+    if not await engine.bot_is_admin(message.bot, message.chat.id):
+        return
+
+    ok, text = await engine.bankrupt_premium_group_by_chat(message.chat.id)
+    await message.reply(text)
+
+
+async def _burn_user_balance(message: Message, settings: Settings, field: str, label: str) -> None:
+    if message.from_user is None or message.from_user.id not in settings.admin_ids:
+        return
+    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+        await message.reply("Bu buyruqni player xabariga reply qilib ishlating.")
+        return
+
+    target_tg = message.reply_to_message.from_user
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == target_tg.id))
+        ).scalar_one_or_none()
+        if user is None:
+            await message.reply("Foydalanuvchi topilmadi. U avval /start bosgan bo'lishi kerak.")
+            return
+
+        burned = int(getattr(user, field, 0) or 0)
+        setattr(user, field, 0)
+        await session.commit()
+
+    target_name = _user_link(target_tg.id, user.display_name or target_tg.full_name or str(target_tg.id))
+    await message.reply(f"🔥 {target_name} balansidagi {label} kuyib ketdi.\nMiqdor: <b>{burned}</b>")
+
+
+@router.message(Command("bust1"))
+async def cmd_bust_diamonds(message: Message, settings: Settings) -> None:
+    await _burn_user_balance(message, settings, "diamonds", "💎 olmoslar")
+
+
+@router.message(Command("bust2"))
+async def cmd_bust_dollars(message: Message, settings: Settings) -> None:
+    await _burn_user_balance(message, settings, "dollar", "💵 dollarlar")
 
 
 @router.message(Command("give", "giveto"))
@@ -433,11 +479,11 @@ async def diamond_shop_open(callback: CallbackQuery, engine: GameEngine) -> None
 # Diamond packages: amount -> (diamonds, stars)
 DIAMOND_PACKAGES = {
     "1": (1, 7),
-    "10": (10, 476),
-    "30": (30, 1295),
-    "50": (50, 2009),
-    "70": (70, 2674),
-    "100": (100, 3591),
+    "10": (10, 70),
+    "30": (30, 200),
+    "70": (70, 450),
+    "250": (250, 1300),
+    "1000": (1000, 5000),
 }
 
 

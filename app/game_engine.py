@@ -3171,6 +3171,7 @@ class GameEngine:
                 ).scalars().all()
             }
 
+        news_url = await self.get_news_channel_url()
         for p in players:
             user = users.get(p.telegram_id)
             if user is None:
@@ -3186,7 +3187,12 @@ class GameEngine:
                 await bot.send_message(
                     p.telegram_id,
                     body,
-                    reply_markup=profile_dashboard_keyboard(self.settings, user=user, is_admin=p.telegram_id in self.settings.admin_ids),
+                    reply_markup=profile_dashboard_keyboard(
+                        self.settings,
+                        user=user,
+                        is_admin=p.telegram_id in self.settings.admin_ids,
+                        news_url=news_url,
+                    ),
                 )
             except TelegramForbiddenError:
                 pass
@@ -3622,6 +3628,62 @@ class GameEngine:
             await session.commit()
         return True, f"✅ Xarid admini yangilandi: @{username}"
 
+    @staticmethod
+    def normalize_telegram_url(raw: str) -> str:
+        value = (raw or "").strip()
+        if not value:
+            return ""
+        if value.startswith("@"):
+            username = value.lstrip("@").strip()
+            return f"https://t.me/{username}" if username else ""
+        if value.startswith("t.me/"):
+            path = value.removeprefix("t.me/").strip("/")
+            return f"https://t.me/{path}" if path else ""
+        if value.startswith("http://t.me/"):
+            path = value.removeprefix("http://t.me/").strip("/")
+            return f"https://t.me/{path}" if path else ""
+        if value.startswith("https://t.me/"):
+            path = value.removeprefix("https://t.me/").strip("/")
+            return f"https://t.me/{path}" if path else ""
+        return ""
+
+    async def get_news_channel_url(self) -> Optional[str]:
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == "news_channel_url"))
+            ).scalar_one_or_none()
+            raw_url = setting.value if setting else self.settings.news_channel_url
+        return self.normalize_telegram_url(raw_url)
+
+    async def set_news_channel_url(self, url: str) -> tuple[bool, str]:
+        normalized = self.normalize_telegram_url(url)
+        if not normalized:
+            return False, "Link noto'g'ri. Masalan: @kanal yoki https://t.me/kanal"
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == "news_channel_url"))
+            ).scalar_one_or_none()
+            if setting is None:
+                setting = BotSetting(key="news_channel_url", value=normalized)
+                session.add(setting)
+            else:
+                setting.value = normalized
+            await session.commit()
+        return True, f"✅ Yangiliklar kanali yangilandi:\n{normalized}"
+
+    async def clear_news_channel_url(self) -> str:
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == "news_channel_url"))
+            ).scalar_one_or_none()
+            if setting is None:
+                setting = BotSetting(key="news_channel_url", value="")
+                session.add(setting)
+            else:
+                setting.value = ""
+            await session.commit()
+        return "✅ Yangiliklar kanali o'chirildi. User paneldagi tugma endi ko'rinmaydi."
+
     async def exchange_diamonds_to_dollars(self, telegram_id: int, diamonds: Union[int, str]) -> tuple[bool, str]:
         async with self.session_factory() as session:
             user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
@@ -3851,6 +3913,16 @@ class GameEngine:
                 await session.delete(contribution)
             await session.commit()
         return True, f"🧨 <b>{escape(title)}</b> bankrot qilindi va premium ro'yxatdan olib tashlandi."
+
+    async def bankrupt_premium_group_by_chat(self, chat_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            group = (
+                await session.execute(select(PremiumGroup).where(PremiumGroup.group_chat_id == chat_id))
+            ).scalar_one_or_none()
+            if group is None or (group.total_diamonds or 0) <= 0:
+                return False, "Bu guruh premium ro'yxatda topilmadi."
+            group_id = group.id
+        return await self.bankrupt_premium_group(str(group_id))
 
     async def _find_user_by_identifier(self, session: AsyncSession, raw_identifier: str) -> Optional[User]:
         identifier = raw_identifier.strip()

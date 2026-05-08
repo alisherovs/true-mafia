@@ -49,6 +49,7 @@ async def lang_callback(callback: CallbackQuery, engine: GameEngine, settings: S
                     lang_code,
                     settings,
                     is_admin=callback.from_user.id in settings.admin_ids,
+                    news_url=await engine.get_news_channel_url(),
                 ),
             )
         return

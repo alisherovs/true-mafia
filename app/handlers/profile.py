@@ -66,10 +66,19 @@ async def _send_profile(message: Message, engine: GameEngine, settings: Settings
         )
         return
 
-    await message.answer(
-        engine.format_user_dashboard(user),
-        reply_markup=profile_dashboard_keyboard(settings, user=user, is_admin=message.from_user.id in settings.admin_ids),
-    )
+    if message.chat.type == "private":
+        await message.answer(
+            engine.format_user_dashboard(user),
+            reply_markup=profile_dashboard_keyboard(
+                settings,
+                user=user,
+                is_admin=message.from_user.id in settings.admin_ids,
+                news_url=await engine.get_news_channel_url(),
+            ),
+        )
+        return
+
+    await message.answer(engine.format_user_dashboard(user))
 
 
 @router.message(Command("profile"))
@@ -111,7 +120,12 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
         return
     await callback.message.edit_text(
         engine.format_user_dashboard(user),
-        reply_markup=profile_dashboard_keyboard(settings, user=user, is_admin=callback.from_user.id in settings.admin_ids),
+        reply_markup=profile_dashboard_keyboard(
+            settings,
+            user=user,
+            is_admin=callback.from_user.id in settings.admin_ids,
+            news_url=await engine.get_news_channel_url(),
+        ),
     )
     await callback.answer()
 
@@ -150,6 +164,11 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
 
     await callback.message.edit_text(
         engine.format_user_dashboard(user),
-        reply_markup=profile_dashboard_keyboard(settings, user=user, is_admin=callback.from_user.id in settings.admin_ids),
+        reply_markup=profile_dashboard_keyboard(
+            settings,
+            user=user,
+            is_admin=callback.from_user.id in settings.admin_ids,
+            news_url=await engine.get_news_channel_url(),
+        ),
     )
     await callback.answer("Sozlama yangilandi.")
