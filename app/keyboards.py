@@ -89,7 +89,6 @@ def profile_dashboard_keyboard(
             InlineKeyboardButton(text="🌍 Til", callback_data="lang:menu:user:0"),
             InlineKeyboardButton(text="🃏 O'yin qoidalari", callback_data="rules:show"),
         ],
-        [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
         [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
     ]
     if news_url:

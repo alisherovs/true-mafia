@@ -129,6 +129,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "alive": "BOOLEAN DEFAULT TRUE",
             "self_heal_used": "BOOLEAN DEFAULT FALSE",
             "judge_cancel_used": "BOOLEAN DEFAULT FALSE",
+            "blocked_until_day": "INTEGER DEFAULT 0",
             "inactive_rounds": "INTEGER DEFAULT 0",
             "last_words": "TEXT",
             "awaiting_last_words": "BOOLEAN DEFAULT FALSE",

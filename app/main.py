@@ -2,17 +2,38 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
+from aiogram.types import Message
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
 from app.handlers import admin, callbacks, economy, game, language, profile, roles, settings as settings_handler, start, top
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
+
+
+class DeleteGroupCommandMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: dict[str, Any],
+    ) -> Any:
+        result = await handler(event, data)
+        if event.chat.type != "private" and event.text and event.text.startswith("/"):
+            try:
+                await event.delete()
+            except TelegramBadRequest:
+                pass
+        return result
 
 
 async def set_commands(bot: Bot) -> None:
@@ -64,6 +85,7 @@ async def main() -> None:
         settings.bot_username = me.username
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
+    dp.message.middleware(DeleteGroupCommandMiddleware())
 
     engine = GameEngine(settings=settings, session_factory=SessionLocal)
     await engine.cleanup_stale_games_on_startup()

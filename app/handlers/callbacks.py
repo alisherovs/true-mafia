@@ -189,14 +189,6 @@ async def vote_callback(callback: CallbackQuery, engine: GameEngine) -> None:
         return
 
     ok, text = await engine.cast_vote(callback.bot, game_id, callback.from_user.id, target_id)
-    if ok and callback.message:
-        try:
-            await callback.message.delete()
-        except TelegramBadRequest:
-            try:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            except TelegramBadRequest:
-                pass
     await callback.answer(text, show_alert=not ok)
 
 

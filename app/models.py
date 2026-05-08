@@ -111,6 +111,7 @@ class GamePlayer(Base):
     alive: Mapped[bool] = mapped_column(Boolean, default=True)
     self_heal_used: Mapped[bool] = mapped_column(Boolean, default=False)
     judge_cancel_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    blocked_until_day: Mapped[int] = mapped_column(Integer, default=0)
     inactive_rounds: Mapped[int] = mapped_column(Integer, default=0)
     last_words: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     awaiting_last_words: Mapped[bool] = mapped_column(Boolean, default=False)
