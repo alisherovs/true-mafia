@@ -14,7 +14,20 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, future=True, echo=False, pool_pre_ping=True)
+engine_options = {
+    "future": True,
+    "echo": False,
+    "pool_pre_ping": True,
+}
+if not settings.database_url.startswith("sqlite"):
+    engine_options.update(
+        {
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+            "pool_timeout": settings.db_pool_timeout,
+        }
+    )
+engine = create_async_engine(settings.database_url, **engine_options)
 SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -63,6 +76,12 @@ async def _ensure_lightweight_columns(conn) -> None:
             "mask": "INTEGER DEFAULT 0",
             "fake_document": "INTEGER DEFAULT 0",
             "next_game_role": "VARCHAR(64)",
+            "use_protection": "BOOLEAN DEFAULT TRUE",
+            "use_killer_protection": "BOOLEAN DEFAULT TRUE",
+            "use_vote_protection": "BOOLEAN DEFAULT TRUE",
+            "use_gun": "BOOLEAN DEFAULT TRUE",
+            "use_mask": "BOOLEAN DEFAULT TRUE",
+            "use_fake_document": "BOOLEAN DEFAULT TRUE",
             "wins": "INTEGER DEFAULT 0",
             "total_games": "INTEGER DEFAULT 0",
         },
@@ -74,6 +93,16 @@ async def _ensure_lightweight_columns(conn) -> None:
             "min_players": "INTEGER DEFAULT 4",
             "role_preset": "VARCHAR(32) DEFAULT 'black23'",
             "premium_until": "DATETIME",
+        },
+    )
+    await add_missing_columns(
+        "premium_groups",
+        {
+            "total_diamonds": "INTEGER DEFAULT 0",
+            "group_chat_id": "BIGINT",
+            "top_sender_telegram_id": "BIGINT",
+            "top_sender_name": "VARCHAR(255)",
+            "top_sender_diamonds": "INTEGER DEFAULT 0",
         },
     )
     await add_missing_columns(
@@ -151,6 +180,34 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(text("UPDATE games SET active_key = 1 WHERE status IN ('registration', 'active')"))
     await conn.execute(text("UPDATE games SET active_key = NULL WHERE status NOT IN ('registration', 'active')"))
     await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_active_game_per_chat ON games(chat_id, active_key)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_games_chat_status_id ON games(chat_id, status, id)"))
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_games_status_registration_ends ON games(status, registration_ends_at)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_game_players_game_alive_role ON game_players(game_id, alive, role)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_game_players_telegram_alive ON game_players(telegram_id, alive)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_premium_groups_total_diamonds ON premium_groups(total_diamonds)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_premium_groups_group_chat_id ON premium_groups(group_chat_id)")
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_group_contributor "
+            "ON premium_group_contributions(premium_group_id, user_telegram_id)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_premium_group_contributions_group_amount "
+            "ON premium_group_contributions(premium_group_id, diamonds)"
+        )
+    )
 
     await conn.execute(
         text(

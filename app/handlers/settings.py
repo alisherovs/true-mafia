@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Router
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -34,7 +35,15 @@ async def cmd_settings(message: Message, engine: GameEngine) -> None:
         f"({role_preset_max_players(group.role_preset)} gacha)\n\n"
         "Timeoutni o'zgartirish: /settimeout 150"
     )
-    await message.reply(text, reply_markup=settings_keyboard(lang))
+    try:
+        await message.bot.send_message(
+            message.from_user.id,
+            text,
+            reply_markup=settings_keyboard(lang, message.chat.id),
+        )
+        await message.reply("⚙️ Sozlamalar bot private chatiga yuborildi.")
+    except TelegramForbiddenError:
+        await message.reply("⚠️ Sozlamalarni botda ochish uchun avval botga /start bosing.")
 
 
 @router.message(Command("settimeout"))

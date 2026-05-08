@@ -104,7 +104,7 @@ async def cmd_start(
             return
         await message.answer(
             engine.format_user_dashboard(user),
-            reply_markup=profile_dashboard_keyboard(settings, is_admin=message.from_user.id in settings.admin_ids),
+            reply_markup=profile_dashboard_keyboard(settings, user=user, is_admin=message.from_user.id in settings.admin_ids),
         )
         return
 
@@ -137,6 +137,23 @@ async def premium_info(callback: CallbackQuery, engine: GameEngine) -> None:
     text = await engine.premium_groups_text()
     if callback.message:
         await callback.message.edit_text(text, reply_markup=premium_groups_keyboard(groups))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "start:back")
+async def back_to_start(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    """Go back to start menu."""
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    
+    user = await engine.ensure_user(callback.from_user)
+    lang = user.language or settings.default_language
+    
+    await callback.message.edit_text(
+        t(lang, "start_menu"),
+        reply_markup=start_menu_keyboard(lang, settings, is_admin=callback.from_user.id in settings.admin_ids),
+    )
     await callback.answer()
 
 

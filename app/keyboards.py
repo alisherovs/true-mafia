@@ -37,38 +37,47 @@ def start_menu_keyboard(lang: str, settings: Settings, is_admin: bool = False) -
     rows = [
         [InlineKeyboardButton(text=t(lang, "add_to_group"), url=add_url)],
         [InlineKeyboardButton(text=t(lang, "premium_groups"), callback_data="premium:info")],
-        [InlineKeyboardButton(text="🛒 Do'kon", callback_data="shop:open")],
+        [InlineKeyboardButton(text="💎 Almaz sotib olish", callback_data="diamond:shop")],
         [InlineKeyboardButton(text=t(lang, "news"), url=settings.news_channel_url)],
         [
             InlineKeyboardButton(text=t(lang, "lang"), callback_data="lang:menu:user:0"),
             InlineKeyboardButton(text=t(lang, "rules_btn"), callback_data="rules:show"),
         ],
+        [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="🛡 Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def profile_dashboard_keyboard(settings: Settings, is_admin: bool = False) -> InlineKeyboardMarkup:
+def _toggle_button(icon: str, field: str, user: object | None) -> InlineKeyboardButton:
+    enabled = getattr(user, field, True) is not False
+    state = "🟢 ON" if enabled else "🔴 OFF"
+    return InlineKeyboardButton(text=f"{icon} - {state}", callback_data=f"invtoggle:{field}")
+
+
+def profile_dashboard_keyboard(settings: Settings, user: object | None = None, is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [
-            InlineKeyboardButton(text="📁 ...ON", callback_data="noop"),
-            InlineKeyboardButton(text="🛡 ...ON", callback_data="noop"),
-            InlineKeyboardButton(text="🎭 ...ON", callback_data="noop"),
+            _toggle_button("📁", "use_fake_document", user),
+            _toggle_button("🛡", "use_protection", user),
+            _toggle_button("🎭", "use_mask", user),
         ],
         [
-            InlineKeyboardButton(text="🔫 - 🟢 ON", callback_data="noop"),
-            InlineKeyboardButton(text="⚖️ - 🟢 ON", callback_data="noop"),
+            _toggle_button("⛑", "use_killer_protection", user),
+            _toggle_button("🔫", "use_gun", user),
+            _toggle_button("⚖️", "use_vote_protection", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
-            InlineKeyboardButton(text="Xarid qilish 💵", callback_data="shop:open"),
-            InlineKeyboardButton(text="Xarid qilish 💎", callback_data="premium:info"),
+            InlineKeyboardButton(text="Xarid qilish 💵", callback_data="dollar:shop"),
+            InlineKeyboardButton(text="Xarid qilish 💎", callback_data="diamond:shop"),
         ],
         [
             InlineKeyboardButton(text="🌍 Til", callback_data="lang:menu:user:0"),
             InlineKeyboardButton(text="🃏 O'yin qoidalari", callback_data="rules:show"),
         ],
+        [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
         [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
         [InlineKeyboardButton(text="Yangiliklar ↗", url=settings.news_channel_url)],
     ]
@@ -81,6 +90,22 @@ def rules_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
+        ]
+    )
+
+
+def commands_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👤 Profil", callback_data="profile:open"),
+                InlineKeyboardButton(text="🃏 Qoidalar", callback_data="rules:show"),
+            ],
+            [
+                InlineKeyboardButton(text="💵 Dollar", callback_data="dollar:shop"),
+                InlineKeyboardButton(text="💎 Almaz", callback_data="diamond:shop"),
+            ],
+            [InlineKeyboardButton(text="◀️ User panel", callback_data="profile:open")],
         ]
     )
 
@@ -171,21 +196,17 @@ def commissar_action_keyboard(game_id: int, actor_id: int, can_shoot: bool) -> I
     rows = [
         [
             InlineKeyboardButton(
-                text="🕵️ Uyiga borib tekshirish",
+                text="Tekshirish",
                 callback_data=f"commissar:check:{game_id}:{actor_id}",
             )
-        ]
+        ],
+        [
+            InlineKeyboardButton(
+                text="Otish",
+                callback_data=f"commissar:shoot:{game_id}:{actor_id}",
+            )
+        ],
     ]
-    if can_shoot:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🔫 Gumondorni o'yindan chetlatish",
-                    callback_data=f"commissar:shoot:{game_id}:{actor_id}",
-                )
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -205,7 +226,6 @@ def confirm_hang_keyboard(game_id: int, target_id: int, yes_count: int = 0, no_c
                 InlineKeyboardButton(text=f"👍 {yes_count}", callback_data=f"hang:yes:{game_id}:{target_id}"),
                 InlineKeyboardButton(text=f"👎 {no_count}", callback_data=f"hang:no:{game_id}:{target_id}"),
             ],
-            [InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:hang:{game_id}:{target_id}")],
         ]
     )
 
@@ -225,30 +245,36 @@ def judge_cancel_keyboard(game_id: int, target_id: int, judge_id: int, confirm_m
 
 
 def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    def callback(action: str) -> str:
+        return f"settings:{game_id}:{action}" if game_id is not None else f"settings:{action}"
+
     items = [
-        ("settings:lang", "🌍 Til sozlamasi"),
-        ("settings:timeout", "⏳ Registration timeout"),
-        ("settings:minplayers", "👥 Minimum players"),
-        ("settings:roles", "🎭 Role settings"),
-        ("settings:premium", "🎲 Premium status"),
-        ("settings:logs", "🧾 Game logs"),
-        ("settings:media", "🖼 Day/Night media"),
-        ("settings:stop", "🛑 Stop game"),
+        (callback("lang"), "🌍 Til sozlamasi"),
+        (callback("timeout"), "⏳ Registration timeout"),
+        (callback("minplayers"), "👥 Minimum players"),
+        (callback("roles"), "🎭 Role settings"),
+        (callback("premium"), "🎲 Premium status"),
+        (callback("logs"), "🧾 Game logs"),
+        (callback("media"), "🖼 Day/Night media"),
+        (callback("stop"), "🛑 Stop game"),
     ]
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=cb)] for cb, label in items]
     )
 
 
-def role_preset_keyboard(current_preset: str = "black23") -> InlineKeyboardMarkup:
+def role_preset_keyboard(current_preset: str = "black23", chat_id: Optional[int] = None) -> InlineKeyboardMarkup:
     def label(preset: str, text: str) -> str:
         return f"✅ {text}" if current_preset == preset else text
 
+    def callback(action: str) -> str:
+        return f"settings:{chat_id}:{action}" if chat_id is not None else f"settings:{action}"
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=label("black23", "🎭 Black 23"), callback_data="settings:rolepreset:black23")],
-            [InlineKeyboardButton(text=label("extended35", "🎲 Extended 35"), callback_data="settings:rolepreset:extended35")],
-            [InlineKeyboardButton(text="◀️ Settings", callback_data="settings:back")],
+            [InlineKeyboardButton(text=label("black23", "🎭 Universal 30"), callback_data=callback("rolepreset:black23"))],
+            [InlineKeyboardButton(text=label("extended35", "🎲 Universal 30"), callback_data=callback("rolepreset:extended35"))],
+            [InlineKeyboardButton(text="◀️ Settings", callback_data=callback("back"))],
         ]
     )
 
@@ -268,6 +294,7 @@ def shop_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🎭 Maska - $70", callback_data="shop:buy:mask")],
             [InlineKeyboardButton(text="📁 Soxta hujjat - $70", callback_data="shop:buy:fake_document")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
         ]
     )
 
@@ -284,11 +311,47 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def dollar_exchange_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="💎 1 → 💵 500", callback_data="dollar:exchange:1"),
+                InlineKeyboardButton(text="💎 5 → 💵 2500", callback_data="dollar:exchange:5"),
+            ],
+            [
+                InlineKeyboardButton(text="💎 10 → 💵 5000", callback_data="dollar:exchange:10"),
+                InlineKeyboardButton(text="💎 50 → 💵 25000", callback_data="dollar:exchange:50"),
+            ],
+            [InlineKeyboardButton(text="💎 Hammasini almashtirish", callback_data="dollar:exchange:all")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
+        ]
+    )
+
+
+def diamond_shop_keyboard(admin_username: str) -> InlineKeyboardMarkup:
+    admin_url = f"https://t.me/{_clean_bot_username(admin_username)}"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 1 almaz - ⭐️7", callback_data="diamond:buy:1")],
+            [InlineKeyboardButton(text="💎 10 almaz - ⭐️476", callback_data="diamond:buy:10")],
+            [InlineKeyboardButton(text="💎 30 almaz - ⭐️1295", callback_data="diamond:buy:30")],
+            [InlineKeyboardButton(text="💎 50 almaz - ⭐️2009", callback_data="diamond:buy:50")],
+            [InlineKeyboardButton(text="💎 70 almaz - ⭐️2674", callback_data="diamond:buy:70")],
+            [InlineKeyboardButton(text="💎 100 almaz - ⭐️3591", callback_data="diamond:buy:100")],
+            [
+                InlineKeyboardButton(text="👤 Admin orqali", url=admin_url),
+                InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back"),
+            ],
+        ]
+    )
+
+
 def owner_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
+            [InlineKeyboardButton(text="👤 Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],
@@ -318,10 +381,11 @@ def owner_premium_groups_keyboard() -> InlineKeyboardMarkup:
 def premium_groups_keyboard(groups: list[object]) -> InlineKeyboardMarkup:
     rows = []
     for group in groups:
+        total = getattr(group, "total_diamonds", None) or getattr(group, "diamond_price", 0)
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"🎲 {group.title} - 💎 {group.diamond_price}",
+                    text=f"{group.title} - 💎 {total}",
                     url=group.invite_link,
                 )
             ]

@@ -20,7 +20,9 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="start", description="Start game"),
         BotCommand(command="lang", description="Change language"),
         BotCommand(command="profile", description="Profile"),
+        BotCommand(command="commands", description="Commands"),
         BotCommand(command="roles", description="Rules"),
+        BotCommand(command="top", description="TOP Rating"),
     ]
     group_commands = [
         BotCommand(command="start", description="Start"),
@@ -29,16 +31,18 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="teamgame", description="Start turnire game"),
         BotCommand(command="extend", description="Extend registration timeout"),
         BotCommand(command="lang", description="Change language"),
-        BotCommand(command="give", description="Share diamonds"),
-        BotCommand(command="giveto", description="Give diamonds to user"),
+        BotCommand(command="give", description="Give diamonds"),
+        BotCommand(command="gsend", description="Boost premium group"),
         BotCommand(command="shop", description="Shop"),
         BotCommand(command="profile", description="Profile"),
+        BotCommand(command="commands", description="Commands"),
         BotCommand(command="roles", description="Rules"),
         BotCommand(command="settings", description="Settings"),
         BotCommand(command="settimeout", description="Set registration timeout"),
         BotCommand(command="stop", description="Stop game"),
         BotCommand(command="top", description="TOP Rating"),
         BotCommand(command="lastwords", description="Set last words"),
+        BotCommand(command="gun", description="Use gun"),
     ]
     await bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
     await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())

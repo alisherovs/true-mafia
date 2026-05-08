@@ -128,3 +128,32 @@ async def cmd_lastwords(message: Message, command: CommandObject, engine: GameEn
         return
     ok, response = await engine.set_last_words(message.from_user.id, text)
     await message.reply(response)
+
+
+@router.message(Command("gun"))
+async def cmd_gun(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        await message.answer("Miltiqni guruhdagi aktiv o'yinda ishlating: target xabariga reply qilib /gun yozing.")
+        return
+
+    target_id: int | None = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+    else:
+        raw = (command.args or "").strip()
+        if raw.isdigit():
+            target_id = int(raw)
+
+    if target_id is None:
+        await message.reply("Foydalanish: target xabariga reply qilib /gun yozing yoki /gun user_id.")
+        return
+
+    ok, text = await engine.use_gun(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        shooter_id=message.from_user.id,
+        target_id=target_id,
+    )
+    await message.reply(text)

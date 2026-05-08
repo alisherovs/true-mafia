@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -29,6 +29,12 @@ class User(Base):
     mask: Mapped[int] = mapped_column(Integer, default=0)
     fake_document: Mapped[int] = mapped_column(Integer, default=0)
     next_game_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    use_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_killer_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_vote_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_gun: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_mask: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_fake_document: Mapped[bool] = mapped_column(Boolean, default=True)
 
     wins: Mapped[int] = mapped_column(Integer, default=0)
     total_games: Mapped[int] = mapped_column(Integer, default=0)
@@ -56,7 +62,11 @@ class Group(Base):
 
 class Game(Base):
     __tablename__ = "games"
-    __table_args__ = (UniqueConstraint("chat_id", "active_key", name="uq_active_game_per_chat"),)
+    __table_args__ = (
+        UniqueConstraint("chat_id", "active_key", name="uq_active_game_per_chat"),
+        Index("ix_games_chat_status_id", "chat_id", "status", "id"),
+        Index("ix_games_status_registration_ends", "status", "registration_ends_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
@@ -80,7 +90,11 @@ class Game(Base):
 
 class GamePlayer(Base):
     __tablename__ = "game_players"
-    __table_args__ = (UniqueConstraint("game_id", "telegram_id", name="uq_game_player"),)
+    __table_args__ = (
+        UniqueConstraint("game_id", "telegram_id", name="uq_game_player"),
+        Index("ix_game_players_game_alive_role", "game_id", "alive", "role"),
+        Index("ix_game_players_telegram_alive", "telegram_id", "alive"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     game_id: Mapped[int] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
@@ -203,15 +217,65 @@ class PremiumRecord(Base):
 
 class PremiumGroup(Base):
     __tablename__ = "premium_groups"
+    __table_args__ = (
+        Index("ix_premium_groups_total_diamonds", "total_diamonds"),
+        Index("ix_premium_groups_group_chat_id", "group_chat_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
     invite_link: Mapped[str] = mapped_column(Text)
     diamond_price: Mapped[int] = mapped_column(Integer, default=0)
+    total_diamonds: Mapped[int] = mapped_column(Integer, default=0)
+    group_chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    top_sender_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    top_sender_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    top_sender_diamonds: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PremiumGroupContribution(Base):
+    __tablename__ = "premium_group_contributions"
+    __table_args__ = (
+        UniqueConstraint("premium_group_id", "user_telegram_id", name="uq_premium_group_contributor"),
+        Index("ix_premium_group_contributions_group_amount", "premium_group_id", "diamonds"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    premium_group_id: Mapped[int] = mapped_column(ForeignKey("premium_groups.id", ondelete="CASCADE"), index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_name: Mapped[str] = mapped_column(String(255))
+    diamonds: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DiamondGiveaway(Base):
+    __tablename__ = "diamond_giveaways"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    creator_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    participants_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    winner_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BotSetting(Base):
+    __tablename__ = "bot_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 

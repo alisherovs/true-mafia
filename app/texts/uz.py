@@ -145,8 +145,8 @@ Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tun
         "🎯 Побед: {wins}\n"
         "🎲 Всего игр: {total_games}"
     ),
-    "give_usage": "Foydalanish: /giveto @username 10 yoki reply qilib /giveto 10",
-    "give_started": "💎 Diamond yuborish uchun /giveto ishlating.",
+    "give_usage": "Foydalanish: /give 10 yoki /give @username 10 izoh yoki reply qilib /give 10 izoh",
+    "give_started": "💎 Diamond yuborish uchun /give ishlating.",
     "give_not_enough": "Balansingizda yetarli diamond yo'q.",
     "give_success": "✅ {amount} 💎 yuborildi.",
     "give_received": "🎁 Sizga {amount} 💎 keldi.",

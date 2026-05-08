@@ -272,38 +272,53 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+
+    payload = callback.data.split(":", maxsplit=1)[1]
+    target_chat_id = callback.message.chat.id
+    action = payload
     if callback.message.chat.type == "private":
+        parts = payload.split(":", maxsplit=1)
+        if len(parts) != 2 or not parts[0].lstrip("-").isdigit():
+            await callback.answer("Group settings only", show_alert=True)
+            return
+        target_chat_id = int(parts[0])
+        action = parts[1]
+    elif payload.split(":", maxsplit=1)[0].lstrip("-").isdigit():
+        parts = payload.split(":", maxsplit=1)
+        target_chat_id = int(parts[0])
+        action = parts[1] if len(parts) > 1 else ""
+
+    if callback.message.chat.type == "private" and target_chat_id == callback.message.chat.id:
         await callback.answer("Group settings only", show_alert=True)
         return
 
     allowed = await engine.is_admin_or_creator(
         bot=callback.bot,
-        chat_id=callback.message.chat.id,
+        chat_id=target_chat_id,
         user_id=callback.from_user.id,
     )
     if not allowed:
         await callback.answer("Bu inline panel faqat adminlar uchun.", show_alert=True)
         return
 
-    lang = await engine.get_group_language(callback.message.chat.id)
-    action = callback.data.split(":", maxsplit=1)[1]
+    lang = await engine.get_group_language(target_chat_id)
 
     if action == "lang":
         await callback.answer("/lang buyrug'idan foydalaning", show_alert=True)
     elif action == "timeout":
-        group = await engine.group_settings(callback.message.chat.id)
+        group = await engine.group_settings(target_chat_id)
         await callback.answer(
             f"Joriy timeout: {group.registration_timeout}s. O'zgartirish: /settimeout <sekund>",
             show_alert=True,
         )
     elif action == "minplayers":
-        await engine.update_group_setting(callback.message.chat.id, "min_players", 4)
+        await engine.update_group_setting(target_chat_id, "min_players", 4)
         await callback.answer("Minimum players: 4", show_alert=True)
     elif action == "roles":
-        group = await engine.group_settings(callback.message.chat.id)
+        group = await engine.group_settings(target_chat_id)
         await callback.message.edit_text(
             engine.format_role_preset_settings(group),
-            reply_markup=role_preset_keyboard(group.role_preset),
+            reply_markup=role_preset_keyboard(group.role_preset, target_chat_id),
         )
         await callback.answer()
     elif action.startswith("rolepreset:"):
@@ -311,15 +326,15 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         if preset not in {"black23", "extended35"}:
             await callback.answer("Noma'lum role preset.", show_alert=True)
             return
-        await engine.update_group_setting(callback.message.chat.id, "role_preset", preset)
-        group = await engine.group_settings(callback.message.chat.id)
+        await engine.update_group_setting(target_chat_id, "role_preset", preset)
+        group = await engine.group_settings(target_chat_id)
         await callback.message.edit_text(
             engine.format_role_preset_settings(group),
-            reply_markup=role_preset_keyboard(group.role_preset),
+            reply_markup=role_preset_keyboard(group.role_preset, target_chat_id),
         )
         await callback.answer(f"Role preset: {role_preset_label(preset)}")
     elif action == "back":
-        group = await engine.group_settings(callback.message.chat.id)
+        group = await engine.group_settings(target_chat_id)
         text = (
             f"{t(lang, 'settings_title')}\n\n"
             f"⏳ Registration timeout: <b>{group.registration_timeout}</b> soniya\n"
@@ -327,18 +342,18 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
             f"🎭 Role preset: <b>{role_preset_label(group.role_preset)}</b> "
             f"({role_preset_max_players(group.role_preset)} gacha)"
         )
-        await callback.message.edit_text(text, reply_markup=settings_keyboard(lang))
+        await callback.message.edit_text(text, reply_markup=settings_keyboard(lang, target_chat_id))
         await callback.answer()
     elif action == "premium":
         await callback.answer("Premium status: disabled", show_alert=True)
     elif action == "logs":
         await callback.answer("Game logs serverda yoziladi.", show_alert=True)
     elif action == "stop":
-        game = await engine.active_game_for_chat(callback.message.chat.id)
+        game = await engine.active_game_for_chat(target_chat_id)
         if not game:
             await callback.answer(t(lang, "no_active_game"), show_alert=True)
             return
-        allowed = await engine.is_admin_or_creator(callback.bot, callback.message.chat.id, callback.from_user.id, game.creator_telegram_id)
+        allowed = await engine.is_admin_or_creator(callback.bot, target_chat_id, callback.from_user.id, game.creator_telegram_id)
         if not allowed:
             await callback.answer(t(lang, "no_permission"), show_alert=True)
             return

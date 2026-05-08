@@ -136,6 +136,62 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Suidsid",
         "Seni osib o'ldirishsa sen yutasan! :)",
     ),
+    Role.LUCKY: RoleMeta(
+        Role.LUCKY,
+        Team.CITY,
+        "🤞🏼",
+        "Omadli",
+        "Qolganlaridan ko'ra omadli bo'lgan tinch axoli - hayotiga suiqasd bo'lsa, u omon qolishi mumkin omadi kulsa:)",
+    ),
+    Role.ARSONIST: RoleMeta(
+        Role.ARSONIST,
+        Team.KILLER,
+        "🧟",
+        "G'azabkor",
+        "Har tunda 1 ta o'yinchini tanlaysiz. Agar o'zingizni tanlasangiz, oxirgi tunlarda tanlaganlariz bilan o'lasiz. Siz kamida 3 kishini tanlasangiz ģalaba qozonasiz..",
+    ),
+    Role.JOURNALIST: RoleMeta(
+        Role.JOURNALIST,
+        Team.MAFIA,
+        "👩🏼‍💻",
+        "Jurnalist",
+        "Mafialarning agentisiz. Har tunda kimnikigadur interyu olishga borasiz va unga kelgan har bir o'yinchini ko'rib qolishingiz mumkin hamda bu haqida mafialarga xabar berasiz.",
+    ),
+    Role.SNITCH: RoleMeta(
+        Role.SNITCH,
+        Team.CITY,
+        "🤓",
+        "Sotqin",
+        "Siz tunda bir odamni tanlaysiz va agarda u don, mafia yoki qotil bo'lsa, uni odamlarga shaxsingizni ochiqlamasdan sota olasiz! Siz tinch tarafda o'ynaysiz va tirik qolangiz yutasiz!",
+    ),
+    Role.MAYOR: RoleMeta(
+        Role.MAYOR,
+        Team.CITY,
+        "🎖",
+        "Janob",
+        "Kunduzgi ovoz berishda sizning ovozingiz ikkitaga teng bo'ladi va ovoz berish payti shaxsingiz oshkor bo'lmaydi.",
+    ),
+    Role.CROOK: RoleMeta(
+        Role.CROOK,
+        Team.NEUTRAL,
+        "🤹🏻",
+        "Aferist",
+        "Kechasi biron bir o'yinchiga tashrif buyurib, u bir kunlik ovoz berish uchun o'z ismini aldab qo'yishi mumkin.",
+    ),
+    Role.HIRED_KILLER: RoleMeta(
+        Role.HIRED_KILLER,
+        Team.MAFIA,
+        "🥷",
+        "Yollanma qotil",
+        "Mafialar tarafda o'ynaysiz! Har tun kimnidir yashirincha ovlaydi; ammo agar komissarni nishonga olsa, komissar uni o'ldiradi.",
+    ),
+    Role.MAQ: RoleMeta(
+        Role.MAQ,
+        Team.NEUTRAL,
+        "🧙‍♂️",
+        "Sehrgar",
+        "O'z qonunlaringiz bilan yashaysiz! Agar Don, Qotil, Komissar katani sizni o'ldirmoqchi bo'lsa, bu urinish behuda bo'ladi va sizga tanlov beriladi: Ularga rahm qilish yoki o'ldirish.",
+    ),
 }
 
 
@@ -150,52 +206,58 @@ def role_team(role: Union[Role, str]) -> Team:
     return ROLE_META[role_enum].team
 
 
+def _expand_role_counts(*counts: tuple[Role, int]) -> list[Role]:
+    roles: list[Role] = []
+    for role, count in counts:
+        roles.extend([role] * count)
+    return roles
+
+
 C = Role.CITIZEN
 M = Role.MAFIA
+KAMIKAZE = Role.SORCERER
+MANIAC = Role.KILLER
+MER = Role.MAYOR
+HIRED_KILLER = Role.HIRED_KILLER
 
 EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
-        4: [Role.DON, Role.DOCTOR, Role.CITIZEN, Role.CITIZEN],
-        5: [Role.DON, Role.DOCTOR, C, C, C],
-        6: [Role.DON, Role.DOCTOR, Role.COMMISSAR, C, C, C],
-        7: [Role.DON, M, Role.DOCTOR, Role.COMMISSAR, C, C, C],
-        8: [Role.DON, M, Role.DOCTOR, Role.COMMISSAR, Role.MISTRESS, C, C, C],
-        9: [Role.DON, M, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, C, C, C],
-        10: [Role.DON, M, M, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, C, C, C],
-        11: [Role.DON, M, M, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, C, C, C],
-        12: [Role.DON, M, M, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, C, C, C],
-        13: [Role.DON, M, M, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, C, C, C],
-        14: [Role.DON, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, C, C, C],
-        15: [Role.DON, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.KILLER, C, C, C],
-        16: [Role.DON, M, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.KILLER, C, C, C],
-        17: [Role.DON, M, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, C, C, C],
-        18: [Role.DON, M, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, C, C, C, C],
-        19: [Role.DON, M, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, C, C, C, C, C],
-        20: [Role.DON, M, M, M, Role.LAWYER, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, Role.WOLF, C, C, C, C, C],
-        21: [Role.DON, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, Role.WOLF, C, C, C, C, C],
-        22: [Role.DON, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.KILLER, Role.WOLF, C, C, C, C, C],
-        23: [Role.DON, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, C, C, C, C, C],
-        24: [Role.DON, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, C, C, C, C, C, C],
-        25: [Role.DON, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C],
-        26: [Role.DON, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C],
-        27: [Role.DON, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C],
-        28: [Role.DON, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C],
-        29: [Role.DON, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C],
-        30: [Role.DON, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C],
-        31: [Role.DON, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C],
-        32: [Role.DON, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C],
-        33: [Role.DON, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C],
-        34: [Role.DON, M, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C],
-        35: [Role.DON, M, M, M, M, M, M, M, Role.LAWYER, Role.SPY, Role.DOCTOR, Role.COMMISSAR, Role.SERGEANT, Role.MISTRESS, Role.BUM, Role.SORCERER, Role.GUARD, Role.WATCHER, Role.JUDGE, Role.KILLER, Role.WOLF, Role.JESTER, C, C, C, C, C, C, C, C, C, C, C, C, C],
+    4: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (C, 2)),
+    5: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (C, 1)),
+    6: _expand_role_counts((Role.DON, 1), (M, 1), (Role.COMMISSAR, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (C, 1)),
+    7: _expand_role_counts((Role.DON, 1), (M, 1), (Role.COMMISSAR, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (C, 1)),
+    8: _expand_role_counts((Role.DON, 1), (M, 1), (Role.COMMISSAR, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (C, 1)),
+    9: _expand_role_counts((Role.DON, 1), (M, 2), (Role.COMMISSAR, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (C, 1)),
+    10: _expand_role_counts((Role.DON, 1), (M, 2), (Role.COMMISSAR, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.WOLF, 1), (C, 1)),
+    11: _expand_role_counts((Role.DON, 1), (M, 2), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.WOLF, 1), (C, 1)),
+    12: _expand_role_counts((Role.DON, 1), (M, 3), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.WOLF, 1), (C, 1)),
+    13: _expand_role_counts((Role.DON, 1), (M, 3), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.WOLF, 1), (C, 1), (Role.JESTER, 1)),
+    14: _expand_role_counts((Role.DON, 1), (M, 3), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.JESTER, 1)),
+    15: _expand_role_counts((Role.DON, 1), (M, 4), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1)),
+    16: _expand_role_counts((Role.DON, 1), (M, 4), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.JESTER, 1)),
+    17: _expand_role_counts((Role.DON, 1), (M, 4), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1)),
+    18: _expand_role_counts((Role.DON, 1), (M, 5), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1)),
+    19: _expand_role_counts((Role.DON, 1), (M, 5), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1)),
+    20: _expand_role_counts((Role.DON, 1), (M, 5), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.MAQ, 1)),
+    21: _expand_role_counts((Role.DON, 1), (M, 4), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1)),
+    22: _expand_role_counts((Role.DON, 1), (M, 4), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1)),
+    23: _expand_role_counts((Role.DON, 1), (M, 5), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1)),
+    24: _expand_role_counts((Role.DON, 1), (M, 5), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (MER, 1)),
+    25: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (MER, 1)),
+    26: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1)),
+    27: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 2), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
+    28: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
+    29: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
+    30: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 2), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
 }
 
 ROLE_PRESET_LABELS = {
-    "black23": "Black 23",
-    "extended35": "Extended 35",
+    "black23": "Universal 30",
+    "extended35": "Universal 30",
 }
 
 ROLE_PRESET_MAX_PLAYERS = {
-    "black23": 23,
-    "extended35": 35,
+    "black23": 30,
+    "extended35": 30,
 }
 
 
@@ -210,10 +272,10 @@ def role_preset_max_players(preset: str) -> int:
 def build_role_set(player_count: int, preset: str = "black23") -> list[Role]:
     max_players = role_preset_max_players(preset)
     capped_count = min(player_count, max_players)
-    if capped_count <= 35:
+    if capped_count <= 30:
         roles = EXTENDED_ROLE_TABLE.get(capped_count, EXTENDED_ROLE_TABLE[4]).copy()
     else:
-        roles = EXTENDED_ROLE_TABLE[35].copy()
+        roles = EXTENDED_ROLE_TABLE[30].copy()
 
     if player_count > len(roles):
         extras = [Role.CITIZEN, Role.CITIZEN, Role.MAFIA, Role.CITIZEN]

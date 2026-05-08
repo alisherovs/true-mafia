@@ -16,10 +16,14 @@ class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     bot_username: str = Field(alias="BOT_USERNAME")
     database_url: str = Field(default="sqlite+aiosqlite:///./storage/mafia.db", alias="DATABASE_URL")
+    db_pool_size: int = Field(default=10, alias="DB_POOL_SIZE")
+    db_max_overflow: int = Field(default=20, alias="DB_MAX_OVERFLOW")
+    db_pool_timeout: int = Field(default=30, alias="DB_POOL_TIMEOUT")
 
     default_language: str = Field(default="uz", alias="DEFAULT_LANGUAGE")
     news_channel_url: str = Field(default="https://t.me", alias="NEWS_CHANNEL_URL")
     support_url: str = Field(default="https://t.me", alias="SUPPORT_URL")
+    admin_username: str = Field(default="support", alias="ADMIN_USERNAME")
     admin_ids_raw: str = Field(default="", alias="ADMIN_IDS")
 
     min_players: int = Field(default=4, alias="MIN_PLAYERS")

@@ -4,6 +4,7 @@ from typing import Optional, Union
 import json
 import logging
 import asyncio
+import unicodedata
 from html import escape
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -32,18 +33,92 @@ from app.keyboards import (
     target_keyboard,
     vote_keyboard,
 )
-from app.models import Game, GameLog, GamePlayer, Group, HangVote, NightAction, NightPrompt, PremiumGroup, SkipDecision, User, Vote
+from app.models import (
+    BotSetting,
+    Game,
+    GameLog,
+    GamePlayer,
+    Group,
+    HangVote,
+    NightAction,
+    NightPrompt,
+    PremiumGroup,
+    PremiumGroupContribution,
+    SkipDecision,
+    User,
+    Vote,
+)
 from app.roles import ROLE_META, build_role_set, role_label, role_preset_label, role_preset_max_players, role_team
 from app.scheduler import scheduler
 from app.texts import t
 
 logger = logging.getLogger(__name__)
 
+INVISIBLE_NAME_CHARS = {
+    "\u034f",
+    "\u061c",
+    "\u115f",
+    "\u1160",
+    "\u17b4",
+    "\u17b5",
+    "\u180e",
+    "\u200b",
+    "\u200c",
+    "\u200d",
+    "\u200e",
+    "\u200f",
+    "\u202a",
+    "\u202b",
+    "\u202c",
+    "\u202d",
+    "\u202e",
+    "\u2060",
+    "\u2061",
+    "\u2062",
+    "\u2063",
+    "\u2064",
+    "\u2066",
+    "\u2067",
+    "\u2068",
+    "\u2069",
+    "\u2800",
+    "\u3164",
+    "\ufeff",
+}
+
 
 class GameEngine:
     def __init__(self, settings: Settings, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.settings = settings
         self.session_factory = session_factory
+        self._group_language_cache: dict[int, tuple[float, str]] = {}
+        self._group_return_url_cache: dict[int, tuple[float, str]] = {}
+        self._active_participants_cache: dict[int, tuple[float, Optional[int], frozenset[int]]] = {}
+        self._cache_ttl_seconds = 10.0
+        self._return_url_cache_ttl_seconds = 3600.0
+        self._cache_limit = 20000
+
+    def _monotonic(self) -> float:
+        return asyncio.get_running_loop().time()
+
+    def _prune_cache_if_needed(self, cache: dict[int, tuple[float, object]]) -> None:
+        if len(cache) < self._cache_limit:
+            return
+        now = self._monotonic()
+        expired_keys = [key for key, value in cache.items() if value[0] <= now]
+        for key in expired_keys:
+            cache.pop(key, None)
+        if len(cache) < self._cache_limit:
+            return
+        for key in list(cache)[: max(1, self._cache_limit // 10)]:
+            cache.pop(key, None)
+
+    def _invalidate_group_cache(self, chat_id: int) -> None:
+        self._group_language_cache.pop(chat_id, None)
+        self._group_return_url_cache.pop(chat_id, None)
+
+    def _invalidate_game_cache(self, chat_id: int) -> None:
+        self._active_participants_cache.pop(chat_id, None)
 
     @staticmethod
     def _now_utc() -> datetime:
@@ -64,11 +139,26 @@ class GameEngine:
     def _display_name_from_tg(tg_user: TgUser) -> str:
         parts = [tg_user.first_name, tg_user.last_name]
         name = " ".join(part for part in parts if part).strip()
-        if name:
+        if name and GameEngine._has_visible_nickname(name):
             return name[:255]
         if tg_user.username:
             return tg_user.username[:255]
         return f"Player {tg_user.id}"
+
+    @staticmethod
+    def _profile_name_from_tg(tg_user: TgUser) -> str:
+        parts = [tg_user.first_name, tg_user.last_name]
+        return " ".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _has_visible_nickname(name: str) -> bool:
+        for char in name:
+            if char in INVISIBLE_NAME_CHARS or char.isspace():
+                continue
+            category = unicodedata.category(char)
+            if category[0] in {"L", "N", "P", "S"}:
+                return True
+        return False
 
     def _format_alive_players(self, players: list[GamePlayer]) -> str:
         if not players:
@@ -187,8 +277,6 @@ class GameEngine:
         else:
             add_once("Ishonish qiyin, lekin bu tunda hech kim o'lmadi...")
 
-        for line in night_event_lines:
-            add_once(line)
         for line in transformed:
             add_once(f"🔁 {line}")
         return messages
@@ -198,19 +286,8 @@ class GameEngine:
         meta = ROLE_META[role]
         return f"Siz - {meta.emoji} <b>{meta.title_uz}</b>siz!\n{meta.short_desc_uz}"
 
-    def _commissar_check_result_text(self, target: GamePlayer, seen_team: str) -> str:
-        team_uz = {
-            Team.CITY.value: "Tinch aholi",
-            Team.MAFIA.value: "Mafiya",
-            Team.KILLER.value: "Xavfli neytral",
-            Team.NEUTRAL.value: "Neytral",
-        }.get(seen_team, seen_team)
-        return (
-            "🕵🏼 <b>Komissar Katani tekshiruvi</b>\n\n"
-            f"Siz {self._tg_mention(target.telegram_id, target.display_name)}ning uyiga tashrif buyurdingiz.\n"
-            f"Topilgan ma'lumot: <b>{team_uz}</b>.\n\n"
-            "Bu ma'lumotni kunduzgi muhokamada ehtiyotkorlik bilan ishlating."
-        )
+    def _commissar_check_result_text(self, target: GamePlayer, seen_role: Role) -> str:
+        return f"{self._tg_mention(target.telegram_id, target.display_name)} - {role_label(seen_role)}"
 
     @staticmethod
     def _night_activity_line(role: Role, action_key: Optional[str]) -> Optional[str]:
@@ -228,16 +305,22 @@ class GameEngine:
             return "🤵🏼 Mafiya bugungi o'ljasini tanladi..."
         if role == Role.SPY:
             return "🕴 Josus qorong'ida iz qoldirmay harakat qildi..."
+        if role == Role.JOURNALIST:
+            return "👩🏼‍💻 Jurnalist intervyu olish uchun ketti..."
+        if role == Role.HIRED_KILLER:
+            return "🥷 Yollanma qotil o'ljasini tanladi..."
         if role == Role.COMMISSAR:
             if action_key == "shoot":
-                return "🕵🏼 Komissar katani shubhali odamni nishonga oldi..."
+                return "🕵🏼 Komissar katani tungi vazifasiga ketdi..."
             return "🕵🏼 Komissar Katani yovuzlarni qidirishga ketdi..."
         if role == Role.LAWYER:
             return "👨🏼‍💼 Advokat Mafiani ximoya qilish uchun qidiryapti..."
         if role == Role.KILLER:
-            return "🕴️ Убийца выбрал свою жертву!"
+            return "🔪 Qotil navbatdagi qurbonini tanladi..."
         if role == Role.BUM:
             return "🧙🏼 Daydi kimnikigadir ichkilik butilka olish uchun ketdi..."
+        if role == Role.CROOK:
+            return "🤹🏻 Aferist o'ljasini tanladi."
         return None
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
@@ -247,9 +330,10 @@ class GameEngine:
 
     def _sleep_death_line(self, player: GamePlayer) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
+        role = role_label(player.role)
         return (
-            f"O'limidan oldin {name} qichqirganini eshitdi:\n"
-            "Men o'yin paytida boshqa uxlamayma-a-a-a-a-a-an!"
+            f"Aholidan kimdir {role} {name} o'limidan oldin:\n"
+            '"Men o\'yin paytida boshqa uxlamayma-a-a-a-a-a-an!" - deb qichqirganini eshitgan.'
         )
 
     def _apply_role_successions(self, alive_players: list[GamePlayer], dead_ids: set[int]) -> list[str]:
@@ -261,7 +345,8 @@ class GameEngine:
                 (
                     player
                     for player in alive_players
-                    if player.telegram_id not in dead_ids and Role(player.role) in {Role.MAFIA, Role.SPY}
+                    if player.telegram_id not in dead_ids
+                    and Role(player.role) in {Role.MAFIA, Role.SPY, Role.JOURNALIST, Role.HIRED_KILLER}
                 ),
                 None,
             )
@@ -336,6 +421,7 @@ class GameEngine:
                 group.title = title
             await session.commit()
             await session.refresh(group)
+            self._invalidate_group_cache(chat_id)
             return group
 
     async def set_user_language(self, telegram_id: int, language: str) -> None:
@@ -363,6 +449,7 @@ class GameEngine:
             else:
                 group.language = language
             await session.commit()
+        self._invalidate_group_cache(chat_id)
 
     async def get_user_language(self, telegram_id: int) -> str:
         user = await self.get_user(telegram_id)
@@ -371,29 +458,50 @@ class GameEngine:
         return self.settings.default_language
 
     async def get_group_language(self, chat_id: int) -> str:
+        now = self._monotonic()
+        cached = self._group_language_cache.get(chat_id)
+        if cached and cached[0] > now:
+            return cached[1]
         async with self.session_factory() as session:
             group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
-            return group.language if group else self.settings.default_language
+            language = group.language if group else self.settings.default_language
+        self._prune_cache_if_needed(self._group_language_cache)
+        self._group_language_cache[chat_id] = (now + self._cache_ttl_seconds, language)
+        return language
 
     async def group_return_url(self, bot: Bot, chat_id: int) -> str:
+        now = self._monotonic()
+        cached = self._group_return_url_cache.get(chat_id)
+        if cached and cached[0] > now:
+            return cached[1]
+
+        url = group_url_from_chat_id(chat_id)
         try:
             chat = await bot.get_chat(chat_id)
             username = getattr(chat, "username", None)
             if username:
-                return f"https://t.me/{username}"
+                url = f"https://t.me/{username}"
+                self._prune_cache_if_needed(self._group_return_url_cache)
+                self._group_return_url_cache[chat_id] = (now + self._return_url_cache_ttl_seconds, url)
+                return url
 
             invite_link = getattr(chat, "invite_link", None)
             if invite_link:
-                return invite_link
+                url = invite_link
+                self._prune_cache_if_needed(self._group_return_url_cache)
+                self._group_return_url_cache[chat_id] = (now + self._return_url_cache_ttl_seconds, url)
+                return url
 
             try:
-                return await bot.export_chat_invite_link(chat_id)
+                url = await bot.export_chat_invite_link(chat_id)
             except (TelegramBadRequest, TelegramForbiddenError):
                 pass
         except (TelegramBadRequest, TelegramForbiddenError):
             pass
 
-        return group_url_from_chat_id(chat_id)
+        self._prune_cache_if_needed(self._group_return_url_cache)
+        self._group_return_url_cache[chat_id] = (now + self._return_url_cache_ttl_seconds, url)
+        return url
 
     async def group_return_keyboard(self, bot: Bot, chat_id: int):
         return go_group_keyboard(chat_id, await self.group_return_url(bot, chat_id))
@@ -522,6 +630,8 @@ class GameEngine:
             )
             await session.commit()
 
+        self._invalidate_group_cache(chat_id)
+        self._invalidate_game_cache(chat_id)
         try:
             await bot.pin_chat_message(chat_id=chat_id, message_id=msg.message_id, disable_notification=True)
         except TelegramBadRequest:
@@ -636,6 +746,11 @@ class GameEngine:
         await bot.send_message(game.chat_id, t(lang, key))
 
     async def join_game(self, bot: Bot, game_id: int, tg_user: TgUser) -> tuple[bool, str]:
+        if not self._has_visible_nickname(self._profile_name_from_tg(tg_user)):
+            return (
+                False,
+                "Nikingiz ko'rinmayapti. O'yinda qatnashish uchun Telegram ismingizni ko'rinadigan qilib o'zgartiring va qayta urinib ko'ring.",
+            )
         user = await self.ensure_user(tg_user)
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
@@ -672,11 +787,13 @@ class GameEngine:
             try:
                 await session.flush()
                 self._add_game_log(session, game, "player_joined", actor=player)
+                chat_id = game.chat_id
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
                 return False, t(lang, "already_joined")
 
+        self._invalidate_game_cache(chat_id)
         await self.update_lobby(bot, game_id)
         return True, t(await self.get_user_language(tg_user.id), "joined")
 
@@ -687,6 +804,11 @@ class GameEngine:
         chat_id: int,
         tg_user: TgUser,
     ) -> tuple[bool, str]:
+        if not self._has_visible_nickname(self._profile_name_from_tg(tg_user)):
+            return (
+                False,
+                "Nikingiz ko'rinmayapti. O'yinda qatnashish uchun Telegram ismingizni ko'rinadigan qilib o'zgartiring va qayta urinib ko'ring.",
+            )
         await self.ensure_user(tg_user)
         async with self.session_factory() as session:
             game = (
@@ -723,9 +845,11 @@ class GameEngine:
             if player is None:
                 return False, t(lang, "not_joined")
             self._add_game_log(session, game, "player_left", actor=player)
+            chat_id = game.chat_id
             await session.delete(player)
             await session.commit()
 
+        self._invalidate_game_cache(chat_id)
         await self.update_lobby(bot, game_id)
         return True, t(lang, "left_game")
 
@@ -768,8 +892,10 @@ class GameEngine:
             game.ended_at = datetime.now(timezone.utc)
             self._add_game_log(session, game, "game_cancelled", reason="manual_stop")
             await session.commit()
+            chat_id = game.chat_id
             lang = await self.get_group_language(game.chat_id)
 
+        self._invalidate_game_cache(chat_id)
         await self.update_lobby(bot, game_id, ended=True)
         self._cleanup_jobs(game_id)
         return True, t(lang, "game_cancelled")
@@ -816,6 +942,7 @@ class GameEngine:
                     min_players=min_players,
                 )
                 await session.commit()
+                self._invalidate_game_cache(game.chat_id)
                 await self.update_lobby(bot, game_id, ended=True)
                 await bot.send_message(game.chat_id, t(lang, "insufficient_players"))
                 self._cleanup_jobs(game_id)
@@ -833,6 +960,7 @@ class GameEngine:
                 min_players=min_players,
             )
             await session.commit()
+            self._invalidate_game_cache(game.chat_id)
 
         await self.update_lobby(bot, game_id, ended=True)
         chat_id = await self._game_chat_id(game_id)
@@ -909,6 +1037,64 @@ class GameEngine:
             except TelegramForbiddenError:
                 await bot.send_message(game.chat_id, f"{player.display_name}: {t(lang, 'need_start_for_role')}")
 
+        # Send team messages for Mafia
+        mafia_team = [player for player in players if player.team == Team.MAFIA.value]
+        if mafia_team:
+            mafia_lines = [
+                f"{idx}. {role_label(player.role)} - {self._tg_mention(player.telegram_id, player.display_name)}"
+                for idx, player in enumerate(mafia_team, 1)
+            ]
+            mafia_text = "<b>Mafia jamoasi:</b>\n" + "\n".join(mafia_lines)
+            for player in mafia_team:
+                try:
+                    await bot.send_message(
+                        player.telegram_id,
+                        mafia_text,
+                        reply_markup=await self.group_return_keyboard(bot, game.chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+
+        # Send team messages for Doctors
+        doctors = [player for player in players if Role(player.role) == Role.DOCTOR]
+        if doctors and len(doctors) > 1:
+            doctor_lines = [
+                f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)}"
+                for idx, player in enumerate(doctors, 1)
+            ]
+            doctor_text = "<b>👨🏼‍⚕️ Doktor jamoasi:</b>\n" + "\n".join(doctor_lines)
+            for player in doctors:
+                try:
+                    await bot.send_message(
+                        player.telegram_id,
+                        doctor_text,
+                        reply_markup=await self.group_return_keyboard(bot, game.chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+
+        # Send team messages for Commissar and Sergeant
+        commissars = [player for player in players if Role(player.role) == Role.COMMISSAR]
+        sergeants = [player for player in players if Role(player.role) == Role.SERGEANT]
+        if commissars and sergeants:
+            commissar_text = "<b>🕵🏼 Komissar Katani va Serjantlar:</b>\n"
+            lines = [
+                f"🕵🏼 {self._tg_mention(c.telegram_id, c.display_name)}" for c in commissars
+            ] + [
+                f"👮🏼 {self._tg_mention(s.telegram_id, s.display_name)}" for s in sergeants
+            ]
+            commissar_text += "\n".join(lines)
+            
+            for player in commissars + sergeants:
+                try:
+                    await bot.send_message(
+                        player.telegram_id,
+                        commissar_text,
+                        reply_markup=await self.group_return_keyboard(bot, game.chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+
     def _night_prompt_for_player(
         self,
         game_id: int,
@@ -925,11 +1111,11 @@ class GameEngine:
             if p.telegram_id != player.telegram_id and p.team != Team.MAFIA.value
         ]
 
-        if role in {Role.MAFIA, Role.DON, Role.SPY}:
+        if role in {Role.MAFIA, Role.DON, Role.SPY, Role.HIRED_KILLER}:
             return "🌚 Kimni yo'q qilamiz?", target_keyboard("kill", game_id, player.telegram_id, mafia_targets)
         if role == Role.DOCTOR:
             return (
-                "💉 Kimni davolaysiz? (o'zingizni faqat 1 marta)",
+                "👨🏼‍⚕️️ Kimni davolaymiz?",
                 target_keyboard("heal", game_id, player.telegram_id, all_choices),
             )
         if role == Role.GUARD:
@@ -938,9 +1124,7 @@ class GameEngine:
             return "🔎 Kimni kuzatasiz? Unga kim kelganini bilasiz.", target_keyboard("watch", game_id, player.telegram_id, targets)
         if role == Role.COMMISSAR:
             return (
-                "🕵🏼 <b>Komissar Katani navbati</b>\n\n"
-                "Bir o'yinchining uyiga borib tekshirishingiz mumkin. "
-                "Ikkinchi tundan boshlab gumondorni o'yindan chetlatish ham ochiladi.",
+                "🕵🏼 Komissar katani",
                 commissar_action_keyboard(
                     game_id=game_id,
                     actor_id=player.telegram_id,
@@ -955,6 +1139,10 @@ class GameEngine:
             return "🔪 Kimni o'ldirasiz?", target_keyboard("killer", game_id, player.telegram_id, targets)
         if role == Role.BUM:
             return "🧙‍♂ Kimni kuzatasiz?", target_keyboard("visit", game_id, player.telegram_id, targets)
+        if role == Role.JOURNALIST:
+            return "👩🏼‍💻 Kimdan intervyu olasiz?", target_keyboard("watch", game_id, player.telegram_id, targets)
+        if role == Role.CROOK:
+            return "🤹🏻 Kimni chalg'itasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
         return None
 
     async def send_private_role_menu(self, bot: Bot, game_id: int, telegram_id: int) -> tuple[bool, str]:
@@ -1246,11 +1434,14 @@ class GameEngine:
                 Role.DON: {"kill"},
                 Role.MAFIA: {"kill"},
                 Role.SPY: {"kill"},
+                Role.HIRED_KILLER: {"kill"},
                 Role.DOCTOR: {"heal"},
                 Role.GUARD: {"guard"},
                 Role.WATCHER: {"watch"},
+                Role.JOURNALIST: {"watch"},
                 Role.COMMISSAR: {"check", "shoot"},
                 Role.MISTRESS: {"block"},
+                Role.CROOK: {"block"},
                 Role.LAWYER: {"defend"},
                 Role.KILLER: {"killer"},
                 Role.BUM: {"visit"},
@@ -1259,11 +1450,22 @@ class GameEngine:
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
                 return False, "Bu amal sizning rolingiz uchun mavjud emas."
-            if actor_role == Role.COMMISSAR and action_key == "shoot" and game.night_number < 2:
-                return False, "Komissar birinchi tunda tekshirmasdan ota olmaydi."
-
             if action_type == ActionType.HEAL and target_id == actor_id and actor.self_heal_used:
                 return False, "Siz o'zingizni yana davolay olmaysiz."
+
+            if action_type == ActionType.HEAL:
+                already_healed_target = (
+                    await session.execute(
+                        select(NightAction.id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.actor_telegram_id == actor_id,
+                            NightAction.target_telegram_id == target_id,
+                            NightAction.action_type == ActionType.HEAL.value,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if already_healed_target is not None:
+                    return False, "Kimni davolaymiz?"
 
             target = (
                 await session.execute(
@@ -1283,6 +1485,8 @@ class GameEngine:
                 success_text = f"Siz {target.display_name}ning uyiga tekshiruvga borishni tanladingiz."
             elif actor_role == Role.COMMISSAR and action_key == "shoot":
                 success_text = f"Siz {target.display_name}ni o'yindan chetlatishni tanladingiz."
+            elif action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
+                success_text = f"Siz - {target.display_name} ni tanladingiz. Don qaror qilmasa, tanlovingiz ishlaydi."
             else:
                 success_text = f"Siz - {target.display_name} ni tanladingiz."
             group_activity_line = self._night_activity_line(actor_role, action_key)
@@ -1322,7 +1526,7 @@ class GameEngine:
                 action_type=action_type.value,
                 action_key=action_key,
             )
-            if action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY}:
+            if action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
                 dons = (
                     await session.execute(
                         select(GamePlayer).where(
@@ -1335,6 +1539,8 @@ class GameEngine:
                 ).scalars().all()
                 don_notice_ids = [don.telegram_id for don in dons]
                 don_notice_text = f"{actor.display_name} -- {target.display_name} ga ovoz berdi"
+                if don_notice_ids:
+                    group_activity_line = None
 
             try:
                 await session.commit()
@@ -1388,8 +1594,6 @@ class GameEngine:
             ).scalar_one_or_none()
             if actor is None or Role(actor.role) != Role.COMMISSAR:
                 return False, "Bu amal faqat Komissar Katani uchun.", None
-            if action_key == "shoot" and game.night_number < 2:
-                return False, "Komissar birinchi tunda ota olmaydi.", None
             existing = (
                 await session.execute(
                     select(NightAction.id).where(
@@ -1404,11 +1608,7 @@ class GameEngine:
             alive = await self._alive_players(session, game_id)
 
         choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != actor_id]
-        title = (
-            "🕵️ Kimning uyiga borib tekshiramiz?"
-            if action_key == "check"
-            else "🔫 Kimni o'yindan chetlatamiz?"
-        )
+        title = "Tekshirish" if action_key == "check" else "Otish"
         return True, title, target_keyboard(action_key, game_id, actor_id, choices)
 
     async def skip_choice(
@@ -1524,7 +1724,7 @@ class GameEngine:
             chat_id = game.chat_id
             player_name = self._tg_mention(player.telegram_id, player.display_name)
 
-        group_text = f"{player_name} hech narsa qilmaslikka qaror qildi"
+        group_text = f"🚷 {player_name} hech narsa qilmaslikka qaror qildi"
         await bot.send_message(chat_id, group_text)
         try:
             await bot.send_message(
@@ -1598,7 +1798,8 @@ class GameEngine:
                 ):
                     visitors_by_target[act.target_telegram_id].append(act.actor_telegram_id)
 
-            mafia_kills = []
+            don_kills = []
+            mafia_fallback_kills = []
             killer_kills = []
             commissar_shots = []
             checks = []
@@ -1615,8 +1816,10 @@ class GameEngine:
                 if target_id is None:
                     continue
 
-                if act.action_type == ActionType.KILL.value and role in {Role.DON, Role.MAFIA, Role.SPY}:
-                    mafia_kills.append(target_id)
+                if act.action_type == ActionType.KILL.value and role == Role.DON:
+                    don_kills.append(target_id)
+                elif act.action_type == ActionType.KILL.value and role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
+                    mafia_fallback_kills.append(target_id)
                 elif act.action_type == ActionType.KILL.value and role == Role.KILLER:
                     killer_kills.append(target_id)
                 elif act.action_type == ActionType.SHOOT.value and role == Role.COMMISSAR:
@@ -1630,9 +1833,13 @@ class GameEngine:
             death_visitors: dict[int, str] = {}
             transformed: list[str] = []
             night_event_lines: list[str] = []
+            protected_notices: list[tuple[int, str]] = []
+            protected_group_lines: list[str] = []
             last_words_prompts: list[tuple[int, str]] = []
 
-            mafia_target = Counter(mafia_kills).most_common(1)
+            active_mafia_roles = {Role.DON} if don_kills else {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
+            active_mafia_kills = don_kills if don_kills else mafia_fallback_kills
+            mafia_target = Counter(active_mafia_kills).most_common(1)
             if mafia_target:
                 target = mafia_target[0][0]
                 target_player = player_map.get(target)
@@ -1651,16 +1858,13 @@ class GameEngine:
                                 if action.action_type == ActionType.KILL.value
                                 and action.target_telegram_id == target
                                 and action.actor_telegram_id in player_map
-                                and Role(player_map[action.actor_telegram_id].role) in {Role.DON, Role.MAFIA, Role.SPY}
+                                and Role(player_map[action.actor_telegram_id].role) in active_mafia_roles
                             ),
                             None,
                         )
                         if killer_actor:
                             death_visitors[target] = role_label(killer_actor.role)
                         mafia_dead.add(target)
-                        night_event_lines.append(
-                            f"🤵🏻 Mafiya {self._tg_mention(target_player.telegram_id, target_player.display_name)} iziga tushdi..."
-                        )
 
             killer_target = Counter(killer_kills).most_common(1)
             if killer_target:
@@ -1670,19 +1874,13 @@ class GameEngine:
                     if Role(target_player.role) == Role.WOLF:
                         dead.add(target)
                         death_causes[target] = "killer"
-                        night_event_lines.append(
-                            f"Bugun 🔪 Qotil {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni o'ldirishga urundi..."
-                        )
                     elif target not in healed and target not in guarded and target_player.alive:
                         if target_player.telegram_id in defended:
-                            night_event_lines.append("🤹🏻 Aferist tun sirlarini chalkashtirib yubordi...")
+                            pass
                         else:
                             dead.add(target)
                             death_causes[target] = "killer"
                             death_visitors[target] = role_label(Role.KILLER.value)
-                            night_event_lines.append(
-                                f"Bugun 🔪 Qotil {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni o'ldirishga urundi..."
-                            )
 
             for target in commissar_shots:
                 target_player = player_map.get(target)
@@ -1692,16 +1890,60 @@ class GameEngine:
                     target_player.role = Role.SERGEANT.value
                     target_player.team = Team.CITY.value
                     transformed.append(f"🐺 {target_player.display_name} serjantga aylandi")
-                    night_event_lines.append(
-                        f"🕵🏼 Komissar Katani {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni nishonga oldi, lekin u 🐺 Bo'ri bo'lgani uchun Serjantga aylandi..."
-                    )
                 else:
                     dead.add(target)
                     death_causes[target] = "commissar"
                     death_visitors[target] = role_label(Role.COMMISSAR.value)
-                    night_event_lines.append(
-                        f"🕵🏼 Komissar Katani {self._tg_mention(target_player.telegram_id, target_player.display_name)}ni o'yindan chetlatdi..."
-                    )
+
+            if dead:
+                protected_users = {
+                    user.telegram_id: user
+                    for user in (
+                        await session.execute(select(User).where(User.telegram_id.in_(list(dead))))
+                    ).scalars().all()
+                }
+                for victim_id in list(dead):
+                    user = protected_users.get(victim_id)
+                    cause = death_causes.get(victim_id)
+                    if user is None or cause is None:
+                        continue
+                    if cause == "killer" and user.use_killer_protection is not False and (user.killer_protection or 0) > 0:
+                        user.killer_protection -= 1
+                        dead.discard(victim_id)
+                        death_causes.pop(victim_id, None)
+                        death_visitors.pop(victim_id, None)
+                        protected_notices.append((victim_id, "⛑ Qotildan himoya sizni qutqarib qoldi."))
+                        protected_group_lines.append("⛑ Kimdir qotildan himoyasini ishlatdi.")
+                        self._add_game_log(
+                            session,
+                            game,
+                            "killer_protection_used",
+                            target=player_map.get(victim_id),
+                            remaining_killer_protection=user.killer_protection,
+                        )
+                    elif cause in {"mafia", "commissar"} and user.use_protection is not False and (user.protection or 0) > 0:
+                        user.protection -= 1
+                        dead.discard(victim_id)
+                        mafia_dead.discard(victim_id)
+                        death_causes.pop(victim_id, None)
+                        death_visitors.pop(victim_id, None)
+                        protected_notices.append((victim_id, "🛡 Himoya sizni qutqarib qoldi."))
+                        if cause == "mafia":
+                            protected_group_lines.append("🛡 Kimdir himoyasini ishlatdi.")
+                        else:
+                            player = player_map.get(victim_id)
+                            if player:
+                                protected_group_lines.append(
+                                    f"🛡 {self._tg_mention(player.telegram_id, player.display_name)} o'z himoyasini ishlatdi."
+                                )
+                        self._add_game_log(
+                            session,
+                            game,
+                            "protection_used",
+                            target=player_map.get(victim_id),
+                            cause=cause,
+                            remaining_protection=user.protection,
+                        )
 
             # Daydi witness hint.
             witness_lines = []
@@ -1740,11 +1982,14 @@ class GameEngine:
                 victim = player_map.get(victim_id)
                 if victim and Role(victim.role) == Role.SORCERER:
                     attacker = None
-                    if victim_id in mafia_kills:
+                    if victim_id in active_mafia_kills:
                         mafia_actors = [
                             a.actor_telegram_id
                             for a in actions
-                            if a.action_type == ActionType.KILL.value and a.details == "kill"
+                            if a.action_type == ActionType.KILL.value
+                            and a.target_telegram_id == victim_id
+                            and a.actor_telegram_id in player_map
+                            and Role(player_map[a.actor_telegram_id].role) in active_mafia_roles
                         ]
                         attacker = mafia_actors[0] if mafia_actors else None
                     elif victim_id in killer_kills:
@@ -1765,11 +2010,6 @@ class GameEngine:
                     dead.add(attacker)
                     death_causes[attacker] = "sorcerer"
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
-                    attacker_player = player_map.get(attacker)
-                    if attacker_player:
-                        night_event_lines.append(
-                            f"kechiradimi yoki o'ldiradimi 🧙‍ Sehrgar {self._tg_mention(attacker_player.telegram_id, attacker_player.display_name)}ni o'ldirdi."
-                        )
 
             for dead_id in dead:
                 pl = player_map.get(dead_id)
@@ -1844,6 +2084,19 @@ class GameEngine:
             except TelegramForbiddenError:
                 pass
 
+        for telegram_id, text in protected_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for line in dict.fromkeys(protected_group_lines):
+            await bot.send_message(chat_id, line)
+
         for telegram_id, _ in last_words_prompts:
             try:
                 await bot.send_message(
@@ -1860,15 +2113,38 @@ class GameEngine:
                         select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.telegram_id == target_id)
                     )
                 ).scalar_one_or_none()
+                target_user = (
+                    await s2.execute(select(User).where(User.telegram_id == target_id))
+                ).scalar_one_or_none()
+                hidden_by_item = False
+                if target_user is not None and target_user.use_mask is not False and (target_user.mask or 0) > 0:
+                    target_user.mask -= 1
+                    hidden_by_item = True
+                    await s2.commit()
+                elif target_user is not None and target_user.use_fake_document is not False and (target_user.fake_document or 0) > 0:
+                    target_user.fake_document -= 1
+                    hidden_by_item = True
+                    await s2.commit()
             if target is None:
                 continue
-            seen_team = target.team
+            seen_role = Role(target.role)
             if Role(target.role) == Role.SPY:
-                seen_team = Team.CITY.value
+                seen_role = Role.CITIZEN
             if target_id in defended and target.team == Team.MAFIA.value:
-                seen_team = Team.CITY.value
+                seen_role = Role.CITIZEN
+            if hidden_by_item:
+                seen_role = Role.CITIZEN
+                await bot.send_message(chat_id, "🎭 Kimdir tekshiruvdan yashirinish uchun maska yoki soxta hujjat ishlatdi.")
+                try:
+                    await bot.send_message(
+                        target_id,
+                        "🎭 Maska yoki 📁 soxta hujjat komissar tekshiruvini yashirdi.",
+                        reply_markup=await self.group_return_keyboard(bot, chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
             try:
-                await bot.send_message(commissar_id, self._commissar_check_result_text(target, seen_team))
+                await bot.send_message(commissar_id, self._commissar_check_result_text(target, seen_role))
             except TelegramForbiddenError:
                 pass
 
@@ -1977,20 +2253,6 @@ class GameEngine:
             ).scalar_one_or_none()
             if skipped is not None:
                 return False, "Siz ovoz berishni o'tkazib yuborgansiz."
-
-            user = (await session.execute(select(User).where(User.telegram_id == target_id))).scalar_one_or_none()
-            if user and user.vote_protection > 0:
-                user.vote_protection -= 1
-                self._add_game_log(
-                    session,
-                    game,
-                    "vote_blocked_by_protection",
-                    actor=voter,
-                    target=target,
-                    remaining_vote_protection=user.vote_protection,
-                )
-                await session.commit()
-                return False, "Bu o'yinchi ovoz berishdan himoyalangan."
 
             exists = (
                 await session.execute(
@@ -2357,6 +2619,8 @@ class GameEngine:
             ).scalar_one_or_none()
             if target is None:
                 return False, "Nomzod topilmadi yoki allaqachon o'lgan.", None
+            if voter_id == target_id:
+                return False, "O'zingiz uchun ovoz bera olmaysiz.", None
             skipped = (
                 await session.execute(
                     select(SkipDecision.id).where(
@@ -2566,50 +2830,76 @@ class GameEngine:
 
             if yes_confirm > no_confirm:
                 yes_votes = sum(1 for vote in votes if vote.target_telegram_id == target_id)
-                target.alive = False
-                target.death_day = game.day_number
-                self._add_game_log(
-                    session,
-                    game,
-                    "player_hanged",
-                    target=target,
-                    yes_confirm=yes_confirm,
-                    no_confirm=no_confirm,
-                    vote_count=yes_votes,
-                )
-                vote_text = (
-                    "<b>Ovoz berish natijalari:</b>\n"
-                    f"{yes_votes} 👍  |  {no_confirm} 👎\n\n"
-                    f"{self._tg_mention(target.telegram_id, target.display_name)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
-                    f"U edi {role_label(target.role)}.."
-                )
-                await session.commit()
-                await bot.send_message(chat_id, vote_text)
-
-                if Role(target.role) == Role.JESTER:
+                target_user = (
+                    await session.execute(select(User).where(User.telegram_id == target.telegram_id))
+                ).scalar_one_or_none()
+                if target_user is not None and target_user.use_vote_protection is not False and (target_user.vote_protection or 0) > 0:
+                    target_user.vote_protection -= 1
+                    self._add_game_log(
+                        session,
+                        game,
+                        "hang_blocked_by_vote_protection",
+                        target=target,
+                        remaining_vote_protection=target_user.vote_protection,
+                    )
+                    await session.commit()
                     await bot.send_message(
                         chat_id,
-                        f"🎭 Masxaraboz {self._tg_mention(target.telegram_id, target.display_name)} "
-                        "o'z xohishiga yetdi va alohida g'olib bo'ldi!"
+                        f"⚖️ {self._tg_mention(target.telegram_id, target.display_name)} o'z himoyasini ishlatdi. Osishni bekor qildi.",
                     )
-                    await self.finish_game(bot, game_id, Team.NEUTRAL)
-                    return
-
-                if Role(target.role) == Role.SORCERER:
-                    alive_now = await self._alive_players(session, game_id)
-                    if alive_now:
-                        victim = alive_now[0]
-                        victim.alive = False
-                        victim.death_day = game.day_number
-                        self._add_game_log(
-                            session,
-                            game,
-                            "sorcerer_revenge_after_hang",
-                            actor=target,
-                            target=victim,
+                    try:
+                        await bot.send_message(
+                            target.telegram_id,
+                            "⚖️ Ovoz himoyasi sizni osilishdan saqlab qoldi.",
+                            reply_markup=await self.group_return_keyboard(bot, chat_id),
                         )
-                        await session.commit()
-                        await bot.send_message(chat_id, f"🧞‍♂️ Afsungar bilan birga {victim.display_name} ham ketdi.")
+                    except TelegramForbiddenError:
+                        pass
+                else:
+                    target.alive = False
+                    target.death_day = game.day_number
+                    self._add_game_log(
+                        session,
+                        game,
+                        "player_hanged",
+                        target=target,
+                        yes_confirm=yes_confirm,
+                        no_confirm=no_confirm,
+                        vote_count=yes_votes,
+                    )
+                    vote_text = (
+                        "<b>Ovoz berish natijalari:</b>\n"
+                        f"{yes_votes} 👍  |  {no_confirm} 👎\n\n"
+                        f"{self._tg_mention(target.telegram_id, target.display_name)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
+                        f"U edi {role_label(target.role)}.."
+                    )
+                    await session.commit()
+                    await bot.send_message(chat_id, vote_text)
+
+                    if Role(target.role) == Role.JESTER:
+                        await bot.send_message(
+                            chat_id,
+                            f"🎭 Masxaraboz {self._tg_mention(target.telegram_id, target.display_name)} "
+                            "o'z xohishiga yetdi va alohida g'olib bo'ldi!"
+                        )
+                        await self.finish_game(bot, game_id, Team.NEUTRAL)
+                        return
+
+                    if Role(target.role) == Role.SORCERER:
+                        alive_now = await self._alive_players(session, game_id)
+                        if alive_now:
+                            victim = alive_now[0]
+                            victim.alive = False
+                            victim.death_day = game.day_number
+                            self._add_game_log(
+                                session,
+                                game,
+                                "sorcerer_revenge_after_hang",
+                                actor=target,
+                                target=victim,
+                            )
+                            await session.commit()
+                            await bot.send_message(chat_id, f"🧞‍♂️ Afsungar bilan birga {victim.display_name} ham ketdi.")
             else:
                 self._add_game_log(
                     session,
@@ -2641,17 +2931,16 @@ class GameEngine:
             if not alive:
                 return Team.CITY
 
-            roles = [Role(p.role) for p in alive]
             teams = [p.team for p in alive]
 
-            if len(alive) == 1 and Role(alive[0].role) == Role.KILLER:
+            if len(alive) == 1 and alive[0].team == Team.KILLER.value:
                 return Team.KILLER
-            if len(alive) == 1 and Role(alive[0].role) == Role.JESTER:
+            if len(alive) == 1 and alive[0].team == Team.NEUTRAL.value:
                 return Team.NEUTRAL
 
             mafia_count = sum(1 for t in teams if t == Team.MAFIA.value)
             city_count = sum(1 for t in teams if t == Team.CITY.value)
-            killer_count = sum(1 for r in roles if r == Role.KILLER)
+            killer_count = sum(1 for t in teams if t == Team.KILLER.value)
             non_mafia_count = len(alive) - mafia_count
 
             # Shaharga xavf soladigan asosiy kuchlar qolmasa, o'yin darhol yopiladi.
@@ -2698,9 +2987,9 @@ class GameEngine:
             for p in players:
                 is_winner = p.team == winner_team.value
                 if winner_team == Team.KILLER:
-                    is_winner = Role(p.role) == Role.KILLER and p.alive
+                    is_winner = p.team == Team.KILLER.value and p.alive
                 elif winner_team == Team.NEUTRAL:
-                    is_winner = Role(p.role) == Role.JESTER
+                    is_winner = p.team == Team.NEUTRAL.value and p.alive
                 p.won = is_winner
                 user = users.get(p.telegram_id)
                 if user:
@@ -2733,9 +3022,16 @@ class GameEngine:
                 duration_seconds = 0
 
         self._cleanup_jobs(game_id)
+        self._invalidate_game_cache(chat_id)
 
-        winner_lines = [f"{idx}. {p.display_name} - {role_label(p.role)}" for idx, p in enumerate(winners, 1)]
-        other_lines = [f"{idx}. {p.display_name} - {role_label(p.role)}" for idx, p in enumerate(losers, 1)]
+        winner_lines = [
+            f"{idx}. {self._tg_mention(p.telegram_id, p.display_name)} - {role_label(p.role)}"
+            for idx, p in enumerate(winners, 1)
+        ]
+        other_lines = [
+            f"{idx}. {self._tg_mention(p.telegram_id, p.display_name)} - {role_label(p.role)}"
+            for idx, p in enumerate([player for player in players if player.alive and player not in winners], 1)
+        ]
         winners_block = "\n".join(winner_lines) if winner_lines else "-"
         others_block = "\n".join(other_lines) if other_lines else "-"
 
@@ -2772,7 +3068,7 @@ class GameEngine:
                 await bot.send_message(
                     p.telegram_id,
                     body,
-                    reply_markup=profile_dashboard_keyboard(self.settings, is_admin=p.telegram_id in self.settings.admin_ids),
+                    reply_markup=profile_dashboard_keyboard(self.settings, user=user, is_admin=p.telegram_id in self.settings.admin_ids),
                 )
             except TelegramForbiddenError:
                 pass
@@ -2789,17 +3085,21 @@ class GameEngine:
 
     @staticmethod
     def format_user_dashboard(user: User) -> str:
+        def state(value: bool) -> str:
+            return "🟢 ON" if value is not False else "🔴 OFF"
+
+        display_name = GameEngine._tg_mention(user.telegram_id, user.display_name)
         return (
+            f"👤 Nik: {display_name}\n"
             f"⭐ ID: <code>{user.telegram_id}</code>\n\n"
-            "👤\n\n"
             f"💵 Dollar: <b>{user.dollar}</b>\n"
             f"💎 Olmos: <b>{user.diamonds}</b>\n\n"
-            f"🛡 Himoya: <b>{user.protection}</b>\n"
-            f"⛑ Qotildan himoya: <b>{user.killer_protection}</b>\n"
-            f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b>\n"
-            f"🔫 Miltiq: <b>{user.gun}</b>\n\n"
-            f"🎭 Maska: <b>{user.mask}</b>\n"
-            f"📁 Soxta hujjat: <b>{user.fake_document}</b>\n"
+            f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
+            f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
+            f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b> {state(user.use_vote_protection)}\n"
+            f"🔫 Miltiq: <b>{user.gun}</b> {state(user.use_gun)}\n\n"
+            f"🎭 Maska: <b>{user.mask}</b> {state(user.use_mask)}\n"
+            f"📁 Soxta hujjat: <b>{user.fake_document}</b> {state(user.use_fake_document)}\n"
             f"🃏 Keyingi o'yindagi rolingiz: <b>{user.next_game_role or '-'}</b>\n\n"
             f"🎯 Побед: <b>{user.wins}</b>\n"
             f"🎲 Всего игр: <b>{user.total_games}</b>"
@@ -2821,24 +3121,295 @@ class GameEngine:
             ).scalar_one_or_none()
             return player_id is not None
 
+    async def use_gun(self, bot: Bot, chat_id: int, shooter_id: int, target_id: int) -> tuple[bool, str]:
+        if shooter_id == target_id:
+            return False, "O'zingizga miltiq ishlata olmaysiz."
+
+        async with self.session_factory() as session:
+            game = await self.find_active_game(session, chat_id)
+            if game is None or game.status != GameStatus.ACTIVE.value:
+                return False, "Aktiv o'yin topilmadi."
+
+            shooter = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game.id,
+                        GamePlayer.telegram_id == shooter_id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            target = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game.id,
+                        GamePlayer.telegram_id == target_id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            user = (await session.execute(select(User).where(User.telegram_id == shooter_id))).scalar_one_or_none()
+            target_user = (await session.execute(select(User).where(User.telegram_id == target_id))).scalar_one_or_none()
+
+            if shooter is None:
+                return False, "Siz bu o'yinda tirik ishtirokchi emassiz."
+            if target is None:
+                return False, "Nishon topilmadi yoki allaqachon o'lgan."
+            if user is None or (user.gun or 0) <= 0:
+                return False, "Profilingizda miltiq yo'q. Do'kondan sotib oling."
+            if user.use_gun is False:
+                return False, "Profilingizda miltiq OFF holatda. Ishlatish uchun profil panelidan ON qiling."
+
+            user.gun -= 1
+            shooter.inactive_rounds = 0
+            blocked_by_protection = (
+                target_user is not None
+                and target_user.use_protection is not False
+                and (target_user.protection or 0) > 0
+            )
+            if blocked_by_protection:
+                target_user.protection -= 1
+                self._add_game_log(
+                    session,
+                    game,
+                    "gun_blocked_by_protection",
+                    actor=shooter,
+                    target=target,
+                    remaining_gun=user.gun,
+                    remaining_protection=target_user.protection,
+                )
+            else:
+                target.alive = False
+                target.death_day = game.day_number
+                self._add_game_log(
+                    session,
+                    game,
+                    "gun_used",
+                    actor=shooter,
+                    target=target,
+                    remaining_gun=user.gun,
+                )
+            target_name = self._tg_mention(target.telegram_id, target.display_name)
+            shooter_name = self._tg_mention(shooter.telegram_id, shooter.display_name)
+            game_id = game.id
+            await session.commit()
+
+        if blocked_by_protection:
+            await bot.send_message(
+                chat_id,
+                f"🔫 {shooter_name} miltiq ishlatdi.\n"
+                f"🛡 {target_name} o'z himoyasini ishlatdi. Miltiqdan omon qoldi.",
+            )
+            try:
+                await bot.send_message(
+                    target_id,
+                    "🛡 Himoya sizni miltiqdan saqlab qoldi.",
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+            return True, "Miltiq ishlatildi, lekin nishon himoyalangan ekan."
+
+        await bot.send_message(
+            chat_id,
+            f"🔫 Kimdir miltiqdan foydalandi.\n"
+            f"💀 {target_name} itdek otib tashlandi.\n"
+            f"U edi {role_label(target.role)}.",
+        )
+        winner = await self.check_winner(game_id)
+        if winner:
+            await self.finish_game(bot, game_id, winner)
+        return True, "Miltiq ishlatildi."
+
     async def active_game_for_chat(self, chat_id: int) -> Optional[Game]:
         async with self.session_factory() as session:
             return await self.find_active_game(session, chat_id)
 
     async def should_delete_message_for_non_player(self, chat_id: int, user_id: int) -> bool:
+        now = self._monotonic()
+        cached = self._active_participants_cache.get(chat_id)
+        if cached and cached[0] > now:
+            _, game_id, participant_ids = cached
+            if game_id is None:
+                return False
+            return user_id not in participant_ids
+
         async with self.session_factory() as session:
             game = await self.find_active_game(session, chat_id)
             if game is None or game.status != GameStatus.ACTIVE.value:
-                return False
-            participant = (
-                await session.execute(
-                    select(GamePlayer.id).where(
-                        GamePlayer.game_id == game.id,
-                        GamePlayer.telegram_id == user_id,
-                    )
+                self._prune_cache_if_needed(self._active_participants_cache)
+                self._active_participants_cache[chat_id] = (
+                    now + self._cache_ttl_seconds,
+                    None,
+                    frozenset(),
                 )
-            ).scalar_one_or_none()
-            return participant is None
+                return False
+            participant_ids = frozenset(
+                (
+                    await session.execute(
+                        select(GamePlayer.telegram_id).where(GamePlayer.game_id == game.id)
+                    )
+                ).scalars().all()
+            )
+
+        self._prune_cache_if_needed(self._active_participants_cache)
+        self._active_participants_cache[chat_id] = (
+            now + self._cache_ttl_seconds,
+            game.id,
+            participant_ids,
+        )
+        return user_id not in participant_ids
+
+    async def get_player_running_game(self, telegram_id: int) -> Optional[tuple[int, GamePlayer, str]]:
+        """Get the player's currently active game info and their player record.
+        Returns: (game_id, game_chat_id, player)
+        """
+        async with self.session_factory() as session:
+            result = (
+                await session.execute(
+                    select(Game, GamePlayer)
+                    .join(GamePlayer, GamePlayer.game_id == Game.id)
+                    .where(
+                        Game.status == GameStatus.ACTIVE.value,
+                        GamePlayer.telegram_id == telegram_id,
+                    )
+                    .order_by(Game.id.desc())
+                )
+            ).first()
+            if result is None:
+                return None
+            game, player = result
+            # Detach and return only necessary data
+            return (game.id, game.chat_id, player.telegram_id, player.role, player.display_name, player.alive)
+
+    async def can_send_private_team_message(self, telegram_id: int) -> bool:
+        game_result = await self.get_player_running_game(telegram_id)
+        if game_result is None:
+            return False
+        _, _, _, player_role, _, is_alive = game_result
+        if not is_alive:
+            return False
+        try:
+            role = Role(player_role)
+        except ValueError:
+            return False
+        return role in {
+            Role.DON,
+            Role.MAFIA,
+            Role.SPY,
+            Role.HIRED_KILLER,
+            Role.LAWYER,
+            Role.DOCTOR,
+            Role.COMMISSAR,
+            Role.SERGEANT,
+        }
+
+    async def send_team_message_to_group(
+        self,
+        bot: Bot,
+        telegram_id: int,
+        message_text: str,
+    ) -> tuple[bool, str]:
+        """Forward a private bot message only to the sender's alive teammates."""
+        game_result = await self.get_player_running_game(telegram_id)
+        if game_result is None:
+            return False, "Siz hozir aktiv o'yinda emas."
+        
+        game_id, chat_id, player_telegram_id, player_role, player_display_name, is_alive = game_result
+        
+        if not is_alive:
+            return False, "O'lgan o'yinchilar dastaga xabar yuborishi mumkin emas."
+        
+        # Determine team and get team members
+        team_members = []
+        team_title = ""
+        
+        role = Role(player_role)
+        
+        # Mafia team
+        if role in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER, Role.LAWYER}:
+            async with self.session_factory() as session:
+                team_members = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == game_id,
+                            GamePlayer.role.in_([
+                                Role.DON.value, Role.MAFIA.value, Role.SPY.value,
+                                Role.HIRED_KILLER.value, Role.LAWYER.value
+                            ]),
+                            GamePlayer.alive.is_(True),
+                        )
+                    )
+                ).scalars().all()
+            team_title = "🤵🏻 Mafia"
+        
+        # Doctors group
+        elif role == Role.DOCTOR:
+            async with self.session_factory() as session:
+                doctors = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == game_id,
+                            GamePlayer.role == Role.DOCTOR.value,
+                            GamePlayer.alive.is_(True),
+                        )
+                    )
+                ).scalars().all()
+            if len(doctors) > 1:
+                team_members = doctors
+                team_title = "👨🏼‍⚕️ Doktorlar"
+            else:
+                return False, "Sizning dastada boshqa a'zolar yo'q."
+        
+        # Commissar and Sergeants group
+        elif role in {Role.COMMISSAR, Role.SERGEANT}:
+            async with self.session_factory() as session:
+                team_members = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == game_id,
+                            GamePlayer.role.in_([Role.COMMISSAR.value, Role.SERGEANT.value]),
+                            GamePlayer.alive.is_(True),
+                        )
+                    )
+                ).scalars().all()
+            team_title = "🕵🏼 Komissar va Serjantlar"
+        
+        else:
+            return False, "Sizning roli dastaga xabar yuborish huquqiga ega emas."
+        
+        recipients = [member for member in team_members if member.telegram_id != telegram_id]
+        if not recipients:
+            return False, "Sizning dastada boshqa tirik a'zo yo'q."
+        
+        safe_message = escape(message_text.strip()[:500])
+        sender_name = self._tg_mention(player_telegram_id, player_display_name)
+        private_message = (
+            f"<b>{team_title}</b> - {role_label(role)}\n"
+            f"{sender_name}: {safe_message}"
+        )
+
+        sent = 0
+        failed = 0
+        for member in recipients:
+            try:
+                await bot.send_message(
+                    member.telegram_id,
+                    private_message,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+                sent += 1
+            except TelegramForbiddenError:
+                failed += 1
+            except Exception as e:
+                failed += 1
+                logger.exception("Failed to send private team message: %s", e)
+
+        if sent == 0:
+            return False, "Sheriklaringiz bot private chatini ochmagan."
+        if failed:
+            return True, f"Xabar {sent} ta sherikka yuborildi. {failed} tasiga yuborilmadi."
+        return True, f"Xabar {sent} ta sherikka yuborildi."
 
     async def cleanup_stale_games_on_startup(self) -> None:
         async with self.session_factory() as session:
@@ -2862,12 +3433,12 @@ class GameEngine:
                     select(Game).where(
                         Game.status == GameStatus.REGISTRATION.value,
                         Game.registration_ends_at.is_not(None),
+                        Game.registration_ends_at <= now,
                     )
                 )
             ).scalars().all()
         for game in games:
-            if game.registration_ends_at and self._ensure_utc(game.registration_ends_at) <= now:
-                await self.close_registration(bot, game.id)
+            await self.close_registration(bot, game.id)
 
     async def is_admin_or_creator(self, bot: Bot, chat_id: int, user_id: int, game_creator_id: Optional[int] = None) -> bool:
         if game_creator_id and user_id == game_creator_id:
@@ -2900,6 +3471,60 @@ class GameEngine:
             receiver.diamonds += amount
             await session.commit()
             return True, "ok"
+
+    @staticmethod
+    def normalize_admin_username(raw: str) -> str:
+        username = (raw or "").strip()
+        username = username.removeprefix("https://t.me/").removeprefix("http://t.me/").removeprefix("t.me/")
+        username = username.strip().lstrip("@").split("/", maxsplit=1)[0].strip()
+        return username
+
+    async def get_purchase_admin_username(self) -> str:
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == "purchase_admin_username"))
+            ).scalar_one_or_none()
+            username = self.normalize_admin_username(setting.value if setting else self.settings.admin_username)
+            return username or self.normalize_admin_username(self.settings.admin_username)
+
+    async def set_purchase_admin_username(self, username: str) -> tuple[bool, str]:
+        username = self.normalize_admin_username(username)
+        if not username or len(username) < 5:
+            return False, "Username noto'g'ri. Masalan: @username"
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == "purchase_admin_username"))
+            ).scalar_one_or_none()
+            if setting is None:
+                setting = BotSetting(key="purchase_admin_username", value=username)
+                session.add(setting)
+            else:
+                setting.value = username
+            await session.commit()
+        return True, f"✅ Xarid admini yangilandi: @{username}"
+
+    async def exchange_diamonds_to_dollars(self, telegram_id: int, diamonds: Union[int, str]) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None:
+                return False, "Avval /start bosing."
+
+            if diamonds == "all":
+                amount = int(user.diamonds or 0)
+            else:
+                amount = int(diamonds)
+
+            if amount <= 0:
+                return False, "Almashtirish uchun kamida 💎 1 almaz kerak."
+            if (user.diamonds or 0) < amount:
+                return False, f"Balans yetarli emas. Kerak: 💎 {amount}"
+
+            dollars = amount * 500
+            user.diamonds -= amount
+            user.dollar += dollars
+            await session.commit()
+
+        return True, f"✅ 💎 {amount} almaz → 💵 {dollars} dollar almashtirildi."
 
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
         prices: dict[str, tuple[int, str, Union[int, str]]] = {
@@ -3036,20 +3661,115 @@ class GameEngine:
 
     async def premium_groups(self, include_inactive: bool = False) -> list[PremiumGroup]:
         async with self.session_factory() as session:
-            stmt = select(PremiumGroup).order_by(PremiumGroup.id.desc())
+            stmt = select(PremiumGroup).order_by(PremiumGroup.total_diamonds.desc(), PremiumGroup.id.desc())
             if not include_inactive:
-                stmt = stmt.where(PremiumGroup.is_active.is_(True))
+                stmt = stmt.where(
+                    PremiumGroup.is_active.is_(True),
+                    PremiumGroup.total_diamonds > 0,
+                )
             return (await session.execute(stmt)).scalars().all()
 
     async def premium_groups_text(self, include_inactive: bool = False) -> str:
         groups = await self.premium_groups(include_inactive=include_inactive)
         if not groups:
-            return "🎲 <b>Premium guruhlar</b>\n\nHozircha premium guruh qo'shilmagan."
-        lines = ["🎲 <b>Premium guruhlar</b>\n"]
-        for idx, group in enumerate(groups, 1):
-            status = "active" if group.is_active else "inactive"
-            lines.append(f"{idx}. <b>{group.title}</b> - 💎 {group.diamond_price} ({status})")
-        return "\n".join(lines)
+            return (
+                "🎲 <b>Premium guruhlar</b>\n\n"
+                "Hozircha guruhlar 💎 almaz yubormagan.\n"
+                "Guruhda <code>/gsend miqdor</code> yozib reytingga chiqish mumkin."
+            )
+        return "🎲 <b>Premium guruhlar</b>\n\nKerakli guruhni tanlang:"
+
+    async def contribute_premium_group(
+        self,
+        bot: Bot,
+        chat_id: int,
+        chat_title: str,
+        tg_user: TgUser,
+        diamonds: int,
+    ) -> tuple[bool, str]:
+        if diamonds <= 0:
+            return False, "Miqdor musbat bo'lishi kerak. Masalan: /gsend 10"
+
+        user = await self.ensure_user(tg_user)
+        invite_link = await self.group_return_url(bot, chat_id)
+        async with self.session_factory() as session:
+            fresh_user = (
+                await session.execute(select(User).where(User.telegram_id == user.telegram_id))
+            ).scalar_one_or_none()
+            if fresh_user is None:
+                return False, "Avval /start bosing."
+            if (fresh_user.diamonds or 0) < diamonds:
+                return False, f"Balans yetarli emas. Kerak: 💎 {diamonds}"
+
+            group = (
+                await session.execute(
+                    select(PremiumGroup).where(PremiumGroup.group_chat_id == chat_id)
+                )
+            ).scalar_one_or_none()
+            if group is None:
+                group = PremiumGroup(
+                    title=(chat_title or "Group")[:255],
+                    invite_link=invite_link,
+                    diamond_price=0,
+                    total_diamonds=0,
+                    group_chat_id=chat_id,
+                    created_by=tg_user.id,
+                    is_active=True,
+                )
+                session.add(group)
+                await session.flush()
+            else:
+                group.title = (chat_title or group.title or "Group")[:255]
+                group.invite_link = invite_link
+                group.is_active = True
+
+            contribution = (
+                await session.execute(
+                    select(PremiumGroupContribution).where(
+                        PremiumGroupContribution.premium_group_id == group.id,
+                        PremiumGroupContribution.user_telegram_id == tg_user.id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if contribution is None:
+                contribution = PremiumGroupContribution(
+                    premium_group_id=group.id,
+                    user_telegram_id=tg_user.id,
+                    user_name=fresh_user.display_name,
+                    diamonds=0,
+                )
+                session.add(contribution)
+
+            fresh_user.diamonds -= diamonds
+            group.total_diamonds = int(group.total_diamonds or 0) + diamonds
+            group.diamond_price = group.total_diamonds
+            contribution.user_name = fresh_user.display_name
+            contribution.diamonds = int(contribution.diamonds or 0) + diamonds
+
+            top = (
+                await session.execute(
+                    select(PremiumGroupContribution).where(
+                        PremiumGroupContribution.premium_group_id == group.id
+                    )
+                )
+            ).scalars().all()
+            top_contributor = max(top, key=lambda item: item.diamonds, default=contribution)
+            if contribution.diamonds >= top_contributor.diamonds:
+                top_contributor = contribution
+            group.top_sender_telegram_id = top_contributor.user_telegram_id
+            group.top_sender_name = top_contributor.user_name
+            group.top_sender_diamonds = top_contributor.diamonds
+
+            await session.commit()
+            total = group.total_diamonds
+            user_total = contribution.diamonds
+
+        return (
+            True,
+            f"✅ {self._tg_mention(tg_user.id, user.display_name)} guruh reytingi uchun 💎 {diamonds} almaz yubordi.\n"
+            f"🎲 Guruh jami: 💎 {total}\n"
+            f"👤 Siz yuborgan jami: 💎 {user_total}",
+        )
 
     async def buy_premium_group(self, telegram_id: int, premium_group_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
@@ -3157,7 +3877,7 @@ class GameEngine:
             if field == "registration_timeout":
                 group.registration_timeout = max(10, int(value))
             elif field == "min_players":
-                group.min_players = max(4, min(int(value), 35))
+                group.min_players = max(4, min(int(value), 30))
             elif field == "role_preset":
                 preset = str(value)
                 if preset in {"black23", "extended35"}:
@@ -3170,6 +3890,5 @@ class GameEngine:
             "🎭 <b>Role settings</b>\n\n"
             f"Joriy preset: <b>{role_preset_label(preset)}</b>\n"
             f"Maksimal tavsiya qilingan o'yinchi: <b>{role_preset_max_players(preset)}</b>\n\n"
-            "<b>Black 23</b> - saytdagi ochiq ma'lumotga mos premium uslub: 23 o'yinchigacha role boshqaruvi.\n"
-            "<b>Extended 35</b> - siz so'ragan katta o'yinlar uchun kengaytirilgan variant."
+            "<b>Universal 30</b> - 4 dan 30 tagacha o'yinchi uchun siz bergan role jadvali bo'yicha taqsimlaydi."
         )

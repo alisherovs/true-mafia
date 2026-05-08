@@ -57,6 +57,14 @@ class Role(str, Enum):
     KILLER = "killer"
     WOLF = "wolf"
     JESTER = "jester"
+    LUCKY = "lucky"
+    ARSONIST = "arsonist"
+    JOURNALIST = "journalist"
+    SNITCH = "snitch"
+    MAYOR = "mayor"
+    CROOK = "crook"
+    HIRED_KILLER = "hired_killer"
+    MAQ = "maq"
 
 
 class ActionType(str, Enum):

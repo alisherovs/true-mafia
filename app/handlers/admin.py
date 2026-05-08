@@ -103,6 +103,24 @@ async def owner_premium_list_callback(callback: CallbackQuery, engine: GameEngin
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:purchase_admin")
+async def owner_purchase_admin_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    current = await engine.get_purchase_admin_username()
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "purchase_admin_username"
+    if callback.message:
+        await callback.message.edit_text(
+            "👤 <b>Xarid admini</b>\n\n"
+            f"Joriy admin: @{current}\n\n"
+            "Almaz xaridida <b>Admin orqali</b> tugmasi ochadigan username yuboring.\n"
+            "Masalan: <code>@username</code>",
+            reply_markup=owner_wait_keyboard(),
+        )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:broadcast_users")
 async def owner_broadcast_users_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -163,6 +181,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🧾 <b>Admin panel yordam</b>\n\n"
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
+            "👤 Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📣 Userlarga reklama - keyingi oddiy xabarni userlarga tarqatadi.\n"
             "🏘 Guruhlarga reklama - keyingi oddiy xabarni guruhlarga tarqatadi.\n"
             "🎁 Kredit berish - user balansiga dollar/olmos qo'shadi.\n\n"
@@ -249,6 +268,15 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         )
         return True
 
+    if action == "purchase_admin_username":
+        ok, text = await engine.set_purchase_admin_username(message.text or "")
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "purchase_admin_username"
+            await message.answer(text, reply_markup=owner_wait_keyboard())
+            return True
+        await message.answer(text, reply_markup=owner_panel_keyboard())
+        return True
+
     if action in {"broadcast_users", "broadcast_groups"}:
         target = "users" if action == "broadcast_users" else "groups"
         label = "userlarga" if target == "users" else "guruhlarga"
@@ -292,10 +320,23 @@ async def enforce_active_game_chat(message: Message, engine: GameEngine, setting
             )
             if handled:
                 await message.answer("So'nggi xabaringiz guruhga yuborildi.")
+                return
+            if await engine.can_send_private_team_message(message.from_user.id):
+                ok, text = await engine.send_team_message_to_group(
+                    bot=message.bot,
+                    telegram_id=message.from_user.id,
+                    message_text=message.text,
+                )
+                if ok:
+                    await message.answer("✅ " + text)
+                elif "aktiv o'yinda" not in text:
+                    await message.answer(text)
         return
     if message.from_user is None or message.from_user.is_bot:
         return
     if message.text and message.text.startswith("/"):
+        return
+    if message.text and message.text.lstrip().startswith("!"):
         return
 
     should_delete = await engine.should_delete_message_for_non_player(
