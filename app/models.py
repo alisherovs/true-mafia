@@ -25,6 +25,7 @@ class User(Base):
     protection: Mapped[int] = mapped_column(Integer, default=0)
     killer_protection: Mapped[int] = mapped_column(Integer, default=0)
     vote_protection: Mapped[int] = mapped_column(Integer, default=0)
+    miner_protection: Mapped[int] = mapped_column(Integer, default=0)
     gun: Mapped[int] = mapped_column(Integer, default=0)
     mask: Mapped[int] = mapped_column(Integer, default=0)
     fake_document: Mapped[int] = mapped_column(Integer, default=0)
@@ -32,6 +33,7 @@ class User(Base):
     use_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_killer_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_vote_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_miner_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_gun: Mapped[bool] = mapped_column(Boolean, default=True)
     use_mask: Mapped[bool] = mapped_column(Boolean, default=True)
     use_fake_document: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -250,6 +252,18 @@ class PremiumGroupContribution(Base):
     user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     user_name: Mapped[str] = mapped_column(String(255))
     diamonds: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PremiumBlockedUser(Base):
+    __tablename__ = "premium_blocked_users"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="User")
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    blocked_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

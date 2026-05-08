@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
 
@@ -11,6 +12,16 @@ from app.keyboards import language_keyboard, premium_groups_keyboard, profile_da
 from app.texts import t
 
 router = Router()
+
+
+async def _safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    if callback.message is None:
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
 
 
 @router.message(CommandStart())
@@ -135,8 +146,7 @@ async def premium_info(callback: CallbackQuery, engine: GameEngine) -> None:
         return
     groups = await engine.premium_groups()
     text = await engine.premium_groups_text()
-    if callback.message:
-        await callback.message.edit_text(text, reply_markup=premium_groups_keyboard(groups))
+    await _safe_edit(callback, text, reply_markup=premium_groups_keyboard(groups))
     await callback.answer()
 
 

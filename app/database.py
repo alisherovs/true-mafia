@@ -72,6 +72,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "protection": "INTEGER DEFAULT 0",
             "killer_protection": "INTEGER DEFAULT 0",
             "vote_protection": "INTEGER DEFAULT 0",
+            "miner_protection": "INTEGER DEFAULT 0",
             "gun": "INTEGER DEFAULT 0",
             "mask": "INTEGER DEFAULT 0",
             "fake_document": "INTEGER DEFAULT 0",
@@ -79,6 +80,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "use_protection": "BOOLEAN DEFAULT TRUE",
             "use_killer_protection": "BOOLEAN DEFAULT TRUE",
             "use_vote_protection": "BOOLEAN DEFAULT TRUE",
+            "use_miner_protection": "BOOLEAN DEFAULT TRUE",
             "use_gun": "BOOLEAN DEFAULT TRUE",
             "use_mask": "BOOLEAN DEFAULT TRUE",
             "use_fake_document": "BOOLEAN DEFAULT TRUE",
@@ -206,6 +208,12 @@ async def _ensure_lightweight_columns(conn) -> None:
         text(
             "CREATE INDEX IF NOT EXISTS ix_premium_group_contributions_group_amount "
             "ON premium_group_contributions(premium_group_id, diamonds)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_premium_blocked_users_created_at "
+            "ON premium_blocked_users(created_at)"
         )
     )
 

@@ -65,6 +65,7 @@ class Role(str, Enum):
     CROOK = "crook"
     HIRED_KILLER = "hired_killer"
     MAQ = "maq"
+    MINER = "miner"
 
 
 class ActionType(str, Enum):
@@ -78,6 +79,8 @@ class ActionType(str, Enum):
     WATCH = "watch"
     VISIT = "visit"
     REVENGE_PICK = "revenge_pick"
+    MINE = "mine"
+    MINE_PROTECT = "mine_protect"
     SKIP = "skip"
 
 

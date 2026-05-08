@@ -5,6 +5,7 @@ import json
 import logging
 import asyncio
 import unicodedata
+import random
 from html import escape
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -29,6 +30,7 @@ from app.keyboards import (
     group_url_from_chat_id,
     judge_cancel_keyboard,
     lobby_keyboard,
+    miner_keyboard,
     profile_dashboard_keyboard,
     target_keyboard,
     vote_keyboard,
@@ -43,6 +45,7 @@ from app.models import (
     NightAction,
     NightPrompt,
     PremiumGroup,
+    PremiumBlockedUser,
     PremiumGroupContribution,
     SkipDecision,
     User,
@@ -190,6 +193,8 @@ class GameEngine:
             return f"{base} Komissar Katani o'qidan halok bo'ldi..."
         if cause == "sorcerer":
             return f"{base} Afsungar qasosi bilan o'ldirildi..."
+        if cause == "miner":
+            return f"{base} o'lim koniga qulab tushdi..."
         return f"{base} vaxshiylarcha o'ldirildi..."
 
     def _death_story_line(
@@ -210,6 +215,8 @@ class GameEngine:
             visitor = "🕵🏼 Komissar Katani"
         elif cause == "sorcerer":
             visitor = "🧙‍ Sehrgar qasosi"
+        elif cause == "miner":
+            visitor = "👷 o'lim koni"
         else:
             visitor = "noma'lum mehmon"
         return f"Tunda {role} {name} vaxshiylarcha o'ldirildi. Aytishlaricha unikiga {visitor} kelgan."
@@ -321,6 +328,10 @@ class GameEngine:
             return "🧙🏼 Daydi kimnikigadir ichkilik butilka olish uchun ketdi..."
         if role == Role.CROOK:
             return "🤹🏻 Aferist o'ljasini tanladi."
+        if role == Role.MINER:
+            if action_key == "mine_protect":
+                return "👷 Konchi o'zini himoyalashga qaror qildi..."
+            return "👷 Konchi konlardan biriga yo'l oldi..."
         return None
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
@@ -1101,6 +1112,7 @@ class GameEngine:
         night_number: int,
         player: GamePlayer,
         alive_players: list[GamePlayer],
+        miner_visits: Optional[dict[int, set[int]]] = None,
     ) -> Optional[tuple[str, object]]:
         role = Role(player.role)
         all_choices = [(p.telegram_id, p.display_name) for p in alive_players]
@@ -1143,6 +1155,9 @@ class GameEngine:
             return "👩🏼‍💻 Kimdan intervyu olasiz?", target_keyboard("watch", game_id, player.telegram_id, targets)
         if role == Role.CROOK:
             return "🤹🏻 Kimni chalg'itasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
+        if role == Role.MINER:
+            visited = miner_visits.get(player.telegram_id, set()) if miner_visits else set()
+            return "Qaysi konga borasiz?", miner_keyboard(game_id, player.telegram_id, visited)
         return None
 
     async def send_private_role_menu(self, bot: Bot, game_id: int, telegram_id: int) -> tuple[bool, str]:
@@ -1363,9 +1378,22 @@ class GameEngine:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one()
             night = game.night_number
             alive = await self._alive_players(session, game_id)
+            mine_rows = (
+                await session.execute(
+                    select(NightAction.actor_telegram_id, NightAction.target_telegram_id).where(
+                        NightAction.game_id == game_id,
+                        NightAction.action_type == ActionType.MINE.value,
+                        NightAction.target_telegram_id.is_not(None),
+                    )
+                )
+            ).all()
+            miner_visits: dict[int, set[int]] = defaultdict(set)
+            for actor_id, mine_number in mine_rows:
+                if mine_number is not None:
+                    miner_visits[actor_id].add(mine_number)
 
         for player in alive:
-            prompt = self._night_prompt_for_player(game_id, night, player, alive)
+            prompt = self._night_prompt_for_player(game_id, night, player, alive, miner_visits)
             if prompt is None:
                 continue
             text, keyboard = prompt
@@ -1402,6 +1430,8 @@ class GameEngine:
             "killer": ActionType.KILL,
             "visit": ActionType.VISIT,
             "revenge": ActionType.REVENGE_PICK,
+            "mine": ActionType.MINE,
+            "mine_protect": ActionType.MINE_PROTECT,
         }
         action_type = action_map.get(action_key)
         if action_type is None:
@@ -1446,10 +1476,26 @@ class GameEngine:
                 Role.KILLER: {"killer"},
                 Role.BUM: {"visit"},
                 Role.SORCERER: {"revenge"},
+                Role.MINER: {"mine", "mine_protect"},
             }
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
                 return False, "Bu amal sizning rolingiz uchun mavjud emas."
+            if action_type == ActionType.MINE and not 1 <= target_id <= 10:
+                return False, "Kon noto'g'ri."
+            if action_type == ActionType.MINE:
+                already_visited_mine = (
+                    await session.execute(
+                        select(NightAction.id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.actor_telegram_id == actor_id,
+                            NightAction.action_type == ActionType.MINE.value,
+                            NightAction.target_telegram_id == target_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if already_visited_mine is not None:
+                    return False, "Bu konga oldin tashrif buyurgansiz. Boshqa kon tanlang."
             if action_type == ActionType.HEAL and target_id == actor_id and actor.self_heal_used:
                 return False, "Siz o'zingizni yana davolay olmaysiz."
 
@@ -1467,16 +1513,19 @@ class GameEngine:
                 if already_healed_target is not None:
                     return False, "Kimni davolaymiz?"
 
-            target = (
-                await session.execute(
-                    select(GamePlayer).where(
-                        GamePlayer.game_id == game_id,
-                        GamePlayer.telegram_id == target_id,
+            if action_type in {ActionType.MINE, ActionType.MINE_PROTECT}:
+                target = actor
+            else:
+                target = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == game_id,
+                            GamePlayer.telegram_id == target_id,
+                        )
                     )
-                )
-            ).scalar_one_or_none()
-            if target is None or not target.alive:
-                return False, "Nishon noto'g'ri."
+                ).scalar_one_or_none()
+                if target is None or not target.alive:
+                    return False, "Nishon noto'g'ri."
             if action_key == "kill" and actor.team == Team.MAFIA.value and target.team == Team.MAFIA.value:
                 return False, "Mafiya o'z sherigiga zarar yetkaza olmaydi."
             if actor_role == Role.MISTRESS and Role(target.role) == Role.COMMISSAR:
@@ -1487,6 +1536,10 @@ class GameEngine:
                 success_text = f"Siz {target.display_name}ni o'yindan chetlatishni tanladingiz."
             elif action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
                 success_text = f"Siz - {target.display_name} ni tanladingiz. Don qaror qilmasa, tanlovingiz ishlaydi."
+            elif action_type == ActionType.MINE:
+                success_text = f"Siz {target_id:02d}-konni tanladingiz."
+            elif action_type == ActionType.MINE_PROTECT:
+                success_text = "Siz himoyalanishni tanladingiz."
             else:
                 success_text = f"Siz - {target.display_name} ni tanladingiz."
             group_activity_line = self._night_activity_line(actor_role, action_key)
@@ -1508,7 +1561,7 @@ class GameEngine:
                     game_id=game_id,
                     night_number=game.night_number,
                     actor_telegram_id=actor_id,
-                    target_telegram_id=target_id,
+                    target_telegram_id=target_id if action_type != ActionType.MINE_PROTECT else None,
                     action_type=action_type.value,
                     details=action_key,
                 )
@@ -1790,11 +1843,13 @@ class GameEngine:
                     watched[act.actor_telegram_id] = act.target_telegram_id
                 elif act.action_type == ActionType.VISIT.value and act.target_telegram_id:
                     visited[act.actor_telegram_id] = act.target_telegram_id
+                elif act.action_type == ActionType.MINE_PROTECT.value:
+                    guarded.add(act.actor_telegram_id)
 
                 if (
                     act.target_telegram_id
                     and act.actor_telegram_id != act.target_telegram_id
-                    and act.action_type != ActionType.WATCH.value
+                    and act.action_type not in {ActionType.WATCH.value, ActionType.MINE.value}
                 ):
                     visitors_by_target[act.target_telegram_id].append(act.actor_telegram_id)
 
@@ -1803,6 +1858,8 @@ class GameEngine:
             killer_kills = []
             commissar_shots = []
             checks = []
+            mine_actions: list[tuple[int, int]] = []
+            miner_protectors: set[int] = set()
             night_activity_lines: list[str] = []
 
             for act in actions:
@@ -1826,6 +1883,10 @@ class GameEngine:
                     commissar_shots.append(target_id)
                 elif act.action_type == ActionType.CHECK.value and role == Role.COMMISSAR:
                     checks.append((act.actor_telegram_id, target_id))
+                elif act.action_type == ActionType.MINE.value and role == Role.MINER:
+                    mine_actions.append((act.actor_telegram_id, target_id))
+                elif act.action_type == ActionType.MINE_PROTECT.value and role == Role.MINER:
+                    miner_protectors.add(act.actor_telegram_id)
 
             dead: set[int] = set()
             death_causes: dict[int, str] = {}
@@ -1836,6 +1897,51 @@ class GameEngine:
             protected_notices: list[tuple[int, str]] = []
             protected_group_lines: list[str] = []
             last_words_prompts: list[tuple[int, str]] = []
+            miner_result_notices: list[tuple[int, str]] = []
+
+            if mine_actions or miner_protectors:
+                miner_users = {
+                    user.telegram_id: user
+                    for user in (
+                        await session.execute(
+                            select(User).where(
+                                User.telegram_id.in_(
+                                    [actor_id for actor_id, _ in mine_actions] + list(miner_protectors)
+                                )
+                            )
+                        )
+                    ).scalars().all()
+                }
+                for actor_id in miner_protectors:
+                    miner_result_notices.append((actor_id, "⚜️ Siz bu tunda himoyalandingiz va konga bormadingiz."))
+                for actor_id, mine_number in mine_actions:
+                    miner = player_map.get(actor_id)
+                    if miner is None or not miner.alive:
+                        continue
+                    layout = ["death"] * 3 + ["diamond"] * 2 + ["dollar"] * 5
+                    rng = random.Random(f"{game_id}:{night}:{actor_id}")
+                    rng.shuffle(layout)
+                    result = layout[mine_number - 1]
+                    user = miner_users.get(actor_id)
+                    if result == "diamond":
+                        if user:
+                            user.diamonds += 1
+                        miner_result_notices.append((actor_id, f"👷 {mine_number:02d}-kondan 💎 1 almaz topdingiz."))
+                    elif result == "dollar":
+                        if user:
+                            user.dollar += 50
+                        miner_result_notices.append((actor_id, f"👷 {mine_number:02d}-kondan 💵 50 dollar topdingiz."))
+                    elif user and user.use_miner_protection is not False and (user.miner_protection or 0) > 0:
+                        user.miner_protection -= 1
+                        miner_result_notices.append(
+                            (actor_id, f"👷 {mine_number:02d}-o'lim koniga tushdingiz, lekin Konchi himoyasi sizni qutqardi.")
+                        )
+                        protected_group_lines.append("👷 Kimdir Konchi himoyasini ishlatdi.")
+                    else:
+                        dead.add(actor_id)
+                        death_causes[actor_id] = "miner"
+                        death_visitors[actor_id] = role_label(Role.MINER)
+                        miner_result_notices.append((actor_id, f"👷 {mine_number:02d}-o'lim koniga tushdingiz."))
 
             active_mafia_roles = {Role.DON} if don_kills else {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
             active_mafia_kills = don_kills if don_kills else mafia_fallback_kills
@@ -2085,6 +2191,16 @@ class GameEngine:
                 pass
 
         for telegram_id, text in protected_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in miner_result_notices:
             try:
                 await bot.send_message(
                     telegram_id,
@@ -2990,6 +3106,8 @@ class GameEngine:
                     is_winner = p.team == Team.KILLER.value and p.alive
                 elif winner_team == Team.NEUTRAL:
                     is_winner = p.team == Team.NEUTRAL.value and p.alive
+                if p.role == Role.MINER.value and p.alive:
+                    is_winner = True
                 p.won = is_winner
                 user = users.get(p.telegram_id)
                 if user:
@@ -3097,6 +3215,7 @@ class GameEngine:
             f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
             f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
             f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b> {state(user.use_vote_protection)}\n"
+            f"👷 Konchi himoyasi: <b>{user.miner_protection}</b> {state(user.use_miner_protection)}\n"
             f"🔫 Miltiq: <b>{user.gun}</b> {state(user.use_gun)}\n\n"
             f"🎭 Maska: <b>{user.mask}</b> {state(user.use_mask)}\n"
             f"📁 Soxta hujjat: <b>{user.fake_document}</b> {state(user.use_fake_document)}\n"
@@ -3531,6 +3650,7 @@ class GameEngine:
             "protection": (120, "protection", 1),
             "killer_protection": (100, "killer_protection", 1),
             "vote_protection": (80, "vote_protection", 1),
+            "miner_protection": (90, "miner_protection", 1),
             "gun": (150, "gun", 1),
             "mask": (70, "mask", 1),
             "fake_document": (70, "fake_document", 1),
@@ -3679,6 +3799,129 @@ class GameEngine:
             )
         return "🎲 <b>Premium guruhlar</b>\n\nKerakli guruhni tanlang:"
 
+    async def owner_premium_groups_manage_text(self) -> str:
+        groups = await self.premium_groups(include_inactive=True)
+        if not groups:
+            return "🎲 <b>Premium guruhlar boshqaruvi</b>\n\nHozircha ro'yxatda guruh yo'q."
+        lines = ["🎲 <b>Premium guruhlar boshqaruvi</b>", "", "Bankrot qilish uchun guruh tugmasini bosing:", ""]
+        for group in groups:
+            status = "aktiv" if group.is_active and (group.total_diamonds or 0) > 0 else "bankrot"
+            lines.append(f"<b>{group.title}</b> | 💎 {group.total_diamonds or 0} | {status}")
+        return "\n".join(lines)
+
+    async def premium_blocked_users_text(self) -> str:
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(PremiumBlockedUser).order_by(PremiumBlockedUser.created_at.desc()).limit(50)
+                )
+            ).scalars().all()
+        if not rows:
+            return "🚷 <b>Bloklangan userlar</b>\n\nHozircha bloklangan user yo'q."
+        lines = ["🚷 <b>Bloklangan userlar</b>\n"]
+        for idx, row in enumerate(rows, 1):
+            reason = f" | {escape(row.reason)}" if row.reason else ""
+            lines.append(f"{idx}. {self._tg_mention(row.telegram_id, row.display_name)} - <code>{row.telegram_id}</code>{reason}")
+        return "\n".join(lines)
+
+    async def bankrupt_premium_group(self, raw_group_id: str) -> tuple[bool, str]:
+        raw_group_id = raw_group_id.strip()
+        if not raw_group_id.isdigit():
+            return False, "Guruh ID raqam bo'lishi kerak. Ro'yxatdan IDni yuboring."
+        group_id = int(raw_group_id)
+        async with self.session_factory() as session:
+            group = (
+                await session.execute(select(PremiumGroup).where(PremiumGroup.id == group_id))
+            ).scalar_one_or_none()
+            if group is None:
+                return False, "Bunday premium guruh topilmadi."
+            title = group.title
+            group.total_diamonds = 0
+            group.diamond_price = 0
+            group.top_sender_telegram_id = None
+            group.top_sender_name = None
+            group.top_sender_diamonds = 0
+            group.is_active = False
+            contributions = (
+                await session.execute(
+                    select(PremiumGroupContribution).where(PremiumGroupContribution.premium_group_id == group.id)
+                )
+            ).scalars().all()
+            for contribution in contributions:
+                await session.delete(contribution)
+            await session.commit()
+        return True, f"🧨 <b>{escape(title)}</b> bankrot qilindi va premium ro'yxatdan olib tashlandi."
+
+    async def _find_user_by_identifier(self, session: AsyncSession, raw_identifier: str) -> Optional[User]:
+        identifier = raw_identifier.strip()
+        if not identifier:
+            return None
+        if identifier.lstrip("-").isdigit():
+            return (
+                await session.execute(select(User).where(User.telegram_id == int(identifier)))
+            ).scalar_one_or_none()
+        username = self.normalize_admin_username(identifier).lower()
+        if not username:
+            return None
+        users = (
+            await session.execute(select(User).where(User.username.is_not(None)))
+        ).scalars().all()
+        return next((user for user in users if (user.username or "").lower().lstrip("@") == username), None)
+
+    async def block_premium_user(self, raw: str, blocked_by: int) -> tuple[bool, str]:
+        parts = raw.strip().split(maxsplit=1)
+        if not parts:
+            return False, "User ID yoki username yuboring. Masalan: <code>@username reklama</code>"
+        reason = parts[1].strip() if len(parts) > 1 else None
+        async with self.session_factory() as session:
+            user = await self._find_user_by_identifier(session, parts[0])
+            if user is None:
+                return False, "User topilmadi. U avval botda /start qilgan bo'lishi kerak."
+            telegram_id = user.telegram_id
+            display_name = user.display_name
+            row = (
+                await session.execute(select(PremiumBlockedUser).where(PremiumBlockedUser.telegram_id == telegram_id))
+            ).scalar_one_or_none()
+            if row is None:
+                row = PremiumBlockedUser(
+                    telegram_id=telegram_id,
+                    display_name=display_name,
+                    reason=reason,
+                    blocked_by=blocked_by,
+                )
+                session.add(row)
+            else:
+                row.display_name = display_name
+                row.reason = reason
+                row.blocked_by = blocked_by
+            await session.commit()
+        return True, f"🚫 User bloklandi: {self._tg_mention(telegram_id, display_name)}"
+
+    async def unblock_premium_user(self, raw: str) -> tuple[bool, str]:
+        raw = raw.strip().split(maxsplit=1)[0] if raw.strip() else ""
+        if not raw:
+            return False, "Blokdan chiqarish uchun user ID yoki username yuboring."
+        async with self.session_factory() as session:
+            user = await self._find_user_by_identifier(session, raw)
+            telegram_id = user.telegram_id if user else int(raw) if raw.lstrip("-").isdigit() else None
+            if telegram_id is None:
+                return False, "User topilmadi. ID yoki username'ni tekshiring."
+            row = (
+                await session.execute(select(PremiumBlockedUser).where(PremiumBlockedUser.telegram_id == telegram_id))
+            ).scalar_one_or_none()
+            if row is None:
+                return False, "Bu user bloklanganlar ro'yxatida yo'q."
+            await session.delete(row)
+            await session.commit()
+        return True, f"✅ User blokdan chiqarildi: <code>{telegram_id}</code>"
+
+    async def is_premium_user_blocked(self, telegram_id: int) -> bool:
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(select(PremiumBlockedUser.telegram_id).where(PremiumBlockedUser.telegram_id == telegram_id))
+            ).scalar_one_or_none()
+            return row is not None
+
     async def contribute_premium_group(
         self,
         bot: Bot,
@@ -3689,6 +3932,8 @@ class GameEngine:
     ) -> tuple[bool, str]:
         if diamonds <= 0:
             return False, "Miqdor musbat bo'lishi kerak. Masalan: /gsend 10"
+        if await self.is_premium_user_blocked(tg_user.id):
+            return False, "Siz premium guruh reytingiga almaz yuborishdan bloklangansiz."
 
         user = await self.ensure_user(tg_user)
         invite_link = await self.group_return_url(bot, chat_id)

@@ -192,6 +192,13 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Sehrgar",
         "O'z qonunlaringiz bilan yashaysiz! Agar Don, Qotil, Komissar katani sizni o'ldirmoqchi bo'lsa, bu urinish behuda bo'ladi va sizga tanlov beriladi: Ularga rahm qilish yoki o'ldirish.",
     ),
+    Role.MINER: RoleMeta(
+        Role.MINER,
+        Team.NEUTRAL,
+        "👷🏻‍♂️",
+        "Konchi",
+        "Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta 💎'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.",
+    ),
 }
 
 
@@ -219,8 +226,9 @@ KAMIKAZE = Role.SORCERER
 MANIAC = Role.KILLER
 MER = Role.MAYOR
 HIRED_KILLER = Role.HIRED_KILLER
+MINER = Role.MINER
 
-EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
+BASE_ROLE_TABLE: dict[int, list[Role]] = {
     4: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (C, 2)),
     5: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (C, 1)),
     6: _expand_role_counts((Role.DON, 1), (M, 1), (Role.COMMISSAR, 1), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (C, 1)),
@@ -248,6 +256,25 @@ EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
     28: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 1), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
     29: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 1), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
     30: _expand_role_counts((Role.DON, 1), (M, 6), (Role.COMMISSAR, 1), (Role.SERGEANT, 2), (KAMIKAZE, 3), (Role.DOCTOR, 1), (Role.MISTRESS, 1), (Role.BUM, 1), (Role.LAWYER, 1), (Role.WOLF, 2), (MANIAC, 1), (C, 1), (Role.LUCKY, 1), (Role.JESTER, 1), (Role.ARSONIST, 1), (Role.JOURNALIST, 1), (Role.MAQ, 1), (Role.SNITCH, 1), (MER, 1), (Role.CROOK, 1), (HIRED_KILLER, 1)),
+}
+
+
+def _with_miner(player_count: int, roles: list[Role]) -> list[Role]:
+    if player_count <= 15 or Role.MINER in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.MINER
+            return updated
+    updated[-1] = Role.MINER
+    return updated
+
+
+EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
+    count: _with_miner(count, roles)
+    for count, roles in BASE_ROLE_TABLE.items()
 }
 
 ROLE_PRESET_LABELS = {

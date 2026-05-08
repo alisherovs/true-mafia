@@ -120,6 +120,9 @@ Agar o'yinda Komissar Katani va serjant tirik bo'lsa sizni hech kim o'ltira olma
 👨‍🔬 <b>Kimyogar</b> -
 Siz erkinsiz. Hohlasangiz odamlarni davolaysiz, hohlasangiz ularni o'ldirasiz. G'alaba qilish uchun tirik qolsangiz bas!
 
+👷🏻‍♂️ <b>Konchi</b> -
+Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta 💎'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.
+
 ☠️ <b>Minior</b> -
 Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tunda kelgan Miniordan boshqalar o'ladi.""",
     "lobby_empty": "ㅤㅤㅤㅤㅤ",

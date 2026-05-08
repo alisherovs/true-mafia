@@ -68,6 +68,7 @@ def profile_dashboard_keyboard(settings: Settings, user: object | None = None, i
             _toggle_button("🔫", "use_gun", user),
             _toggle_button("⚖️", "use_vote_protection", user),
         ],
+        [_toggle_button("👷", "use_miner_protection", user)],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
             InlineKeyboardButton(text="Xarid qilish 💵", callback_data="dollar:shop"),
@@ -192,6 +193,34 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def miner_keyboard(game_id: int, actor_id: int, visited_mines: set[int] | None = None) -> InlineKeyboardMarkup:
+    visited_mines = visited_mines or set()
+    rows = []
+    for start in (1, 6):
+        row = []
+        for mine in range(start, start + 5):
+            if mine in visited_mines:
+                continue
+            row.append(
+                InlineKeyboardButton(
+                    text=f"{mine:02d}",
+                    callback_data=f"act:mine:{game_id}:{actor_id}:{mine}",
+                )
+            )
+        if row:
+            rows.append(row)
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="⚜️ Himoyalanish",
+                callback_data=f"act:mine_protect:{game_id}:{actor_id}:0",
+            )
+        ]
+    )
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def commissar_action_keyboard(game_id: int, actor_id: int, can_shoot: bool) -> InlineKeyboardMarkup:
     rows = [
         [
@@ -290,6 +319,7 @@ def shop_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🛡 Himoya - $120", callback_data="shop:buy:protection")],
             [InlineKeyboardButton(text="⛑️ Qotildan himoya - $100", callback_data="shop:buy:killer_protection")],
             [InlineKeyboardButton(text="⚖️ Ovoz himoyasi - $80", callback_data="shop:buy:vote_protection")],
+            [InlineKeyboardButton(text="👷 Konchi himoyasi - $90", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🔫 Miltiq - $150", callback_data="shop:buy:gun")],
             [InlineKeyboardButton(text="🎭 Maska - $70", callback_data="shop:buy:mask")],
             [InlineKeyboardButton(text="📁 Soxta hujjat - $70", callback_data="shop:buy:fake_document")],
@@ -368,14 +398,32 @@ def owner_wait_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def owner_premium_groups_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Premium guruh qo'shish", callback_data="owner:premium_add")],
+def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    for group in groups or []:
+        total = getattr(group, "total_diamonds", 0) or 0
+        if total <= 0:
+            continue
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{group.title} - 💎 {total}",
+                    callback_data=f"owner:premium_bankrupt:{group.id}",
+                )
+            ]
+        )
+    rows.extend(
+        [
             [InlineKeyboardButton(text="📋 Premium guruhlar ro'yxati", callback_data="owner:premium_list")],
+            [
+                InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
+                InlineKeyboardButton(text="✅ Blokdan chiqarish", callback_data="owner:premium_unblock_user"),
+            ],
+            [InlineKeyboardButton(text="🚷 Bloklanganlar", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def premium_groups_keyboard(groups: list[object]) -> InlineKeyboardMarkup:

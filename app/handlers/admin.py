@@ -28,6 +28,16 @@ def _owner_panel_text(stats: str) -> str:
     )
 
 
+async def _safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    if callback.message is None:
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc):
+            raise
+
+
 @router.message(Command("admin"))
 async def cmd_owner_admin(message: Message, engine: GameEngine, settings: Settings) -> None:
     if message.from_user is None or not _is_owner(message.from_user.id, settings):
@@ -60,16 +70,12 @@ async def owner_stats_callback(callback: CallbackQuery, engine: GameEngine, sett
 
 
 @router.callback_query(F.data == "owner:premium_groups")
-async def owner_premium_groups_callback(callback: CallbackQuery, settings: Settings) -> None:
+async def owner_premium_groups_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    if callback.message:
-        await callback.message.edit_text(
-            "🎲 <b>Premium guruhlar boshqaruvi</b>\n\n"
-            "Bu yerda userlar olmos orqali qo'shiladigan premium guruhlarni ulaysiz.",
-            reply_markup=owner_premium_groups_keyboard(),
-        )
+    groups = await engine.premium_groups(include_inactive=True)
+    await _safe_edit(callback, await engine.owner_premium_groups_manage_text(), reply_markup=owner_premium_groups_keyboard(groups))
     await callback.answer()
 
 
@@ -95,11 +101,66 @@ async def owner_premium_list_callback(callback: CallbackQuery, engine: GameEngin
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    if callback.message:
-        await callback.message.edit_text(
-            await engine.premium_groups_text(include_inactive=True),
-            reply_markup=owner_premium_groups_keyboard(),
-        )
+    groups = await engine.premium_groups(include_inactive=True)
+    await _safe_edit(callback, await engine.owner_premium_groups_manage_text(), reply_markup=owner_premium_groups_keyboard(groups))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:premium_bankrupt:"))
+async def owner_premium_bankrupt_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    group_id = callback.data.rsplit(":", maxsplit=1)[-1]
+    ok, text = await engine.bankrupt_premium_group(group_id)
+    groups = await engine.premium_groups(include_inactive=True)
+    await _safe_edit(
+        callback,
+        f"{text}\n\n{await engine.owner_premium_groups_manage_text()}",
+        reply_markup=owner_premium_groups_keyboard(groups),
+    )
+    await callback.answer("Bankrot qilindi." if ok else text, show_alert=not ok)
+
+
+@router.callback_query(F.data == "owner:premium_block_user")
+async def owner_premium_block_user_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_block_user"
+    await _safe_edit(
+        callback,
+        "🚫 <b>Premium user bloklash</b>\n\n"
+        "Telegram ID, @username yoki username yuboring. Sabab yozish ixtiyoriy.\n\n"
+        "Masalan:\n<code>123456789 reklama</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:premium_unblock_user")
+async def owner_premium_unblock_user_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_unblock_user"
+    await _safe_edit(
+        callback,
+        "✅ <b>Premium userni blokdan chiqarish</b>\n\n"
+        "Telegram ID, @username yoki username yuboring.\n\n"
+        "Masalan:\n<code>123456789</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:premium_blocked_list")
+async def owner_premium_blocked_list_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    groups = await engine.premium_groups(include_inactive=True)
+    await _safe_edit(callback, await engine.premium_blocked_users_text(), reply_markup=owner_premium_groups_keyboard(groups))
     await callback.answer()
 
 
@@ -275,6 +336,22 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_panel_keyboard())
+        return True
+
+    if action == "premium_block_user":
+        ok, text = await engine.block_premium_user(message.text or "", blocked_by=message.from_user.id)
+        groups = await engine.premium_groups(include_inactive=True) if ok else []
+        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_block_user"
+        return True
+
+    if action == "premium_unblock_user":
+        ok, text = await engine.unblock_premium_user(message.text or "")
+        groups = await engine.premium_groups(include_inactive=True) if ok else []
+        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_unblock_user"
         return True
 
     if action in {"broadcast_users", "broadcast_groups"}:
