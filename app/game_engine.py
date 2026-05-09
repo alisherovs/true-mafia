@@ -1920,6 +1920,12 @@ class GameEngine:
             alive_players = await self._alive_players(session, game_id)
             alive_ids = {p.telegram_id for p in alive_players}
             player_map = {p.telegram_id: p for p in alive_players}
+            users_by_tg = {
+                user.telegram_id: user
+                for user in (
+                    await session.execute(select(User).where(User.telegram_id.in_(alive_ids)))
+                ).scalars().all()
+            }
 
             actions = (
                 await session.execute(
@@ -1946,9 +1952,28 @@ class GameEngine:
                 if not actor.alive:
                     continue
                 if act.action_type == ActionType.BLOCK.value and act.target_telegram_id:
+                    target = player_map.get(act.target_telegram_id)
+                    target_user = users_by_tg.get(act.target_telegram_id)
+                    if (
+                        target_user
+                        and target_user.use_drug_protection is not False
+                        and (target_user.drug_protection or 0) > 0
+                    ):
+                        target_user.drug_protection -= 1
+                        protected_group_lines.append(
+                            f"💊 {self._tg_mention(act.target_telegram_id, target.display_name if target else 'Kimdir')} "
+                            "doridan himoyasini ishlatdi."
+                        )
+                        self._add_game_log(
+                            session,
+                            game,
+                            "drug_protection_used",
+                            actor=target,
+                            remaining_drug_protection=target_user.drug_protection,
+                        )
+                        continue
                     blocked.add(act.target_telegram_id)
                     mistress_visit_targets.add(act.target_telegram_id)
-                    target = player_map.get(act.target_telegram_id)
                     if target:
                         target.blocked_until_day = game.day_number + 1
 
@@ -3243,38 +3268,56 @@ class GameEngine:
         await self.start_night(bot, game_id)
 
     async def check_winner(self, game_id: int) -> Optional[Team]:
+        """
+        Oyin xulosasini tekshiradi - kim yutdi?
+        
+        Qoida:
+        1. Mafia nol qolsa → CITY wins
+        2. Qotil o'z qolsa → KILLER wins
+        3. Suidsid o'ldirilib ketsa → NEUTRAL wins
+        4. 2 kishi qolsa va 1 ta mafia bo'lsa → MAFIA wins (final duel)
+        5. Mafia soni ≥ non-mafia soni bo'lsa → MAFIA wins
+        6. Boshqa holda oyni davom ettir
+        """
         async with self.session_factory() as session:
             alive = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.alive.is_(True)))
             ).scalars().all()
+            
             if not alive:
                 return Team.CITY
 
             teams = [p.team for p in alive]
-
+            
+            mafia_count = sum(1 for t in teams if t == Team.MAFIA.value)
+            killer_count = sum(1 for t in teams if t == Team.KILLER.value)
+            neutral_count = sum(1 for t in teams if t == Team.NEUTRAL.value)
+            city_count = len(alive) - mafia_count - killer_count - neutral_count
+            
+            # Mafia nolga tushsa → Shahar yutadi
+            if mafia_count == 0 and killer_count == 0 and neutral_count == 0:
+                return Team.CITY
+            
+            # Qotil o'z qolsa → Qotil yutadi
             if len(alive) == 1 and alive[0].team == Team.KILLER.value:
                 return Team.KILLER
+            
+            # Suidsid o'ldirilib ketsa → Suidsid yutadi (lekin bu bajarilgan deb hisob qilamiz)
             if len(alive) == 1 and alive[0].team == Team.NEUTRAL.value:
                 return Team.NEUTRAL
-
-            mafia_count = sum(1 for t in teams if t == Team.MAFIA.value)
-            city_count = sum(1 for t in teams if t == Team.CITY.value)
-            killer_count = sum(1 for t in teams if t == Team.KILLER.value)
-            non_mafia_count = len(alive) - mafia_count
-
-            # Shaharga xavf soladigan asosiy kuchlar qolmasa, o'yin darhol yopiladi.
-            if mafia_count == 0 and killer_count == 0:
-                return Team.CITY
-
-            # Final duel: Don/Mafiya/Josus va bitta boshqa personaj qolsa, mafia ustun.
-            if len(alive) == 2 and mafia_count == 1 and non_mafia_count == 1:
+            
+            # Final duel: 2 kishi qolsa va 1 ta mafia bo'lsa → Mafia wins
+            # (Don/Mafia vs. istalgan boshqa)
+            if len(alive) == 2 and mafia_count == 1 and killer_count == 0:
                 return Team.MAFIA
-
-            # Mafia soni qolgan tinch aholidan kam bo'lmasa, shahar nazorati mafiyaga o'tadi.
-            if mafia_count > 0 and mafia_count >= city_count and killer_count == 0:
+            
+            # Asosiy qaror: Mafia soni ≥ city + neutral soni bo'lsa → Mafia yutadi
+            # (Qotil hisob bo'lmaydi, u o'zining o'yinini o'ynaydi)
+            non_mafia_fighting = city_count + neutral_count
+            if mafia_count > 0 and mafia_count >= non_mafia_fighting and killer_count == 0:
                 return Team.MAFIA
-            if len(alive) == 1 and killer_count == 1:
-                return Team.KILLER
+            
+            # O'yin davom ettirish
             return None
 
     async def finish_game(self, bot: Bot, game_id: int, winner_team: Team) -> None:
@@ -3433,7 +3476,8 @@ class GameEngine:
             f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
             f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
             f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b> {state(user.use_vote_protection)}\n"
-            f"👷 Konchi himoyasi: <b>{user.miner_protection}</b> {state(user.use_miner_protection)}\n"
+            f"💊 Doridan himoya: <b>{user.drug_protection}</b> {state(user.use_drug_protection)}\n"
+            f"📦 Sirpanishdan himoya: <b>{user.miner_protection}</b> {state(user.use_miner_protection)}\n"
             f"🔫 Miltiq: <b>{user.gun}</b> {state(user.use_gun)}\n\n"
             f"🎭 Maska: <b>{user.mask}</b> {state(user.use_mask)}\n"
             f"📁 Soxta hujjat: <b>{user.fake_document}</b> {state(user.use_fake_document)}\n"
@@ -3923,18 +3967,19 @@ class GameEngine:
         return True, f"✅ 💎 {amount} almaz → 💵 {dollars} dollar almashtirildi."
 
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
-        prices: dict[str, tuple[int, str, Union[int, str]]] = {
-            "protection": (120, "protection", 1),
-            "killer_protection": (100, "killer_protection", 1),
-            "vote_protection": (80, "vote_protection", 1),
-            "miner_protection": (90, "miner_protection", 1),
-            "gun": (150, "gun", 1),
-            "mask": (70, "mask", 1),
-            "fake_document": (70, "fake_document", 1),
-            "role:commissar": (300, "next_game_role", Role.COMMISSAR.value),
-            "role:doctor": (260, "next_game_role", Role.DOCTOR.value),
-            "role:don": (500, "next_game_role", Role.DON.value),
-            "role:killer": (450, "next_game_role", Role.KILLER.value),
+        prices: dict[str, tuple[int, str, str, Union[int, str]]] = {
+            "protection": (100, "dollar", "protection", 1),
+            "fake_document": (190, "dollar", "fake_document", 1),
+            "vote_protection": (1, "diamonds", "vote_protection", 1),
+            "gun": (1, "diamonds", "gun", 1),
+            "drug_protection": (100, "dollar", "drug_protection", 1),
+            "mask": (100, "dollar", "mask", 1),
+            "killer_protection": (2, "diamonds", "killer_protection", 1),
+            "miner_protection": (300, "dollar", "miner_protection", 1),
+            "role:commissar": (300, "dollar", "next_game_role", Role.COMMISSAR.value),
+            "role:doctor": (260, "dollar", "next_game_role", Role.DOCTOR.value),
+            "role:don": (500, "dollar", "next_game_role", Role.DON.value),
+            "role:killer": (450, "dollar", "next_game_role", Role.KILLER.value),
         }
         if item_key.startswith("disable_role:"):
             role_value = item_key.split(":", maxsplit=1)[1]
@@ -3960,14 +4005,19 @@ class GameEngine:
         item = prices.get(item_key)
         if item is None:
             return False, "Bunday mahsulot topilmadi."
-        price, field_name, value = item
+        price, currency, field_name, value = item
         async with self.session_factory() as session:
             user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
             if user is None:
                 return False, "Avval /start bosing."
-            if user.dollar < price:
-                return False, f"Balans yetarli emas. Kerak: 💵 {price}"
-            user.dollar -= price
+            balance = user.diamonds if currency == "diamonds" else user.dollar
+            icon = "💎" if currency == "diamonds" else "💵"
+            if balance < price:
+                return False, f"Balans yetarli emas. Kerak: {icon} {price}"
+            if currency == "diamonds":
+                user.diamonds -= price
+            else:
+                user.dollar -= price
             if field_name == "next_game_role":
                 user.next_game_role = str(value)
             else:
