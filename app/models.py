@@ -26,6 +26,7 @@ class User(Base):
     killer_protection: Mapped[int] = mapped_column(Integer, default=0)
     vote_protection: Mapped[int] = mapped_column(Integer, default=0)
     miner_protection: Mapped[int] = mapped_column(Integer, default=0)
+    drug_protection: Mapped[int] = mapped_column(Integer, default=0)
     gun: Mapped[int] = mapped_column(Integer, default=0)
     mask: Mapped[int] = mapped_column(Integer, default=0)
     fake_document: Mapped[int] = mapped_column(Integer, default=0)
@@ -35,6 +36,7 @@ class User(Base):
     use_killer_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_vote_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_miner_protection: Mapped[bool] = mapped_column(Boolean, default=True)
+    use_drug_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_gun: Mapped[bool] = mapped_column(Boolean, default=True)
     use_mask: Mapped[bool] = mapped_column(Boolean, default=True)
     use_fake_document: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -78,6 +80,7 @@ class Game(Base):
     status: Mapped[str] = mapped_column(String(32), default=GameStatus.REGISTRATION.value)
     phase: Mapped[str] = mapped_column(String(32), default=GamePhase.REGISTRATION.value)
     active_key: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    role_preset: Mapped[str] = mapped_column(String(32), default="black23")
 
     day_number: Mapped[int] = mapped_column(Integer, default=0)
     night_number: Mapped[int] = mapped_column(Integer, default=0)

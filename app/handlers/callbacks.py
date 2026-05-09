@@ -312,8 +312,8 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
             show_alert=True,
         )
     elif action == "minplayers":
-        await engine.update_group_setting(target_chat_id, "min_players", 4)
-        await callback.answer("Minimum players: 4", show_alert=True)
+        ok, msg = await engine.update_group_setting(target_chat_id, "min_players", 4)
+        await callback.answer(msg, show_alert=True)
     elif action == "roles":
         group = await engine.group_settings(target_chat_id)
         await callback.message.edit_text(
@@ -326,13 +326,18 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         if preset not in GAME_MODES and preset not in {"black23", "extended35"}:
             await callback.answer("Noma'lum role preset.", show_alert=True)
             return
-        await engine.update_group_setting(target_chat_id, "role_preset", preset)
+        
+        ok, msg = await engine.update_group_setting(target_chat_id, "role_preset", preset)
+        if not ok:
+            await callback.answer(msg, show_alert=True)
+            return
+        
         group = await engine.group_settings(target_chat_id)
         await callback.message.edit_text(
             engine.format_role_preset_settings(group),
             reply_markup=role_preset_keyboard(group.role_preset, target_chat_id),
         )
-        await callback.answer(f"Role preset: {role_preset_label(preset)}")
+        await callback.answer(msg)
     elif action == "back":
         group = await engine.group_settings(target_chat_id)
         text = (

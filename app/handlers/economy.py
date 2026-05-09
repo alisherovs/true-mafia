@@ -117,7 +117,7 @@ async def cmd_shop(message: Message, engine: GameEngine) -> None:
     await engine.ensure_user(message.from_user)
     await message.answer(
         "🛒 <b>Do'kon</b>\n\n"
-        "Dollar orqali himoya va maxsus imkoniyatlar sotib olishingiz mumkin.",
+        "Himoya va maxsus imkoniyatlarni 💵 dollar yoki 💎 almaz orqali sotib olishingiz mumkin.",
         reply_markup=shop_keyboard(),
     )
 
@@ -130,7 +130,7 @@ async def shop_open_callback(callback: CallbackQuery, engine: GameEngine) -> Non
     await engine.ensure_user(callback.from_user)
     await callback.message.edit_text(
         "🛒 <b>Do'kon</b>\n\n"
-        "Kerakli itemni tanlang. Xarid summasi profilingizdagi dollardan yechiladi.",
+        "Kerakli itemni tanlang. Xarid summasi profilingizdagi 💵 dollar yoki 💎 almazdan yechiladi.",
         reply_markup=shop_keyboard(),
     )
     await callback.answer()

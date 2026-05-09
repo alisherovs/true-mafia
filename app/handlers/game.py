@@ -10,8 +10,7 @@ from app.texts import t
 router = Router()
 
 
-@router.message(Command("game"))
-async def cmd_game(message: Message, engine: GameEngine) -> None:
+async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str | None = None) -> None:
     if message.from_user is None:
         return
     if message.chat.type == "private":
@@ -27,6 +26,17 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
         await message.reply(t(lang, "bot_not_admin"))
         return
 
+    active_game = await engine.active_game_for_chat(message.chat.id)
+    if mode and active_game is not None and active_game.status != "registration":
+        await message.reply("🎮 Aktiv o'yin tugamaguncha mode almashtirib bo'lmaydi.")
+        return
+    
+    if mode:
+        ok, msg = await engine.update_group_setting(message.chat.id, "role_preset", mode)
+        if not ok:
+            await message.reply(msg)
+            return
+
     ok, text = await engine.create_game_registration(
         bot=message.bot,
         chat_id=message.chat.id,
@@ -35,6 +45,28 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
     )
     if not ok:
         await message.reply(text)
+    elif mode:
+        await message.reply(f"✅ Mode tanlandi: <b>{mode}</b>")
+
+
+@router.message(Command("game"))
+async def cmd_game(message: Message, engine: GameEngine) -> None:
+    await _start_game_with_mode(message, engine)
+
+
+@router.message(Command("classic"))
+async def cmd_classic_game(message: Message, engine: GameEngine) -> None:
+    await _start_game_with_mode(message, engine, "classic")
+
+
+@router.message(Command("super"))
+async def cmd_super_game(message: Message, engine: GameEngine) -> None:
+    await _start_game_with_mode(message, engine, "super")
+
+
+@router.message(Command("mega"))
+async def cmd_mega_game(message: Message, engine: GameEngine) -> None:
+    await _start_game_with_mode(message, engine, "mega")
 
 
 @router.message(Command("leave"))

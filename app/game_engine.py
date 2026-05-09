@@ -679,6 +679,7 @@ class GameEngine:
                 phase=GamePhase.REGISTRATION.value,
                 active_key=1,
                 registration_ends_at=ends_at,
+                role_preset=group.role_preset or "black23",
             )
             session.add(game)
             try:
@@ -4471,21 +4472,40 @@ class GameEngine:
             )
         return "\n".join(lines)
 
-    async def update_group_setting(self, chat_id: int, field: str, value: object) -> None:
+    async def update_group_setting(self, chat_id: int, field: str, value: object) -> tuple[bool, str]:
+        """Guruh sozlamalarini yangilash. Aktiv oyni davomida mode o'zgartirish mumkin emas."""
         async with self.session_factory() as session:
             group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
             if group is None:
                 group = Group(chat_id=chat_id, title="Group")
                 session.add(group)
+            
             if field == "registration_timeout":
                 group.registration_timeout = max(10, int(value))
+                await session.commit()
+                return True, f"✅ Registration timeout: {group.registration_timeout} soniya"
             elif field == "min_players":
                 group.min_players = max(4, min(int(value), 30))
+                await session.commit()
+                return True, f"✅ Minimal o'yinchilar: {group.min_players}"
             elif field == "role_preset":
                 preset = str(value)
-                if preset in GAME_MODES or preset in {"black23", "extended35"}:
-                    group.role_preset = preset
-            await session.commit()
+                if preset not in GAME_MODES and preset not in {"black23", "extended35"}:
+                    return False, "❌ Noma'lum role preset"
+                
+                # Aktiv oyni tekshirish
+                active_game = await self.find_active_game(session, chat_id)
+                if active_game is not None and active_game.status != GameStatus.COMPLETED.value:
+                    current_preset = active_game.role_preset or "black23"
+                    if current_preset != preset:
+                        current_name = role_preset_label(current_preset)
+                        return False, f"❌ Aktiv oyin davomida mode o'zgartira olmaysiz!\nJoriy mode: <b>{current_name}</b>"
+                
+                group.role_preset = preset
+                await session.commit()
+                return True, f"✅ Role preset: {role_preset_label(preset)}"
+            
+            return False, "❌ Noma'lum sozlama"
 
     def format_role_preset_settings(self, group: Group) -> str:
         preset = group.role_preset or "black23"

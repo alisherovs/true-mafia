@@ -69,5 +69,5 @@ async def cmd_settimeout(message: Message, command: CommandObject, engine: GameE
         await message.reply("Minimal vaqt: 10 soniya.")
         return
 
-    await engine.update_group_setting(message.chat.id, "registration_timeout", seconds)
-    await message.reply(f"✅ Registration timeout yangilandi: <b>{seconds}</b> soniya.")
+    ok, msg = await engine.update_group_setting(message.chat.id, "registration_timeout", seconds)
+    await message.reply(msg)

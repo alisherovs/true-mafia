@@ -79,7 +79,10 @@ def profile_dashboard_keyboard(
             _toggle_button("🔫", "use_gun", user),
             _toggle_button("⚖️", "use_vote_protection", user),
         ],
-        [_toggle_button("👷", "use_miner_protection", user)],
+        [
+            _toggle_button("💊", "use_drug_protection", user),
+            _toggle_button("📦", "use_miner_protection", user),
+        ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
             InlineKeyboardButton(text="Xarid qilish 💵", callback_data="dollar:shop"),
@@ -331,15 +334,16 @@ def roles_overview_keyboard() -> InlineKeyboardMarkup:
 def shop_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🛡 Himoya - $120", callback_data="shop:buy:protection")],
-            [InlineKeyboardButton(text="⛑️ Qotildan himoya - $100", callback_data="shop:buy:killer_protection")],
-            [InlineKeyboardButton(text="⚖️ Ovoz himoyasi - $80", callback_data="shop:buy:vote_protection")],
-            [InlineKeyboardButton(text="👷 Konchi himoyasi - $90", callback_data="shop:buy:miner_protection")],
-            [InlineKeyboardButton(text="🔫 Miltiq - $150", callback_data="shop:buy:gun")],
-            [InlineKeyboardButton(text="🎭 Maska - $70", callback_data="shop:buy:mask")],
-            [InlineKeyboardButton(text="📁 Soxta hujjat - $70", callback_data="shop:buy:fake_document")],
+            [InlineKeyboardButton(text="🛡 Himoya - 100💵", callback_data="shop:buy:protection")],
+            [InlineKeyboardButton(text="📁 Hujjat - 190💵", callback_data="shop:buy:fake_document")],
+            [InlineKeyboardButton(text="⚖️ Ovozdan himoya - 1💎", callback_data="shop:buy:vote_protection")],
+            [InlineKeyboardButton(text="🔫 Miltiq - 1💎", callback_data="shop:buy:gun")],
+            [InlineKeyboardButton(text="💊 Doridan himoya - 100💵", callback_data="shop:buy:drug_protection")],
+            [InlineKeyboardButton(text="🎭 Maska - 100💵", callback_data="shop:buy:mask")],
+            [InlineKeyboardButton(text="⛑️ Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
+            [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
-            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - $200", callback_data="shop:disable_roles")],
+            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 200💵", callback_data="shop:disable_roles")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
         ]
     )
@@ -361,7 +365,7 @@ def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"🚫 {role_label(role)} - $200", callback_data=f"shop:disable_role:{role.value}")]
         for role in ACTIVE_ROLE_POOL
-        if role != Role.CITIZEN
+        if role not in {Role.CITIZEN, Role.DON}
     ]
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

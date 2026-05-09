@@ -48,6 +48,9 @@ async def set_commands(bot: Bot) -> None:
     group_commands = [
         BotCommand(command="start", description="Start"),
         BotCommand(command="game", description="Start registration"),
+        BotCommand(command="classic", description="Start Classic mode"),
+        BotCommand(command="super", description="Start Super mode"),
+        BotCommand(command="mega", description="Start Mega mode"),
         BotCommand(command="leave", description="Leave game"),
         BotCommand(command="teamgame", description="Start turnire game"),
         BotCommand(command="extend", description="Extend registration timeout"),

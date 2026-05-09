@@ -36,6 +36,9 @@ PRIVATE_COMMANDS_TEXT = (
 GROUP_COMMANDS_TEXT = (
     "📋 <b>Guruh buyruqlari</b>\n\n"
     "/game - ro'yxatdan o'tishni boshlash\n"
+    "/classic - Classic mode bilan ro'yxatdan o'tishni boshlash\n"
+    "/super - Super mode bilan ro'yxatdan o'tishni boshlash\n"
+    "/mega - Mega mode bilan ro'yxatdan o'tishni boshlash\n"
     "/start - ro'yxatni yopib o'yinni boshlash\n"
     "/teamgame - turnir o'yinini boshlash\n"
     "/leave - o'yindan chiqish\n"
@@ -141,6 +144,7 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
         "use_killer_protection",
         "use_vote_protection",
         "use_miner_protection",
+        "use_drug_protection",
         "use_gun",
         "use_mask",
         "use_fake_document",
