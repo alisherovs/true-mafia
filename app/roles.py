@@ -403,7 +403,7 @@ def _max_mafia_slots(player_count: int) -> int:
 
 
 def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
-    """SUPER mode: Faol rollarga ustunlik beriladi, Tinch aholi minimal."""
+    """SUPER mode: Faol rollarga ustunlik beriladi, Tinch aholi minimal. Commissar emas!"""
     # Qaysi rollar available
     eligible = get_available_roles(GAME_MODE_SUPER, player_count, disabled_roles)
     max_mafia = _max_mafia_slots(player_count)
@@ -412,8 +412,11 @@ def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Rol
     available_mafia = [r for r in MAFIA_ACTIVE_ROLES if r in eligible and r not in disabled_roles]
     selected_mafia = available_mafia[:max_mafia]
     
-    # Non-mafia faol rollari
-    available_non_mafia = [r for r in NON_MAFIA_ACTIVE_ROLES if r in eligible and r not in disabled_roles]
+    # Non-mafia faol rollari (Commissar BUNDAN CHIQARILDI!)
+    available_non_mafia = [
+        r for r in NON_MAFIA_ACTIVE_ROLES 
+        if r in eligible and r not in disabled_roles and r != Role.COMMISSAR
+    ]
     selected_non_mafia = available_non_mafia[:len(available_non_mafia)]
     
     # Birlash
@@ -427,7 +430,7 @@ def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Rol
 
 
 def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
-    """MEGA mode: FAQAT faol rollari, Tinch aholi hech qachon tushmaydi."""
+    """MEGA mode: FAQAT faol rollari (Commissar emas!), Tinch aholi hech qachon tushmaydi."""
     eligible = get_available_roles(GAME_MODE_SUPER, player_count, disabled_roles)
     max_mafia = _max_mafia_slots(player_count)
     
@@ -435,15 +438,21 @@ def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role
     available_mafia = [r for r in MAFIA_ACTIVE_ROLES if r in eligible and r not in disabled_roles]
     selected_mafia = available_mafia[:max_mafia]
     
-    # Non-mafia faol rollari
-    available_non_mafia = [r for r in NON_MAFIA_ACTIVE_ROLES if r in eligible and r not in disabled_roles]
+    # Non-mafia faol rollari (Commissar BUNDAN CHIQARILDI!)
+    available_non_mafia = [
+        r for r in NON_MAFIA_ACTIVE_ROLES 
+        if r in eligible and r not in disabled_roles and r != Role.COMMISSAR
+    ]
     selected_non_mafia = available_non_mafia[:len(available_non_mafia)]
     
     roles = selected_mafia + selected_non_mafia
     
     # Agar hali kam bo'lsa, repeatable non-mafia rollarni qo'shish
     if len(roles) < player_count:
-        repeatable = [r for r in REPEATABLE_ACTIVE_ROLES if r not in disabled_roles and r in available_non_mafia]
+        repeatable = [
+            r for r in REPEATABLE_ACTIVE_ROLES 
+            if r not in disabled_roles and r in available_non_mafia and r != Role.COMMISSAR
+        ]
         idx = 0
         while len(roles) < player_count and repeatable:
             roles.append(repeatable[idx % len(repeatable)])
