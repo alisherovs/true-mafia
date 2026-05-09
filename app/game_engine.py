@@ -2358,7 +2358,7 @@ class GameEngine:
             try:
                 await bot.send_message(
                     telegram_id,
-                    "Mafiya sizni o'ldirdi. Guruhga boradigan so'nggi xabaringizni yozing.",
+                    "Sizni shavqatsizlarcha o'ldirishdi :(\nSo'nggi so'zingni aytishing mumkin:",
                 )
             except TelegramForbiddenError:
                 pass
