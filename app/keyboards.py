@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.config import Settings
 from app.enums import Role
-from app.roles import role_label
+from app.roles import ACTIVE_ROLE_POOL, role_label
 from app.texts import t
 
 LANGS = [
@@ -304,6 +304,9 @@ def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboar
 
 
 def role_preset_keyboard(current_preset: str = "black23", chat_id: Optional[int] = None) -> InlineKeyboardMarkup:
+    if current_preset in {"black23", "extended35"}:
+        current_preset = "classic"
+
     def label(preset: str, text: str) -> str:
         return f"✅ {text}" if current_preset == preset else text
 
@@ -312,8 +315,9 @@ def role_preset_keyboard(current_preset: str = "black23", chat_id: Optional[int]
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=label("black23", "🎭 Universal 30"), callback_data=callback("rolepreset:black23"))],
-            [InlineKeyboardButton(text=label("extended35", "🎲 Universal 30"), callback_data=callback("rolepreset:extended35"))],
+            [InlineKeyboardButton(text=label("classic", "🎭 Classic"), callback_data=callback("rolepreset:classic"))],
+            [InlineKeyboardButton(text=label("super", "⚡ Super"), callback_data=callback("rolepreset:super"))],
+            [InlineKeyboardButton(text=label("mega", "🔥 Mega"), callback_data=callback("rolepreset:mega"))],
             [InlineKeyboardButton(text="◀️ Settings", callback_data=callback("back"))],
         ]
     )
@@ -335,6 +339,7 @@ def shop_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🎭 Maska - $70", callback_data="shop:buy:mask")],
             [InlineKeyboardButton(text="📁 Soxta hujjat - $70", callback_data="shop:buy:fake_document")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
+            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - $200", callback_data="shop:disable_roles")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
         ]
     )
@@ -350,6 +355,16 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
+
+
+def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🚫 {role_label(role)} - $200", callback_data=f"shop:disable_role:{role.value}")]
+        for role in ACTIVE_ROLE_POOL
+        if role != Role.CITIZEN
+    ]
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def dollar_exchange_keyboard() -> InlineKeyboardMarkup:

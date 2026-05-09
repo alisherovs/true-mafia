@@ -14,7 +14,13 @@ from sqlalchemy import select
 from app.config import Settings
 from app.database import SessionLocal
 from app.game_engine import GameEngine
-from app.keyboards import dollar_exchange_keyboard, role_shop_keyboard, shop_keyboard, diamond_shop_keyboard
+from app.keyboards import (
+    diamond_shop_keyboard,
+    disable_role_shop_keyboard,
+    dollar_exchange_keyboard,
+    role_shop_keyboard,
+    shop_keyboard,
+)
 from app.models import DiamondGiveaway, User
 from app.texts import t
 
@@ -143,6 +149,20 @@ async def shop_roles_callback(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data == "shop:disable_roles")
+async def shop_disable_roles_callback(callback: CallbackQuery) -> None:
+    if callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "🚫 <b>Faol rolni o'chirish</b>\n\n"
+        "Tanlangan faol rol keyingi o'yin role pool'idan olib tashlanadi.\n"
+        "Narx: <b>💵 200</b>",
+        reply_markup=disable_role_shop_keyboard(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("shop:buy:"))
 async def shop_buy_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None:
@@ -150,6 +170,16 @@ async def shop_buy_callback(callback: CallbackQuery, engine: GameEngine) -> None
         return
     item_key = callback.data.split(":", maxsplit=2)[2]
     ok, text = await engine.buy_shop_item(callback.from_user.id, item_key)
+    await callback.answer(text, show_alert=True)
+
+
+@router.callback_query(F.data.startswith("shop:disable_role:"))
+async def shop_disable_role_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    role_key = callback.data.split(":", maxsplit=2)[2]
+    ok, text = await engine.buy_shop_item(callback.from_user.id, f"disable_role:{role_key}")
     await callback.answer(text, show_alert=True)
 
 

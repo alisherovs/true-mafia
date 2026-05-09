@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union
+from typing import Callable, Optional, Union
 from dataclasses import dataclass
 from random import shuffle
 
@@ -278,14 +278,66 @@ EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
 }
 
 ROLE_PRESET_LABELS = {
+    "classic": "Classic",
+    "super": "Super",
+    "mega": "Mega",
     "black23": "Universal 30",
     "extended35": "Universal 30",
 }
 
 ROLE_PRESET_MAX_PLAYERS = {
+    "classic": 30,
+    "super": 30,
+    "mega": 30,
     "black23": 30,
     "extended35": 30,
 }
+
+GAME_MODE_CLASSIC = "classic"
+GAME_MODE_SUPER = "super"
+GAME_MODE_MEGA = "mega"
+GAME_MODES = {GAME_MODE_CLASSIC, GAME_MODE_SUPER, GAME_MODE_MEGA}
+
+ROLE_MIN_PLAYERS: dict[str, int] = {
+    "don": 4,
+    "commissar": 4,
+    "doctor": 5,
+    "mafia": 7,
+    "advocate": 8,
+    "spy": 8,
+    "killer": 9,
+    "journalist": 9,
+}
+
+ROLE_MIN_KEYS: dict[Role, str] = {
+    Role.DON: "don",
+    Role.COMMISSAR: "commissar",
+    Role.DOCTOR: "doctor",
+    Role.MAFIA: "mafia",
+    Role.LAWYER: "advocate",
+    Role.SPY: "spy",
+    Role.HIRED_KILLER: "killer",
+    Role.JOURNALIST: "journalist",
+}
+
+ACTIVE_ROLE_POOL: tuple[Role, ...] = (
+    Role.DON,
+    Role.COMMISSAR,
+    Role.DOCTOR,
+    Role.MAFIA,
+    Role.LAWYER,
+    Role.SPY,
+    Role.HIRED_KILLER,
+    Role.JOURNALIST,
+)
+
+REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (
+    Role.MAFIA,
+    Role.DOCTOR,
+    Role.SPY,
+    Role.HIRED_KILLER,
+    Role.JOURNALIST,
+)
 
 
 def role_preset_label(preset: str) -> str:
@@ -296,9 +348,94 @@ def role_preset_max_players(preset: str) -> int:
     return ROLE_PRESET_MAX_PLAYERS.get(preset, ROLE_PRESET_MAX_PLAYERS["black23"])
 
 
-def build_role_set(player_count: int, preset: str = "black23") -> list[Role]:
-    max_players = role_preset_max_players(preset)
-    capped_count = min(player_count, max_players)
+def normalize_game_mode(mode: str = GAME_MODE_CLASSIC) -> str:
+    if mode in {"black23", "extended35"}:
+        return GAME_MODE_CLASSIC
+    return mode if mode in GAME_MODES else GAME_MODE_CLASSIC
+
+
+def get_available_roles(
+    mode: str,
+    player_count: int,
+    disabled_roles: Optional[set[Role]] = None,
+    *,
+    include_future_thresholds: bool = False,
+) -> list[Role]:
+    disabled = disabled_roles or set()
+    if normalize_game_mode(mode) == GAME_MODE_CLASSIC:
+        return [role for role in build_role_set(player_count, GAME_MODE_CLASSIC) if role not in disabled]
+
+    max_threshold = max(ROLE_MIN_PLAYERS.values()) if include_future_thresholds else player_count
+    return [
+        role
+        for role in ACTIVE_ROLE_POOL
+        if ROLE_MIN_PLAYERS[ROLE_MIN_KEYS[role]] <= max_threshold and role not in disabled
+    ]
+
+
+def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
+    roles = get_available_roles(GAME_MODE_SUPER, player_count, disabled_roles)
+    if len(roles) < player_count:
+        roles.extend([Role.CITIZEN] * (player_count - len(roles)))
+    return roles[:player_count]
+
+
+def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
+    roles = get_available_roles(GAME_MODE_MEGA, player_count, disabled_roles)
+    if len(roles) < player_count:
+        for role in get_available_roles(
+            GAME_MODE_MEGA,
+            player_count,
+            disabled_roles,
+            include_future_thresholds=True,
+        ):
+            if role not in roles:
+                roles.append(role)
+            if len(roles) >= player_count:
+                break
+
+    repeatable = [role for role in REPEATABLE_ACTIVE_ROLES if role not in disabled_roles]
+    idx = 0
+    while len(roles) < player_count and repeatable:
+        roles.append(repeatable[idx % len(repeatable)])
+        idx += 1
+
+    if len(roles) < player_count:
+        safe_base = [role for role in ACTIVE_ROLE_POOL if role not in disabled_roles] or list(ACTIVE_ROLE_POOL)
+        idx = 0
+        while len(roles) < player_count:
+            roles.append(safe_base[idx % len(safe_base)])
+            idx += 1
+
+    return roles[:player_count]
+
+
+def generate_roles_for_game(
+    mode: str,
+    player_count: int,
+    disabled_roles: Optional[set[Role]] = None,
+    rng: Optional[Callable[[list[Role]], None]] = None,
+) -> list[Role]:
+    if player_count < 4:
+        raise ValueError("Kamida 4 ta o'yinchi kerak.")
+
+    normalized_mode = normalize_game_mode(mode)
+    disabled = disabled_roles or set()
+    if normalized_mode == GAME_MODE_SUPER:
+        roles = _build_super_roles(player_count, disabled)
+    elif normalized_mode == GAME_MODE_MEGA:
+        roles = _build_mega_roles(player_count, disabled)
+    else:
+        roles = _build_classic_role_set(player_count, disabled)
+
+    shuffler = rng or shuffle
+    shuffler(roles)
+    return roles[:player_count]
+
+
+def _build_classic_role_set(player_count: int, disabled_roles: Optional[set[Role]] = None) -> list[Role]:
+    disabled = disabled_roles or set()
+    capped_count = min(player_count, 30)
     if capped_count <= 30:
         roles = EXTENDED_ROLE_TABLE.get(capped_count, EXTENDED_ROLE_TABLE[4]).copy()
     else:
@@ -311,5 +448,25 @@ def build_role_set(player_count: int, preset: str = "black23") -> list[Role]:
             roles.append(extras[idx % len(extras)])
             idx += 1
 
-    shuffle(roles)
+    roles = [role for role in roles if role not in disabled]
+    if len(roles) < player_count:
+        fallback = [Role.CITIZEN, Role.MAFIA, Role.DOCTOR, Role.COMMISSAR, Role.DON]
+        idx = 0
+        while len(roles) < player_count:
+            candidate = fallback[idx % len(fallback)]
+            if candidate not in disabled:
+                roles.append(candidate)
+            idx += 1
+            if idx > 100 and len(roles) < player_count:
+                roles.append(Role.CITIZEN)
+
     return roles[:player_count]
+
+
+def build_role_set(
+    player_count: int,
+    preset: str = "black23",
+    disabled_roles: Optional[set[Role]] = None,
+    rng: Optional[Callable[[list[Role]], None]] = None,
+) -> list[Role]:
+    return generate_roles_for_game(preset, player_count, disabled_roles=disabled_roles, rng=rng)

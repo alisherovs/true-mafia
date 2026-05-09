@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery
 
 from app.game_engine import GameEngine
 from app.keyboards import role_preset_keyboard, settings_keyboard
-from app.roles import role_preset_label, role_preset_max_players
+from app.roles import GAME_MODES, role_preset_label, role_preset_max_players
 from app.texts import t
 
 router = Router()
@@ -323,7 +323,7 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         await callback.answer()
     elif action.startswith("rolepreset:"):
         preset = action.split(":", maxsplit=1)[1]
-        if preset not in {"black23", "extended35"}:
+        if preset not in GAME_MODES and preset not in {"black23", "extended35"}:
             await callback.answer("Noma'lum role preset.", show_alert=True)
             return
         await engine.update_group_setting(target_chat_id, "role_preset", preset)

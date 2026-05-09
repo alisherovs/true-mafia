@@ -77,6 +77,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "mask": "INTEGER DEFAULT 0",
             "fake_document": "INTEGER DEFAULT 0",
             "next_game_role": "VARCHAR(64)",
+            "next_game_disabled_role": "VARCHAR(64)",
             "use_protection": "BOOLEAN DEFAULT TRUE",
             "use_killer_protection": "BOOLEAN DEFAULT TRUE",
             "use_vote_protection": "BOOLEAN DEFAULT TRUE",

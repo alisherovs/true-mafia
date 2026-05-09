@@ -51,7 +51,17 @@ from app.models import (
     User,
     Vote,
 )
-from app.roles import ROLE_META, build_role_set, role_label, role_preset_label, role_preset_max_players, role_team
+from app.roles import (
+    ACTIVE_ROLE_POOL,
+    GAME_MODES,
+    ROLE_META,
+    build_role_set,
+    normalize_game_mode,
+    role_label,
+    role_preset_label,
+    role_preset_max_players,
+    role_team,
+)
 from app.scheduler import scheduler
 from app.texts import t
 
@@ -992,7 +1002,7 @@ class GameEngine:
                 return
 
             group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
-            min_players = group.min_players if group else self.settings.min_players
+            min_players = max(4, group.min_players if group else self.settings.min_players)
             players = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc()))
             ).scalars().all()
@@ -1056,13 +1066,28 @@ class GameEngine:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one()
             group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
             role_preset = group.role_preset if group else "black23"
-            roles = build_role_set(len(players), role_preset)
             users = {
                 user.telegram_id: user
                 for user in (
                     await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
                 ).scalars().all()
             }
+            disabled_roles: set[Role] = set()
+            for user in users.values():
+                if not user.next_game_disabled_role:
+                    continue
+                try:
+                    disabled_roles.add(Role(user.next_game_disabled_role))
+                except ValueError:
+                    user.next_game_disabled_role = None
+            roles = build_role_set(len(players), role_preset, disabled_roles=disabled_roles)
+            logger.info(
+                "role_generation mode=%s player_count=%s selected_roles=%s disabled_roles=%s",
+                normalize_game_mode(role_preset),
+                len(players),
+                [role.value for role in roles],
+                [role.value for role in sorted(disabled_roles, key=lambda r: r.value)],
+            )
             assigned = dict(zip([p.telegram_id for p in players], roles))
 
             for player in players:
@@ -1074,6 +1099,9 @@ class GameEngine:
                 except ValueError:
                     user.next_game_role = None
                     continue
+                if desired in disabled_roles:
+                    user.next_game_role = None
+                    continue
                 holder = next((p for p in players if assigned[p.telegram_id] == desired), None)
                 if holder is None:
                     continue
@@ -1081,6 +1109,9 @@ class GameEngine:
                 user.next_game_role = None
 
             for player, role in zip(players, roles):
+                user = users.get(player.telegram_id)
+                if user is not None:
+                    user.next_game_disabled_role = None
                 final_role = assigned[player.telegram_id]
                 player.role = final_role.value
                 player.team = role_team(final_role).value
@@ -3385,6 +3416,14 @@ class GameEngine:
         def state(value: bool) -> str:
             return "🟢 ON" if value is not False else "🔴 OFF"
 
+        def stored_role(value: Optional[str]) -> str:
+            if not value:
+                return "-"
+            try:
+                return role_label(Role(value))
+            except ValueError:
+                return value
+
         display_name = GameEngine._tg_mention(user.telegram_id, user.display_name)
         return (
             f"👤 Nik: {display_name}\n"
@@ -3398,7 +3437,8 @@ class GameEngine:
             f"🔫 Miltiq: <b>{user.gun}</b> {state(user.use_gun)}\n\n"
             f"🎭 Maska: <b>{user.mask}</b> {state(user.use_mask)}\n"
             f"📁 Soxta hujjat: <b>{user.fake_document}</b> {state(user.use_fake_document)}\n"
-            f"🃏 Keyingi o'yindagi rolingiz: <b>{user.next_game_role or '-'}</b>\n\n"
+            f"🃏 Keyingi o'yindagi rolingiz: <b>{stored_role(user.next_game_role)}</b>\n"
+            f"🚫 Keyingi o'yinda o'chiriladigan rol: <b>{stored_role(user.next_game_disabled_role)}</b>\n\n"
             f"🎯 Побед: <b>{user.wins}</b>\n"
             f"🎲 Всего игр: <b>{user.total_games}</b>"
         )
@@ -3896,6 +3936,27 @@ class GameEngine:
             "role:don": (500, "next_game_role", Role.DON.value),
             "role:killer": (450, "next_game_role", Role.KILLER.value),
         }
+        if item_key.startswith("disable_role:"):
+            role_value = item_key.split(":", maxsplit=1)[1]
+            try:
+                disabled_role = Role(role_value)
+            except ValueError:
+                return False, "Bunday faol rol topilmadi."
+            if disabled_role not in ACTIVE_ROLE_POOL:
+                return False, "Bu rolni faol role pool'dan o'chirib bo'lmaydi."
+            async with self.session_factory() as session:
+                user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+                if user is None:
+                    return False, "Avval /start bosing."
+                if user.next_game_disabled_role:
+                    return False, "Keyingi o'yin uchun faol rol allaqachon o'chirilgan."
+                if user.dollar < 200:
+                    return False, "Balans yetarli emas. Kerak: 💵 200"
+                user.dollar -= 200
+                user.next_game_disabled_role = disabled_role.value
+                await session.commit()
+            return True, f"✅ Keyingi o'yinda {role_label(disabled_role)} pool'dan olib tashlanadi."
+
         item = prices.get(item_key)
         if item is None:
             return False, "Bunday mahsulot topilmadi."
@@ -4372,7 +4433,7 @@ class GameEngine:
                 group.min_players = max(4, min(int(value), 30))
             elif field == "role_preset":
                 preset = str(value)
-                if preset in {"black23", "extended35"}:
+                if preset in GAME_MODES or preset in {"black23", "extended35"}:
                     group.role_preset = preset
             await session.commit()
 
@@ -4382,5 +4443,7 @@ class GameEngine:
             "🎭 <b>Role settings</b>\n\n"
             f"Joriy preset: <b>{role_preset_label(preset)}</b>\n"
             f"Maksimal tavsiya qilingan o'yinchi: <b>{role_preset_max_players(preset)}</b>\n\n"
-            "<b>Universal 30</b> - 4 dan 30 tagacha o'yinchi uchun siz bergan role jadvali bo'yicha taqsimlaydi."
+            "<b>Classic</b> - eski klassik taqsimotni saqlaydi.\n"
+            "<b>Super</b> - faol rollarni minimal o'yinchi soniga qarab ertaroq beradi, yetmasa Tinch aholi bilan to'ldiradi.\n"
+            "<b>Mega</b> - faqat faol rollar, Tinch aholi hech qachon tushmaydi."
         )

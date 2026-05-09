@@ -30,6 +30,7 @@ class User(Base):
     mask: Mapped[int] = mapped_column(Integer, default=0)
     fake_document: Mapped[int] = mapped_column(Integer, default=0)
     next_game_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    next_game_disabled_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     use_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_killer_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_vote_protection: Mapped[bool] = mapped_column(Boolean, default=True)
