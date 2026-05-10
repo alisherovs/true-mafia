@@ -58,8 +58,7 @@ async def owner_panel_callback(callback: CallbackQuery, engine: GameEngine, sett
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     stats = await engine.owner_stats()
-    if callback.message:
-        await callback.message.edit_text(_owner_panel_text(stats), reply_markup=owner_panel_keyboard())
+    await _safe_edit(callback, _owner_panel_text(stats), reply_markup=owner_panel_keyboard())
     await callback.answer()
 
 
@@ -69,8 +68,7 @@ async def owner_stats_callback(callback: CallbackQuery, engine: GameEngine, sett
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    if callback.message:
-        await callback.message.edit_text(await engine.owner_stats(), reply_markup=owner_panel_keyboard())
+    await _safe_edit(callback, await engine.owner_stats(), reply_markup=owner_panel_keyboard())
     await callback.answer()
 
 
@@ -108,6 +106,27 @@ async def owner_premium_list_callback(callback: CallbackQuery, engine: GameEngin
         return
     groups = await engine.premium_groups(include_inactive=True)
     await _safe_edit(callback, await engine.owner_premium_groups_manage_text(), reply_markup=owner_premium_groups_keyboard(groups))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:premium_timer")
+async def owner_premium_timer_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    current = await engine.premium_reset_timer_text()
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_timer"
+    await _safe_edit(
+        callback,
+        "⏱ <b>Premium guruhlar timeri</b>\n\n"
+        f"{current}\n\n"
+        "Necha daqiqadan keyin premium guruh balansi 0 bo'lishini yuboring.\n"
+        "Masalan:\n"
+        "<code>60</code> - 1 soat\n"
+        "<code>1440</code> - 1 kun\n"
+        "<code>0</code> - timer o'chiriladi",
+        reply_markup=owner_wait_keyboard(),
+    )
     await callback.answer()
 
 
@@ -290,6 +309,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🧾 <b>Admin panel yordam</b>\n\n"
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
+            "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
             "👤 Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
             "📣 Userlarga reklama - keyingi oddiy xabarni userlarga tarqatadi.\n"
@@ -394,6 +414,19 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_news_channel_keyboard(True))
+        return True
+
+    if action == "premium_timer":
+        ok, text = await engine.set_premium_reset_interval_minutes(message.text or "")
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_timer"
+            await message.answer(text, reply_markup=owner_wait_keyboard())
+            return True
+        groups = await engine.premium_groups(include_inactive=True)
+        await message.answer(
+            f"{text}\n\n{await engine.owner_premium_groups_manage_text()}",
+            reply_markup=owner_premium_groups_keyboard(groups),
+        )
         return True
 
     if action == "premium_block_user":

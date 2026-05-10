@@ -23,18 +23,18 @@ async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str 
 
     lang = await engine.get_group_language(message.chat.id)
     if not await engine.bot_is_admin(message.bot, message.chat.id):
-        await message.reply(t(lang, "bot_not_admin"))
+        await message.answer(t(lang, "bot_not_admin"))
         return
 
     active_game = await engine.active_game_for_chat(message.chat.id)
     if mode and active_game is not None and active_game.status != "registration":
-        await message.reply("🎮 Aktiv o'yin tugamaguncha mode almashtirib bo'lmaydi.")
+        await message.answer("🎮 Aktiv o'yin tugamaguncha mode almashtirib bo'lmaydi.")
         return
     
     if mode:
         ok, msg = await engine.update_group_setting(message.chat.id, "role_preset", mode)
         if not ok:
-            await message.reply(msg)
+            await message.answer(msg)
             return
 
     ok, text = await engine.create_game_registration(
@@ -44,9 +44,9 @@ async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str 
         creator_id=message.from_user.id,
     )
     if not ok:
-        await message.reply(text)
+        await message.answer(text)
     elif mode:
-        await message.reply(f"✅ Mode tanlandi: <b>{mode}</b>")
+        await message.answer(f"✅ Mode tanlandi: <b>{mode}</b>")
 
 
 @router.message(Command("game"))
@@ -81,11 +81,11 @@ async def cmd_leave(message: Message, engine: GameEngine) -> None:
     game = await engine.active_game_for_chat(message.chat.id)
     lang = await engine.get_group_language(message.chat.id)
     if game is None:
-        await message.reply(t(lang, "no_active_game"))
+        await message.answer(t(lang, "no_active_game"))
         return
 
     ok, text = await engine.leave_game(message.bot, game.id, message.from_user.id)
-    await message.reply(text)
+    await message.answer(text)
 
 
 @router.message(Command("extend"))
@@ -100,12 +100,12 @@ async def cmd_extend(message: Message, command: CommandObject, engine: GameEngin
     game = await engine.active_game_for_chat(message.chat.id)
     lang = await engine.get_group_language(message.chat.id)
     if game is None:
-        await message.reply(t(lang, "no_active_game"))
+        await message.answer(t(lang, "no_active_game"))
         return
 
     allowed = await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id, game.creator_telegram_id)
     if not allowed:
-        await message.reply(t(lang, "no_permission"))
+        await message.answer(t(lang, "no_permission"))
         return
 
     seconds = 30
@@ -115,7 +115,7 @@ async def cmd_extend(message: Message, command: CommandObject, engine: GameEngin
             seconds = parsed
 
     ok, text = await engine.extend_registration(message.bot, game.id, seconds)
-    await message.reply(text)
+    await message.answer(text)
 
 
 @router.message(Command("stop"))
@@ -130,16 +130,16 @@ async def cmd_stop(message: Message, engine: GameEngine) -> None:
     game = await engine.active_game_for_chat(message.chat.id)
     lang = await engine.get_group_language(message.chat.id)
     if game is None:
-        await message.reply(t(lang, "no_active_game"))
+        await message.answer(t(lang, "no_active_game"))
         return
 
     allowed = await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id, game.creator_telegram_id)
     if not allowed:
-        await message.reply(t(lang, "no_permission"))
+        await message.answer(t(lang, "no_permission"))
         return
 
     ok, text = await engine.stop_game(message.bot, game.id)
-    await message.reply(text)
+    await message.answer(text)
 
 
 @router.message(Command("teamgame"))
@@ -147,7 +147,7 @@ async def cmd_teamgame(message: Message, engine: GameEngine) -> None:
     if message.from_user is None:
         return
     lang = await (engine.get_user_language(message.from_user.id) if message.chat.type == "private" else engine.get_group_language(message.chat.id))
-    await message.reply(t(lang, "teamgame_stub"))
+    await message.answer(t(lang, "teamgame_stub"))
 
 
 @router.message(Command("lastwords"))
@@ -156,10 +156,10 @@ async def cmd_lastwords(message: Message, command: CommandObject, engine: GameEn
         return
     text = (command.args or "").strip()
     if not text:
-        await message.reply("Foydalanish: /lastwords Munavvara")
+        await message.answer("Foydalanish: /lastwords Munavvara")
         return
     ok, response = await engine.set_last_words(message.from_user.id, text)
-    await message.reply(response)
+    await message.answer(response)
 
 
 @router.message(Command("gun"))
@@ -179,7 +179,7 @@ async def cmd_gun(message: Message, command: CommandObject, engine: GameEngine) 
             target_id = int(raw)
 
     if target_id is None:
-        await message.reply("Foydalanish: target xabariga reply qilib /gun yozing yoki /gun user_id.")
+        await message.answer("Foydalanish: target xabariga reply qilib /gun yozing yoki /gun user_id.")
         return
 
     ok, text = await engine.use_gun(
@@ -188,4 +188,4 @@ async def cmd_gun(message: Message, command: CommandObject, engine: GameEngine) 
         shooter_id=message.from_user.id,
         target_id=target_id,
     )
-    await message.reply(text)
+    await message.answer(text)

@@ -461,6 +461,7 @@ def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineK
     rows.extend(
         [
             [InlineKeyboardButton(text="📋 Premium guruhlar ro'yxati", callback_data="owner:premium_list")],
+            [InlineKeyboardButton(text="⏱ Premium timer", callback_data="owner:premium_timer")],
             [
                 InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
                 InlineKeyboardButton(text="✅ Blokdan chiqarish", callback_data="owner:premium_unblock_user"),

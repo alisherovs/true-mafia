@@ -108,6 +108,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "top_sender_telegram_id": "BIGINT",
             "top_sender_name": "VARCHAR(255)",
             "top_sender_diamonds": "INTEGER DEFAULT 0",
+            "reset_at": "DATETIME",
         },
     )
     await add_missing_columns(
@@ -202,6 +203,7 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_premium_groups_group_chat_id ON premium_groups(group_chat_id)")
     )
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_premium_groups_reset_at ON premium_groups(reset_at)"))
     await conn.execute(
         text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_group_contributor "

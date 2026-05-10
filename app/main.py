@@ -115,6 +115,15 @@ async def main() -> None:
         coalesce=True,
         misfire_grace_time=15,
     )
+    scheduler.add_job(
+        engine.premium_reset_watchdog,
+        "interval",
+        seconds=60,
+        id="premium_reset_watchdog",
+        replace_existing=True,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
     await set_commands(bot)
 
     try:
