@@ -109,6 +109,57 @@ def rules_back_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+ROLE_INFO_ORDER: tuple[Role, ...] = (
+    Role.SORCERER,
+    Role.SPY,
+    Role.WOLF,
+    Role.BUM,
+    Role.DOCTOR,
+    Role.DON,
+    Role.MAYOR,
+    Role.JESTER,
+    Role.WATCHER,
+    Role.JOURNALIST,
+    Role.MISTRESS,
+    Role.COMMISSAR,
+    Role.MAFIA,
+    Role.MINER,
+    Role.JUDGE,
+    Role.KILLER,
+    Role.LUCKY,
+    Role.SERGEANT,
+    Role.SNITCH,
+    Role.ARSONIST,
+    Role.CITIZEN,
+    Role.LAWYER,
+    Role.MAQ,
+    Role.HIRED_KILLER,
+    Role.CROOK,
+    Role.GUARD,
+)
+
+
+def roles_menu_keyboard() -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    buttons = [
+        InlineKeyboardButton(text=role_label(role), callback_data=f"roles:info:{role.value}")
+        for role in ROLE_INFO_ORDER
+    ]
+    for index in range(0, len(buttons), 2):
+        rows.append(buttons[index:index + 2])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def role_info_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="roles:list")],
+            [InlineKeyboardButton(text="🏠 User panel", callback_data="start:back")],
+        ]
+    )
+
+
 def commands_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

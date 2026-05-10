@@ -62,23 +62,17 @@ async def _send_profile(message: Message, engine: GameEngine, settings: Settings
     if user is None:
         return
 
-    if await engine.user_in_running_game(message.from_user.id):
-        await message.answer(
-            "🎮 <b>Siz hozir aktiv o'yindasiz.</b>\n\n"
-            "Profil statistikasi o'yin davomida ko'rsatilmaydi."
-        )
-        return
-
     if message.chat.type == "private":
-        await message.answer(
-            engine.format_user_dashboard(user),
-            reply_markup=profile_dashboard_keyboard(
+        in_running_game = await engine.user_in_running_game(message.from_user.id)
+        reply_markup = None
+        if not in_running_game:
+            reply_markup = profile_dashboard_keyboard(
                 settings,
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
                 news_url=await engine.get_news_channel_url(),
-            ),
-        )
+            )
+        await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
         return
 
     await message.answer(engine.format_user_dashboard(user))
@@ -114,22 +108,16 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
         await callback.answer()
         return
     user = await engine.ensure_user(callback.from_user)
-    if await engine.user_in_running_game(callback.from_user.id):
-        await callback.message.edit_text(
-            "🎮 <b>Siz hozir aktiv o'yindasiz.</b>\n\n"
-            "Profil statistikasi o'yin davomida ko'rsatilmaydi."
-        )
-        await callback.answer()
-        return
-    await callback.message.edit_text(
-        engine.format_user_dashboard(user),
-        reply_markup=profile_dashboard_keyboard(
+    in_running_game = await engine.user_in_running_game(callback.from_user.id)
+    reply_markup = None
+    if not in_running_game:
+        reply_markup = profile_dashboard_keyboard(
             settings,
             user=user,
             is_admin=callback.from_user.id in settings.admin_ids,
             news_url=await engine.get_news_channel_url(),
-        ),
-    )
+        )
+    await callback.message.edit_text(engine.format_user_dashboard(user), reply_markup=reply_markup)
     await callback.answer()
 
 

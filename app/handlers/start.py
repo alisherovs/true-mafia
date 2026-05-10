@@ -107,21 +107,16 @@ async def cmd_start(
 
     if payload == "profile":
         user = await engine.ensure_user(message.from_user)
-        if await engine.user_in_running_game(message.from_user.id):
-            await message.answer(
-                "🎮 <b>Siz hozir aktiv o'yindasiz.</b>\n\n"
-                "Profil statistikasi o'yin davomida ko'rsatilmaydi."
-            )
-            return
-        await message.answer(
-            engine.format_user_dashboard(user),
-            reply_markup=profile_dashboard_keyboard(
+        in_running_game = await engine.user_in_running_game(message.from_user.id)
+        reply_markup = None
+        if not in_running_game:
+            reply_markup = profile_dashboard_keyboard(
                 settings,
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
                 news_url=await engine.get_news_channel_url(),
-            ),
-        )
+            )
+        await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
         return
 
     existing = await engine.get_user(message.from_user.id)

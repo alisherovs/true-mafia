@@ -1170,6 +1170,12 @@ class GameEngine:
             await session.commit()
 
             lang = await self.get_group_language(game.chat_id)
+            document_user_ids = [
+                user.telegram_id
+                for user in users.values()
+                if (user.fake_document or 0) > 0 and user.use_fake_document is not False
+            ]
+            document_text = self._fake_document_roles_text(players)
 
         for player in players:
             role = Role(player.role)
@@ -1181,6 +1187,14 @@ class GameEngine:
                 )
             except TelegramForbiddenError:
                 await bot.send_message(game.chat_id, f"{player.display_name}: {t(lang, 'need_start_for_role')}")
+
+        used_document_ids: list[int] = []
+        for telegram_id in document_user_ids:
+            sent = await self._send_fake_document_report(bot, telegram_id, document_text, game.chat_id)
+            if sent:
+                used_document_ids.append(telegram_id)
+        if used_document_ids:
+            await self._consume_fake_documents(used_document_ids)
 
         # Send team messages for Mafia
         mafia_team = [player for player in players if player.team == Team.MAFIA.value]
@@ -1239,6 +1253,61 @@ class GameEngine:
                     )
                 except TelegramForbiddenError:
                     pass
+
+    def _fake_document_roles_text(self, players: list[GamePlayer]) -> str:
+        lines = [
+            "📁 <b>Hujjat ishga tushdi!</b>",
+            "",
+            "Ushbu o'yindagi rollar:",
+        ]
+        for idx, player in enumerate(players, 1):
+            lines.append(
+                f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)} - {role_label(player.role)}"
+            )
+        return "\n".join(lines)
+
+    async def _send_fake_document_report(
+        self,
+        bot: Bot,
+        telegram_id: int,
+        text: str,
+        chat_id: int,
+    ) -> bool:
+        chunks: list[str] = []
+        current = ""
+        for line in text.splitlines():
+            candidate = f"{current}\n{line}" if current else line
+            if len(candidate) > 3800:
+                if current:
+                    chunks.append(current)
+                current = line
+            else:
+                current = candidate
+        if current:
+            chunks.append(current)
+
+        try:
+            for index, chunk in enumerate(chunks):
+                await bot.send_message(
+                    telegram_id,
+                    chunk,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id) if index == len(chunks) - 1 else None,
+                )
+            return True
+        except TelegramForbiddenError:
+            return False
+
+    async def _consume_fake_documents(self, telegram_ids: list[int]) -> None:
+        if not telegram_ids:
+            return
+        async with self.session_factory() as session:
+            users = (
+                await session.execute(select(User).where(User.telegram_id.in_(telegram_ids)))
+            ).scalars().all()
+            for user in users:
+                if (user.fake_document or 0) > 0:
+                    user.fake_document -= 1
+            await session.commit()
 
     def _night_prompt_for_player(
         self,
@@ -3476,11 +3545,9 @@ class GameEngine:
             winners: list[GamePlayer] = []
             losers: list[GamePlayer] = []
             for p in players:
-                is_winner = bool(p.won) or p.team == winner_team.value
-                if winner_team == Team.KILLER:
-                    is_winner = bool(p.won) or (p.team == Team.KILLER.value and p.alive)
-                elif winner_team == Team.NEUTRAL:
-                    is_winner = bool(p.won) or (p.team == Team.NEUTRAL.value and p.alive)
+                # O'yin davomida o'lganlar yakunda mag'lub hisoblanadi.
+                # Faqat Suidsid kabi alohida shart bilan yutgan rollar p.won orqali g'olib bo'lib qoladi.
+                is_winner = bool(p.won) or (p.team == winner_team.value and p.alive)
                 if p.role == Role.MINER.value and p.alive:
                     is_winner = True
                 p.won = is_winner
@@ -4153,6 +4220,8 @@ class GameEngine:
                 current = int(getattr(user, field_name) or 0)
                 setattr(user, field_name, current + int(value))
             await session.commit()
+        if item_key == "fake_document":
+            return True, "✅ 📁 Hujjat sotib olindi. Keyingi o'yin boshlanganda rollar haqida ma'lumot botdan avtomatik keladi."
         return True, "✅ Xarid muvaffaqiyatli amalga oshirildi."
 
     async def owner_stats(self) -> str:

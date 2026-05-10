@@ -84,7 +84,7 @@ ROLE_META: dict[Role, RoleMeta] = {
         Role.SORCERER,
         Team.CITY,
         "💣",
-        "️Afsungar",
+        "Afsungar",
         "Sizning maqsadingiz tinch fuqarolarga yordam berish.  Agar kechasi o'ldirilsang, seni o'ldirgan ham o'ladi.  Agar kunlik ovoz berishda o'ldirilsangiz, siz biron bir o'yinchini tanlashingiz va uni o'zingiz bilan birga jahannaga ravona bo'lishingiz mumkin.",
     ),
     Role.DON: RoleMeta(
@@ -112,7 +112,7 @@ ROLE_META: dict[Role, RoleMeta] = {
         Role.SPY,
         Team.MAFIA,
         "🕴",
-        "Josus",
+        "Ayg'oqchi",
         "Mafialar tarafida yashirin o'ynaysiz. Komissar sizni tekshirsa, oddiy shahar odamidek ko'rinasiz.",
     ),
     Role.KILLER: RoleMeta(
@@ -308,6 +308,7 @@ ROLE_MIN_PLAYERS: dict[str, int] = {
     "killer": 9,
     "journalist": 9,
     "hired_killer": 12,
+    "werewolf": 19,
 }
 
 ROLE_MIN_KEYS: dict[Role, str] = {
@@ -318,6 +319,7 @@ ROLE_MIN_KEYS: dict[Role, str] = {
     Role.LAWYER: "advocate",
     Role.SPY: "spy",
     Role.KILLER: "killer",
+    Role.WOLF: "werewolf",
     Role.JOURNALIST: "journalist",
     Role.HIRED_KILLER: "hired_killer",
 }
@@ -330,6 +332,7 @@ ACTIVE_ROLE_POOL: tuple[Role, ...] = (
     Role.LAWYER,
     Role.SPY,
     Role.KILLER,
+    Role.WOLF,
     Role.JOURNALIST,
     Role.HIRED_KILLER,
 )
@@ -347,6 +350,7 @@ NON_MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.COMMISSAR,
     Role.DOCTOR,
     Role.KILLER,
+    Role.WOLF,
 )
 
 REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (
@@ -429,7 +433,9 @@ def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role
     future_non_mafia = [
         role
         for role in NON_MAFIA_ACTIVE_ROLES
-        if role not in disabled_roles and role not in roles
+        if role not in disabled_roles
+        and role not in roles
+        and (role != Role.WOLF or player_count > 18)
     ]
     for role in future_non_mafia:
         if len(roles) >= player_count:
@@ -509,6 +515,9 @@ def _build_classic_role_set(player_count: int, disabled_roles: Optional[set[Role
         while len(roles) < player_count:
             roles.append(extras[idx % len(extras)])
             idx += 1
+
+    if player_count <= 18:
+        roles = [Role.CITIZEN if role == Role.WOLF else role for role in roles]
 
     roles = [role for role in roles if role not in disabled]
     if len(roles) < player_count:
