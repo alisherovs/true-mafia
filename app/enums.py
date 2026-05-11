@@ -66,6 +66,8 @@ class Role(str, Enum):
     HIRED_KILLER = "hired_killer"
     MAQ = "maq"
     MINER = "miner"
+    PRANKSTER = "prankster"
+    LOVE_ANGEL = "love_angel"
 
 
 class ActionType(str, Enum):
@@ -81,6 +83,8 @@ class ActionType(str, Enum):
     REVENGE_PICK = "revenge_pick"
     MINE = "mine"
     MINE_PROTECT = "mine_protect"
+    PRANK = "prank"
+    LOVE = "love"
     SKIP = "skip"
 
 

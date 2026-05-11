@@ -234,6 +234,8 @@ class GameEngine:
             return f"{base} Afsungar qasosi bilan o'ldirildi..."
         if cause == "miner":
             return f"{base} o'lim koniga qulab tushdi..."
+        if cause == "love":
+            return f"{base} sevgi rishtasi uzilgani sabab halok bo'ldi..."
         return f"{base} vaxshiylarcha o'ldirildi..."
 
     def _death_story_line(
@@ -256,6 +258,8 @@ class GameEngine:
             visitor = "🧙‍ Sehrgar qasosi"
         elif cause == "miner":
             visitor = "👷 o'lim koni"
+        elif cause == "love":
+            visitor = "💘 sevgi rishtasi"
         else:
             visitor = "noma'lum mehmon"
         return f"Tunda {role} {name}...\nvaxshiylarcha o'ldirildi. Aytishlaricha unikiga {visitor} kelgan."
@@ -274,6 +278,8 @@ class GameEngine:
             return "🧙‍ Sehrgar qasosi"
         if cause == "miner":
             return "👷 o'lim koni"
+        if cause == "love":
+            return "💘 sevgi rishtasi"
         return "noma'lum mehmon"
 
     def _build_alive_status_text(self, alive_players: list[GamePlayer]) -> str:
@@ -392,7 +398,94 @@ class GameEngine:
             if action_key == "mine_protect":
                 return "👷 Konchi o'zini himoyalashga qaror qildi..."
             return "👷 Konchi konlardan biriga yo'l oldi..."
+        if role == Role.PRANKSTER:
+            return "🧑🏻‍🦲 Hazilkash prank qilishga ketdi"
+        if role == Role.LOVE_ANGEL:
+            return (
+                "💘 Sevgi farishtasi tun qorong'usida bir insonning uyiga bordi...\n"
+                "U ikki yurak orasida ko'rinmas rishta bog'ladi.\n"
+                "Endi bu ikki taqdir bir-biriga ulanib qoldi."
+            )
         return None
+
+    @staticmethod
+    def _prank_message_for_role(role: Role) -> str:
+        if role == Role.COMMISSAR:
+            return "😂 Siz bugun kimnidur tekshirmoqchi edingiz biroq lupangizni hazilkash banan bilan almashtirib ketibdi"
+        if role in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER, Role.KILLER}:
+            return "😂 Siz bugun pichogingiz bilan kimnidur oldirmoqchi edingiz biroq hazilkash sizga qoshiq ushlatib ketibdi"
+        if role == Role.BUM:
+            return "😂 Siz bugun ichkilik ichgani bormoqchi edingiz biroq hazilkash pivangizni mors bilan almashtirib qoyibdi"
+        if role == Role.MISTRESS:
+            return "😂 Siz bugun kimdur bilan kongil yozmoqchi edingiz biroq hazilkash taksistga sizni boshqa uyga jonatishini sorabdi"
+        if role == Role.DOCTOR:
+            return "😂 Siz bugun kimnidir davolamoqchi edingiz biroq hazilkash dorilarni shakar bilan almashtirib ketibdi"
+        if role == Role.LAWYER:
+            return "😂 Siz bugun kimnidir himoya qilmoqchi edingiz biroq hazilkash papkangizga bo'sh qog'oz solib ketibdi"
+        if role == Role.JOURNALIST:
+            return "😂 Siz bugun intervyu olmoqchi edingiz biroq hazilkash mikrofoningizni sabzi bilan almashtirib ketibdi"
+        if role == Role.MINER:
+            return "😂 Siz bugun konga bormoqchi edingiz biroq hazilkash belkuragingizni o'yinchoq qilib qo'yibdi"
+        return "😂 Hazilkash bugungi rejangizni kulgili prankka aylantirib yubordi"
+
+    @staticmethod
+    def _love_target_message() -> str:
+        return (
+            "💘 Bu tun yuragingiz g'alati urdi...\n"
+            "Kimdir siz bilan sirli sevgi rishtasini bog'ladi.\n"
+            "Endi taqdiringiz yolg'iz emas."
+        )
+
+    @staticmethod
+    def _love_death_message() -> str:
+        return (
+            "💔 Sevgi rishtasi uzildi...\n"
+            "Bir yurak to'xtadi, ikkinchisi esa bu ayriliqqa chiday olmadi."
+        )
+
+    @staticmethod
+    def _love_link_pairs_from_actions(actions: list[NightAction]) -> list[tuple[int, int]]:
+        pairs: list[tuple[int, int]] = []
+        seen: set[frozenset[int]] = set()
+        for action in actions:
+            if action.action_type != ActionType.LOVE.value or action.target_telegram_id is None:
+                continue
+            if action.actor_telegram_id == action.target_telegram_id:
+                continue
+            key = frozenset((action.actor_telegram_id, action.target_telegram_id))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append((action.actor_telegram_id, action.target_telegram_id))
+        return pairs
+
+    def _apply_love_link_deaths(
+        self,
+        love_pairs: list[tuple[int, int]],
+        player_map: dict[int, GamePlayer],
+        dead: set[int],
+        death_causes: dict[int, str],
+        death_visitors: dict[int, str],
+    ) -> set[int]:
+        added: set[int] = set()
+        changed = True
+        while changed:
+            changed = False
+            for first_id, second_id in love_pairs:
+                first_dead = first_id in dead
+                second_dead = second_id in dead
+                if first_dead == second_dead:
+                    continue
+                survivor_id = second_id if first_dead else first_id
+                survivor = player_map.get(survivor_id)
+                if survivor is None or not survivor.alive or survivor_id in dead:
+                    continue
+                dead.add(survivor_id)
+                added.add(survivor_id)
+                death_causes[survivor_id] = "love"
+                death_visitors[survivor_id] = role_label(Role.LOVE_ANGEL)
+                changed = True
+        return added
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
         safe_words = escape(words.strip()[:500])
@@ -1316,6 +1409,7 @@ class GameEngine:
         player: GamePlayer,
         alive_players: list[GamePlayer],
         miner_visits: Optional[dict[int, set[int]]] = None,
+        love_used_ids: Optional[set[int]] = None,
     ) -> Optional[tuple[str, object]]:
         role = Role(player.role)
         all_choices = [(p.telegram_id, p.display_name) for p in alive_players]
@@ -1358,6 +1452,12 @@ class GameEngine:
             return "👩🏼‍💻 Kimdan intervyu olasiz?", target_keyboard("watch", game_id, player.telegram_id, targets)
         if role == Role.CROOK:
             return "🤹🏻 Kimni chalg'itasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
+        if role == Role.PRANKSTER:
+            return "😂 Kimga prank qilasiz?", target_keyboard("prank", game_id, player.telegram_id, targets)
+        if role == Role.LOVE_ANGEL:
+            if player.telegram_id in (love_used_ids or set()):
+                return None
+            return "💘 Kim bilan sevgi rishtasi o'rnatasiz?", target_keyboard("love", game_id, player.telegram_id, targets)
         if role == Role.MINER:
             visited = miner_visits.get(player.telegram_id, set()) if miner_visits else set()
             return "Qaysi konga borasiz?", miner_keyboard(game_id, player.telegram_id, visited)
@@ -1381,6 +1481,17 @@ class GameEngine:
                 return False, "Siz bu o'yinda ro'yxatdan o'tmagansiz."
 
             alive = await self._alive_players(session, game_id)
+            love_used_ids = set(
+                (
+                    await session.execute(
+                        select(NightAction.actor_telegram_id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.action_type == ActionType.LOVE.value,
+                            NightAction.details == "love_active",
+                        )
+                    )
+                ).scalars().all()
+            )
             prompt = None
             if game.phase == GamePhase.NIGHT.value and player.alive:
                 existing_action = (
@@ -1393,7 +1504,13 @@ class GameEngine:
                     )
                 ).scalar_one_or_none()
                 if existing_action is None:
-                    prompt = self._night_prompt_for_player(game_id, game.night_number, player, alive)
+                    prompt = self._night_prompt_for_player(
+                        game_id,
+                        game.night_number,
+                        player,
+                        alive,
+                        love_used_ids=love_used_ids,
+                    )
             is_night = game.phase == GamePhase.NIGHT.value
             is_alive = player.alive
             night_number = game.night_number
@@ -1594,9 +1711,20 @@ class GameEngine:
             for actor_id, mine_number in mine_rows:
                 if mine_number is not None:
                     miner_visits[actor_id].add(mine_number)
+            love_used_ids = set(
+                (
+                    await session.execute(
+                        select(NightAction.actor_telegram_id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.action_type == ActionType.LOVE.value,
+                            NightAction.details == "love_active",
+                        )
+                    )
+                ).scalars().all()
+            )
 
         for player in alive:
-            prompt = self._night_prompt_for_player(game_id, night, player, alive, miner_visits)
+            prompt = self._night_prompt_for_player(game_id, night, player, alive, miner_visits, love_used_ids)
             if prompt is None:
                 continue
             text, keyboard = prompt
@@ -1635,6 +1763,8 @@ class GameEngine:
             "revenge": ActionType.REVENGE_PICK,
             "mine": ActionType.MINE,
             "mine_protect": ActionType.MINE_PROTECT,
+            "prank": ActionType.PRANK,
+            "love": ActionType.LOVE,
         }
         action_type = action_map.get(action_key)
         if action_type is None:
@@ -1664,15 +1794,17 @@ class GameEngine:
             actor_role = Role(actor.role)
             night_blocked = (
                 await session.execute(
-                    select(NightAction.id).where(
+                    select(NightAction.action_type).where(
                         NightAction.game_id == game_id,
                         NightAction.night_number == game.night_number,
-                        NightAction.action_type == ActionType.BLOCK.value,
+                        NightAction.action_type.in_([ActionType.BLOCK.value, ActionType.PRANK.value]),
                         NightAction.target_telegram_id == actor_id,
                     )
                 )
             ).scalar_one_or_none()
             if night_blocked is not None:
+                if night_blocked == ActionType.PRANK.value:
+                    return False, self._prank_message_for_role(actor_role)
                 return False, "Kezuvchi sabab bu tunda hech qanday amal bajara olmaysiz."
 
             allowed_actions: dict[Role, set[str]] = {
@@ -1692,6 +1824,8 @@ class GameEngine:
                 Role.BUM: {"visit"},
                 Role.SORCERER: {"revenge"},
                 Role.MINER: {"mine", "mine_protect"},
+                Role.PRANKSTER: {"prank"},
+                Role.LOVE_ANGEL: {"love"},
             }
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
@@ -1728,6 +1862,22 @@ class GameEngine:
                 if already_healed_target is not None:
                     return False, "Kimni davolaymiz?"
 
+            if action_type == ActionType.LOVE:
+                if target_id == actor_id:
+                    return False, "Sevgi farishtasi o'zini tanlay olmaydi."
+                already_loved = (
+                    await session.execute(
+                        select(NightAction.id).where(
+                            NightAction.game_id == game_id,
+                            NightAction.actor_telegram_id == actor_id,
+                            NightAction.action_type == ActionType.LOVE.value,
+                            NightAction.details == "love_active",
+                        )
+                    )
+                ).scalar_one_or_none()
+                if already_loved is not None:
+                    return False, "Sevgi rishtasi faqat 1 marta o'rnatiladi."
+
             if action_type in {ActionType.MINE, ActionType.MINE_PROTECT}:
                 target = actor
             else:
@@ -1755,6 +1905,8 @@ class GameEngine:
                 success_text = f"Siz {target_id:02d}-konni tanladingiz."
             elif action_type == ActionType.MINE_PROTECT:
                 success_text = "Siz himoyalanishni tanladingiz."
+            elif action_type == ActionType.LOVE:
+                success_text = f"Siz - {target.display_name} bilan sevgi rishtasi o'rnatdingiz."
             else:
                 success_text = f"Siz - {target.display_name} ni tanladingiz."
             group_activity_line = self._night_activity_line(actor_role, action_key)
@@ -2055,6 +2207,15 @@ class GameEngine:
                     )
                 )
             ).scalars().all()
+            prior_love_actions = (
+                await session.execute(
+                    select(NightAction).where(
+                        NightAction.game_id == game_id,
+                        NightAction.action_type == ActionType.LOVE.value,
+                        NightAction.details == "love_active",
+                    )
+                )
+            ).scalars().all()
 
             blocked: set[int] = set()
             defended: set[int] = set()
@@ -2064,6 +2225,10 @@ class GameEngine:
             visited: dict[int, int] = {}
             watched: dict[int, int] = {}
             visitors_by_target: dict[int, list[int]] = defaultdict(list)
+            prank_targets: set[int] = set()
+            prank_notices: list[tuple[int, str]] = []
+            love_notices: list[tuple[int, str]] = []
+            protected_group_lines: list[str] = []
 
             for act in actions:
                 if act.actor_telegram_id not in alive_ids:
@@ -2071,6 +2236,11 @@ class GameEngine:
                 actor = player_map[act.actor_telegram_id]
                 if not actor.alive:
                     continue
+                if act.action_type == ActionType.PRANK.value and act.target_telegram_id:
+                    target = player_map.get(act.target_telegram_id)
+                    if target:
+                        prank_targets.add(act.target_telegram_id)
+                        prank_notices.append((act.target_telegram_id, self._prank_message_for_role(Role(target.role))))
                 if act.action_type == ActionType.BLOCK.value and act.target_telegram_id:
                     target = player_map.get(act.target_telegram_id)
                     target_user = users_by_tg.get(act.target_telegram_id)
@@ -2098,7 +2268,7 @@ class GameEngine:
                         target.blocked_until_day = game.day_number + 1
 
             for act in actions:
-                if act.actor_telegram_id in blocked:
+                if act.actor_telegram_id in blocked or act.actor_telegram_id in prank_targets:
                     continue
                 if act.action_type == ActionType.HEAL.value and act.target_telegram_id:
                     healed.add(act.target_telegram_id)
@@ -2112,6 +2282,9 @@ class GameEngine:
                     visited[act.actor_telegram_id] = act.target_telegram_id
                 elif act.action_type == ActionType.MINE_PROTECT.value:
                     guarded.add(act.actor_telegram_id)
+                elif act.action_type == ActionType.LOVE.value and act.target_telegram_id:
+                    act.details = "love_active"
+                    love_notices.append((act.target_telegram_id, self._love_target_message()))
 
                 if (
                     act.target_telegram_id
@@ -2119,6 +2292,13 @@ class GameEngine:
                     and act.action_type not in {ActionType.WATCH.value, ActionType.MINE.value}
                 ):
                     visitors_by_target[act.target_telegram_id].append(act.actor_telegram_id)
+
+            current_love_actions = [
+                act
+                for act in actions
+                if act.action_type == ActionType.LOVE.value and act.details == "love_active"
+            ]
+            love_pairs = self._love_link_pairs_from_actions(prior_love_actions + current_love_actions)
 
             don_kills = []
             mafia_fallback_kills = []
@@ -2130,7 +2310,7 @@ class GameEngine:
             night_activity_lines: list[str] = []
 
             for act in actions:
-                if act.actor_telegram_id in blocked:
+                if act.actor_telegram_id in blocked or act.actor_telegram_id in prank_targets:
                     continue
                 actor = player_map.get(act.actor_telegram_id)
                 if actor is None:
@@ -2162,7 +2342,6 @@ class GameEngine:
             transformed: list[str] = []
             night_event_lines: list[str] = []
             protected_notices: list[tuple[int, str]] = []
-            protected_group_lines: list[str] = []
             last_words_prompts: list[tuple[int, str]] = []
             miner_result_notices: list[tuple[int, str]] = []
             miner_group_lines: list[str] = []
@@ -2347,6 +2526,10 @@ class GameEngine:
                             remaining_protection=user.protection,
                         )
 
+            love_dead = self._apply_love_link_deaths(love_pairs, player_map, dead, death_causes, death_visitors)
+            if love_dead:
+                night_event_lines.append(self._love_death_message())
+
             # Daydi sees what happened at the house he visited.
             witness_lines: list[tuple[int, str]] = []
             killed_targets = dead.copy()
@@ -2443,6 +2626,10 @@ class GameEngine:
                     death_causes[attacker] = "sorcerer"
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
 
+            extra_love_dead = self._apply_love_link_deaths(love_pairs, player_map, dead, death_causes, death_visitors)
+            if extra_love_dead and not love_dead:
+                night_event_lines.append(self._love_death_message())
+
             for dead_id in dead:
                 pl = player_map.get(dead_id)
                 if pl:
@@ -2528,6 +2715,30 @@ class GameEngine:
                 await bot.send_message(
                     telegram_id,
                     '"Ana 💊dori tasir qila boshladi endi sen bir kun uxlaysan...", - dedi 💃 Kezuvchi',
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in prank_notices:
+            if telegram_id in dead:
+                continue
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in love_notices:
+            if telegram_id in dead:
+                continue
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
                     reply_markup=await self.group_return_keyboard(bot, chat_id),
                 )
             except TelegramForbiddenError:
@@ -3429,10 +3640,12 @@ class GameEngine:
 
                     if Role(target.role) == Role.SORCERER:
                         alive_now = await self._alive_players(session, game_id)
+                        extra_day_dead: set[int] = set()
                         if alive_now:
                             victim = alive_now[0]
                             victim.alive = False
                             victim.death_day = game.day_number
+                            extra_day_dead.add(victim.telegram_id)
                             self._add_game_log(
                                 session,
                                 game,
@@ -3442,6 +3655,56 @@ class GameEngine:
                             )
                             await session.commit()
                             await bot.send_message(chat_id, f"🧞‍♂️ Afsungar bilan birga {victim.display_name} ham ketdi.")
+                    else:
+                        extra_day_dead = set()
+
+                    all_players = (
+                        await session.execute(
+                            select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                        )
+                    ).scalars().all()
+                    love_actions = (
+                        await session.execute(
+                            select(NightAction).where(
+                                NightAction.game_id == game_id,
+                                NightAction.action_type == ActionType.LOVE.value,
+                                NightAction.details == "love_active",
+                            )
+                        )
+                    ).scalars().all()
+                    love_dead = self._apply_love_link_deaths(
+                        self._love_link_pairs_from_actions(love_actions),
+                        {player.telegram_id: player for player in all_players},
+                        {target.telegram_id, *extra_day_dead},
+                        {},
+                        {},
+                    )
+                    for love_id in love_dead:
+                        love_player = next((player for player in all_players if player.telegram_id == love_id), None)
+                        if love_player:
+                            love_player.alive = False
+                            love_player.death_day = game.day_number
+                            self._add_game_log(
+                                session,
+                                game,
+                                "love_link_death_after_hang",
+                                target=love_player,
+                            )
+                    extra_successions = self._apply_role_successions(all_players, extra_day_dead | love_dead)
+                    if love_dead or extra_successions:
+                        await session.commit()
+                    if love_dead:
+                        await bot.send_message(chat_id, self._love_death_message())
+                    for line, heir_id, new_role in extra_successions:
+                        await bot.send_message(chat_id, line)
+                        try:
+                            await bot.send_message(
+                                heir_id,
+                                self._private_role_text(new_role),
+                                reply_markup=await self.group_return_keyboard(bot, chat_id),
+                            )
+                        except TelegramForbiddenError:
+                            pass
             else:
                 self._add_game_log(
                     session,

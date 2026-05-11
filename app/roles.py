@@ -199,6 +199,22 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Konchi",
         "Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta 💎'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.",
     ),
+    Role.PRANKSTER: RoleMeta(
+        Role.PRANKSTER,
+        Team.NEUTRAL,
+        "🧑🏻‍🦲",
+        "Hazilkash",
+        "Siz tunda bir kishini tanlaysiz va unga hazil qilasiz. U o'sha tunda hazilomus harakatlar qiladi.",
+    ),
+    Role.LOVE_ANGEL: RoleMeta(
+        Role.LOVE_ANGEL,
+        Team.CITY,
+        "💘",
+        "Sevgi farishtasi",
+        "Siz tunda bir kishining uyiga tashrif buyurasiz va u bilan sevgi rishtasi o'rnatasiz.\n"
+        "Agar siz o'lsangiz yoki osilsangiz, siz bilan bog'langan inson ham yuragi ezilib halok bo'ladi.\n"
+        "Agar bog'langan inson o'lsa yoki osilsa, siz ham uning ortidan ketasiz.",
+    ),
 }
 
 
@@ -227,6 +243,8 @@ MANIAC = Role.KILLER
 MER = Role.MAYOR
 HIRED_KILLER = Role.HIRED_KILLER
 MINER = Role.MINER
+PRANKSTER = Role.PRANKSTER
+LOVE_ANGEL = Role.LOVE_ANGEL
 
 BASE_ROLE_TABLE: dict[int, list[Role]] = {
     4: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (C, 2)),
@@ -272,8 +290,34 @@ def _with_miner(player_count: int, roles: list[Role]) -> list[Role]:
     return updated
 
 
+def _with_prankster(player_count: int, roles: list[Role]) -> list[Role]:
+    if player_count < 15 or Role.PRANKSTER in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.PRANKSTER
+            return updated
+    updated[-1] = Role.PRANKSTER
+    return updated
+
+
+def _with_love_angel(player_count: int, roles: list[Role]) -> list[Role]:
+    if player_count < 17 or Role.LOVE_ANGEL in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.LOVE_ANGEL
+            return updated
+    updated[-1] = Role.LOVE_ANGEL
+    return updated
+
+
 EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
-    count: _with_miner(count, roles)
+    count: _with_love_angel(count, _with_prankster(count, _with_miner(count, roles)))
     for count, roles in BASE_ROLE_TABLE.items()
 }
 
@@ -309,6 +353,8 @@ ROLE_MIN_PLAYERS: dict[str, int] = {
     "journalist": 9,
     "hired_killer": 12,
     "werewolf": 19,
+    "prankster": 10,
+    "love_angel": 12,
 }
 
 ROLE_MIN_KEYS: dict[Role, str] = {
@@ -322,6 +368,8 @@ ROLE_MIN_KEYS: dict[Role, str] = {
     Role.WOLF: "werewolf",
     Role.JOURNALIST: "journalist",
     Role.HIRED_KILLER: "hired_killer",
+    Role.PRANKSTER: "prankster",
+    Role.LOVE_ANGEL: "love_angel",
 }
 
 ACTIVE_ROLE_POOL: tuple[Role, ...] = (
@@ -333,6 +381,8 @@ ACTIVE_ROLE_POOL: tuple[Role, ...] = (
     Role.SPY,
     Role.KILLER,
     Role.WOLF,
+    Role.PRANKSTER,
+    Role.LOVE_ANGEL,
     Role.JOURNALIST,
     Role.HIRED_KILLER,
 )
@@ -351,6 +401,8 @@ NON_MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.DOCTOR,
     Role.KILLER,
     Role.WOLF,
+    Role.PRANKSTER,
+    Role.LOVE_ANGEL,
 )
 
 REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (

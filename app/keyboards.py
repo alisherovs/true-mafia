@@ -124,6 +124,8 @@ ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.COMMISSAR,
     Role.MAFIA,
     Role.MINER,
+    Role.PRANKSTER,
+    Role.LOVE_ANGEL,
     Role.JUDGE,
     Role.KILLER,
     Role.LUCKY,
