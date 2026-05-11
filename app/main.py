@@ -16,7 +16,7 @@ from aiogram.types import Message
 from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
-from app.handlers import admin, callbacks, economy, game, language, profile, roles, settings as settings_handler, start, top
+from app.handlers import admin, callbacks, economy, game, hero, language, profile, roles, settings as settings_handler, start, top
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
 
@@ -99,6 +99,7 @@ async def main() -> None:
     dp.include_router(roles.router)
     dp.include_router(profile.router)
     dp.include_router(economy.router)
+    dp.include_router(hero.router)
     dp.include_router(settings_handler.router)
     dp.include_router(top.router)
     dp.include_router(callbacks.router)

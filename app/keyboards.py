@@ -5,7 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.config import Settings
 from app.enums import Role
-from app.roles import ACTIVE_ROLE_POOL, role_label
+from app.roles import ACTIVE_ROLE_POOL, SHOP_ROLE_CATALOG, role_label
 from app.texts import t
 
 LANGS = [
@@ -384,9 +384,15 @@ def roles_overview_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def shop_keyboard() -> InlineKeyboardMarkup:
+def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
+    hero_button = (
+        InlineKeyboardButton(text="🥷 Geroyim", callback_data="hero:panel")
+        if has_hero
+        else InlineKeyboardButton(text="🥷 Geroy sotib olish - 100💎", callback_data="hero:shop:buy")
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [hero_button],
             [InlineKeyboardButton(text="🛡 Himoya - 100💵", callback_data="shop:buy:protection")],
             [InlineKeyboardButton(text="📁 Hujjat - 190💵", callback_data="shop:buy:fake_document")],
             [InlineKeyboardButton(text="⚖️ Ovozdan himoya - 1💎", callback_data="shop:buy:vote_protection")],
@@ -396,27 +402,103 @@ def shop_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="⛑️ Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
             [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
-            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 200💵", callback_data="shop:disable_roles")],
+            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
         ]
     )
 
 
-def role_shop_keyboard() -> InlineKeyboardMarkup:
+def hero_panel_keyboard(is_for_sale: bool = False) -> InlineKeyboardMarkup:
+    sale_rows = (
+        [
+            [InlineKeyboardButton(text="❌ Sotuvdan qaytarish", callback_data="hero:sale:cancel")],
+            [InlineKeyboardButton(text="✏️ Narxni o'zgartirish", callback_data="hero:sale:price")],
+        ]
+        if is_for_sale
+        else [[InlineKeyboardButton(text="🏷 Geroyni sotish", callback_data="hero:sell")]]
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🕵🏻‍♂ Komissar - $300", callback_data="shop:role:commissar")],
-            [InlineKeyboardButton(text="👨🏻‍⚕ Doktor - $260", callback_data="shop:role:doctor")],
-            [InlineKeyboardButton(text="🤵🏻 Don - $500", callback_data="shop:role:don")],
-            [InlineKeyboardButton(text="🔪 Qotil - $450", callback_data="shop:role:killer")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
+            [InlineKeyboardButton(text="➕ 1000 Ball qo'shish", callback_data="hero:add_points")],
+            [InlineKeyboardButton(text="🛡 Himoyani yangilash", callback_data="hero:upgrade_def")],
+            [InlineKeyboardButton(text="🩸 Qurolni zaryadlash", callback_data="hero:recharge")],
+            [InlineKeyboardButton(text="🖋 Nomini o'zgartirish", callback_data="hero:rename")],
+            *sale_rows,
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="shop:open")],
         ]
     )
 
 
+def hero_game_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⚔️ Zarba berish", callback_data="hero:game:attack")],
+            [InlineKeyboardButton(text="🛡 Himoyalanish", callback_data="hero:game:defend")],
+            [InlineKeyboardButton(text="📊 Jonlar holati", callback_data="hero:game:hp")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="hero:game:cancel")],
+        ]
+    )
+
+
+def hero_target_keyboard(players: list[object]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=getattr(player, "display_name", "User"), callback_data=f"hero:game:target:{player.id}")]
+        for player in players
+    ]
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="hero:game:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def hero_defense_keyboard(max_amount: int) -> InlineKeyboardMarkup:
+    choices = [amount for amount in (10, 20, 30) if amount <= max_amount]
+    rows = [[InlineKeyboardButton(text=str(amount), callback_data=f"hero:game:defamount:{amount}")] for amount in choices]
+    rows.append([InlineKeyboardButton(text="Maksimal", callback_data="hero:game:defamount:max")])
+    rows.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="hero:game:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def hero_damage_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Maksimal zarba", callback_data="hero:game:damage:max")],
+            [InlineKeyboardButton(text="🔙 Orqaga", callback_data="hero:game:attack")],
+        ]
+    )
+
+
+def hero_market_buy_keyboard(hero_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Sotib olish", callback_data=f"hero:market:buy:{hero_id}")],
+        ]
+    )
+
+
+def owner_hero_market_keyboard(has_channel: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="➕ Qo'shish / o'zgartirish", callback_data="owner:hero_market_set")]]
+    if has_channel:
+        rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:hero_market_clear")])
+    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def role_shop_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for item in SHOP_ROLE_CATALOG:
+        icon = "💎" if item.currency == "diamonds" else "💵"
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{role_label(item.role)} - {item.price}{icon}",
+                callback_data=f"shop:role:{item.role.value}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🚫 {role_label(role)} - $200", callback_data=f"shop:disable_role:{role.value}")]
+        [InlineKeyboardButton(text=f"🚫 {role_label(role)} - 100💵", callback_data=f"shop:disable_role:{role.value}")]
         for role in ACTIVE_ROLE_POOL
         if role not in {Role.CITIZEN, Role.DON}
     ]
@@ -473,6 +555,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="� Blacklist", callback_data="owner:blacklist")],
             [InlineKeyboardButton(text="�👤 Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
+            [InlineKeyboardButton(text="🥷 Geroy savdo kanali", callback_data="owner:hero_market_channel")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],

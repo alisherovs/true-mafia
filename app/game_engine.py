@@ -28,6 +28,8 @@ from app.keyboards import (
     go_vote_private_keyboard,
     go_group_keyboard,
     group_url_from_chat_id,
+    hero_game_keyboard,
+    hero_market_buy_keyboard,
     judge_cancel_keyboard,
     lobby_keyboard,
     miner_keyboard,
@@ -42,6 +44,7 @@ from app.models import (
     GamePlayer,
     Group,
     HangVote,
+    Hero,
     NightAction,
     NightPrompt,
     PremiumGroup,
@@ -55,12 +58,32 @@ from app.roles import (
     ACTIVE_ROLE_POOL,
     GAME_MODES,
     ROLE_META,
+    SHOP_ROLE_BY_VALUE,
     build_role_set,
     normalize_game_mode,
     role_label,
     role_preset_label,
     role_preset_max_players,
     role_team,
+)
+from app.hero import (
+    HERO_ADD_POINTS_AMOUNT,
+    HERO_ADD_POINTS_PRICE_DIAMONDS,
+    HERO_ALLOWED_ROLES,
+    HERO_BUY_PRICE_DIAMONDS,
+    HERO_CANCEL_SALE_PRICE_DIAMONDS,
+    HERO_DEFAULT_CHARGE,
+    HERO_DEFAULT_HP,
+    HERO_DEFAULT_NAME,
+    HERO_LEVELS,
+    HERO_MARKET_CHANNEL_KEY,
+    HERO_MAX_CHARGE,
+    HERO_RECHARGE_PRICE_DOLLAR,
+    HERO_RENAME_PRICE_DOLLAR,
+    HERO_UPGRADE_DEFENSE_PRICE_DOLLAR,
+    hero_level_for_points,
+    safe_hero_name,
+    sanitize_hero_name,
 )
 from app.scheduler import scheduler
 from app.texts import t
@@ -519,7 +542,7 @@ class GameEngine:
                 heir.role = Role.DON.value
                 heir.team = Team.MAFIA.value
                 successions.append((
-                    f"🤵🏻 Donning qora merosi {self._tg_mention(heir.telegram_id, heir.display_name)} qo'liga o'tdi.",
+                    "🤵🏻 Don mafiyaga meros qoldirdi.",
                     heir.telegram_id,
                     Role.DON,
                 ))
@@ -1240,9 +1263,9 @@ class GameEngine:
                     user.next_game_role = None
                     continue
                 holder = next((p for p in players if assigned[p.telegram_id] == desired), None)
-                if holder is None:
-                    continue
-                assigned[holder.telegram_id], assigned[player.telegram_id] = assigned[player.telegram_id], desired
+                if holder is not None and holder.telegram_id != player.telegram_id:
+                    assigned[holder.telegram_id] = assigned[player.telegram_id]
+                assigned[player.telegram_id] = desired
                 user.next_game_role = None
 
             for player, role in zip(players, roles):
@@ -2880,6 +2903,8 @@ class GameEngine:
             await self.finish_game(bot, game_id, winner)
             return
 
+        await self.send_hero_phase_prompts(bot, game_id)
+
         scheduler.add_job(
             self.start_voting,
             "date",
@@ -2896,6 +2921,9 @@ class GameEngine:
                 return
             game.phase = GamePhase.DAY_VOTING.value
             alive = await self._alive_players(session, game_id)
+            for player in alive:
+                player.hero_defense_active = False
+                player.hero_defense_amount = 0
             self._add_game_log(
                 session,
                 game,
@@ -3946,6 +3974,353 @@ class GameEngine:
             f"🎲 Всего игр: <b>{user.total_games}</b>"
         )
 
+    async def user_has_hero(self, telegram_id: int) -> bool:
+        async with self.session_factory() as session:
+            hero_id = (
+                await session.execute(
+                    select(Hero.id)
+                    .join(User, User.id == Hero.owner_user_id)
+                    .where(User.telegram_id == telegram_id)
+                )
+            ).scalar_one_or_none()
+            return hero_id is not None
+
+    @staticmethod
+    def _sync_hero_level(hero: Hero) -> None:
+        info = hero_level_for_points(int(hero.points or 0))
+        hero.level = info.level
+        hero.max_defense = info.max_defense
+        hero.current_defense = min(int(hero.current_defense or 0), int(info.max_defense))
+        hero.max_charge = HERO_MAX_CHARGE
+        hero.charge = min(int(hero.charge or 0), HERO_MAX_CHARGE)
+
+    @staticmethod
+    def _hero_panel_text(hero: Hero) -> str:
+        info = hero_level_for_points(int(hero.points or 0))
+        next_text = (
+            f"{info.next_level} => {info.next_points} ball"
+            if info.next_level and info.next_points is not None
+            else "Maksimal daraja"
+        )
+        sale_text = ""
+        if hero.is_for_sale:
+            sale_text = f"\n🏷 Sotuvda: 💎 {hero.sale_price_diamonds or 0}"
+        return (
+            "Geroylar haqida\n\n"
+            f"🥷 Geroy: {safe_hero_name(hero.name)}\n"
+            f"⭐️ Daraja: {info.level}\n"
+            f"👊 Kuch: {info.power_text}\n"
+            f"🖤 Himoya: {int(hero.current_defense or 0)}\n"
+            f"♥️ Max himoya: {info.max_defense}\n"
+            f"🩸 Zaryad miqdori: {int(hero.charge or 0)}\n"
+            f"☑️ Jami ballari: {int(hero.points or 0)} ball\n"
+            f"⏫ Keyingi daraja = {next_text}{sale_text}\n\n"
+            "🛒 Xaridlar uchun:\n"
+            f"➕ 1000 Ball qo'shish = 💎 {HERO_ADD_POINTS_PRICE_DIAMONDS}\n"
+            f"🛡 Himoyani yangilash = 💶 {HERO_UPGRADE_DEFENSE_PRICE_DOLLAR}\n"
+            f"🩸 Qurolni zaryadlash = 💶 {HERO_RECHARGE_PRICE_DOLLAR}\n"
+            f"🖋 Geroy nomini o'zgertirish = 💶 {HERO_RENAME_PRICE_DOLLAR}"
+        )
+
+    async def hero_panel_data(self, telegram_id: int) -> tuple[bool, str, bool]:
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    select(Hero)
+                    .join(User, User.id == Hero.owner_user_id)
+                    .where(User.telegram_id == telegram_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return False, "❌ Sizda hali geroy yo'q. Do'kondan 💎 100 almazga sotib olishingiz mumkin.", False
+            self._sync_hero_level(row)
+            await session.commit()
+            return True, self._hero_panel_text(row), bool(row.is_for_sale)
+
+    async def buy_hero(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None:
+                return False, "Avval /start bosing."
+            existing = (await session.execute(select(Hero.id).where(Hero.owner_user_id == user.id))).scalar_one_or_none()
+            if existing is not None:
+                return False, "Sizda allaqachon geroy bor."
+            if int(user.diamonds or 0) < HERO_BUY_PRICE_DIAMONDS:
+                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {HERO_BUY_PRICE_DIAMONDS}, Sizda: 💎 {user.diamonds or 0}"
+            user.diamonds -= HERO_BUY_PRICE_DIAMONDS
+            hero = Hero(
+                owner_user_id=user.id,
+                name=HERO_DEFAULT_NAME,
+                points=0,
+                level=1,
+                current_defense=0,
+                max_defense=0.0,
+                charge=HERO_DEFAULT_CHARGE,
+                max_charge=HERO_MAX_CHARGE,
+            )
+            session.add(hero)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return False, "Sizda allaqachon geroy bor."
+        return True, "✅ Tabriklaymiz! Siz 🥷 Geroy sotib oldingiz."
+
+    async def hero_add_points(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Sizda hali geroy yo'q. Do'kondan 💎 100 almazga sotib olishingiz mumkin."
+            if int(user.diamonds or 0) < HERO_ADD_POINTS_PRICE_DIAMONDS:
+                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {HERO_ADD_POINTS_PRICE_DIAMONDS}, Sizda: 💎 {user.diamonds or 0}"
+            old_level = int(hero.level or 1)
+            user.diamonds -= HERO_ADD_POINTS_PRICE_DIAMONDS
+            hero.points = int(hero.points or 0) + HERO_ADD_POINTS_AMOUNT
+            self._sync_hero_level(hero)
+            await session.commit()
+            level_line = f"\n⭐️ Daraja oshdi: {old_level} → {hero.level}" if hero.level != old_level else ""
+            return True, f"✅ +{HERO_ADD_POINTS_AMOUNT} ball qo'shildi. Jami: {hero.points} ball.{level_line}"
+
+    async def hero_upgrade_defense(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            self._sync_hero_level(hero)
+            max_defense = int(hero.max_defense or 0)
+            if max_defense <= 0:
+                return False, "Bu darajada himoya ochilmagan."
+            if int(hero.current_defense or 0) >= max_defense:
+                return False, "Himoya maksimal."
+            if int(user.dollar or 0) < HERO_UPGRADE_DEFENSE_PRICE_DOLLAR:
+                return False, f"❌ Mablag' yetarli emas. Kerak: 💶 {HERO_UPGRADE_DEFENSE_PRICE_DOLLAR}, Sizda: 💶 {user.dollar or 0}"
+            user.dollar -= HERO_UPGRADE_DEFENSE_PRICE_DOLLAR
+            hero.current_defense = min(max_defense, int(hero.current_defense or 0) + 10)
+            await session.commit()
+            return True, f"🛡 Himoya yangilandi: 🖤 {hero.current_defense}/{max_defense}"
+
+    async def hero_recharge(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            if int(hero.charge or 0) >= HERO_MAX_CHARGE:
+                return False, "Qurol zaryadi to'liq."
+            if int(user.dollar or 0) < HERO_RECHARGE_PRICE_DOLLAR:
+                return False, f"❌ Mablag' yetarli emas. Kerak: 💶 {HERO_RECHARGE_PRICE_DOLLAR}, Sizda: 💶 {user.dollar or 0}"
+            user.dollar -= HERO_RECHARGE_PRICE_DOLLAR
+            hero.charge = HERO_MAX_CHARGE
+            hero.max_charge = HERO_MAX_CHARGE
+            await session.commit()
+            return True, "🩸 Qurol zaryadi to'liq 10 ga qaytarildi."
+
+    async def hero_rename(self, telegram_id: int, raw_name: str) -> tuple[bool, str]:
+        ok, name_or_error = sanitize_hero_name(raw_name)
+        if not ok:
+            return False, name_or_error
+        async with self.session_factory() as session:
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            if int(user.dollar or 0) < HERO_RENAME_PRICE_DOLLAR:
+                return False, f"❌ Mablag' yetarli emas. Kerak: 💶 {HERO_RENAME_PRICE_DOLLAR}, Sizda: 💶 {user.dollar or 0}"
+            hero.name = name_or_error
+            user.dollar -= HERO_RENAME_PRICE_DOLLAR
+            await session.commit()
+        return True, f"✅ Geroy nomi yangilandi: {safe_hero_name(name_or_error)}"
+
+    async def _hero_owner_row(self, session: AsyncSession, telegram_id: int) -> tuple[Optional[User], Optional[Hero]]:
+        user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+        if user is None:
+            return None, None
+        hero = (await session.execute(select(Hero).where(Hero.owner_user_id == user.id))).scalar_one_or_none()
+        return user, hero
+
+    async def get_hero_market_channel_id(self) -> Optional[str]:
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == HERO_MARKET_CHANNEL_KEY))
+            ).scalar_one_or_none()
+            value = (setting.value if setting else "").strip()
+            return value or None
+
+    async def set_hero_market_channel(self, bot: Bot, raw_channel: str) -> tuple[bool, str]:
+        channel = (raw_channel or "").strip()
+        if not channel:
+            return False, "Kanal ID yoki @username yuboring."
+        if not (channel.startswith("@") or channel.startswith("-100") or channel.lstrip("-").isdigit()):
+            return False, "Kanal @username yoki kanal ID bo'lishi kerak."
+        try:
+            chat = await bot.get_chat(channel)
+            me = await bot.get_me()
+            member = await bot.get_chat_member(chat.id, me.id)
+        except Exception as exc:
+            return False, f"❌ Kanal topilmadi yoki bot kira olmaydi: {exc}"
+        if member.status not in {"administrator", "creator"}:
+            return False, "❌ Bot o'sha kanalda admin bo'lishi kerak."
+        value = str(chat.id)
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == HERO_MARKET_CHANNEL_KEY))
+            ).scalar_one_or_none()
+            if setting is None:
+                session.add(BotSetting(key=HERO_MARKET_CHANNEL_KEY, value=value))
+            else:
+                setting.value = value
+            await session.commit()
+        return True, f"✅ Geroy savdo kanali ulandi: <code>{value}</code>"
+
+    async def clear_hero_market_channel(self) -> str:
+        async with self.session_factory() as session:
+            setting = (
+                await session.execute(select(BotSetting).where(BotSetting.key == HERO_MARKET_CHANNEL_KEY))
+            ).scalar_one_or_none()
+            if setting is None:
+                session.add(BotSetting(key=HERO_MARKET_CHANNEL_KEY, value=""))
+            else:
+                setting.value = ""
+            await session.commit()
+        return "✅ Geroy savdo kanali o'chirildi."
+
+    def _hero_market_text(self, hero: Hero) -> str:
+        info = hero_level_for_points(int(hero.points or 0))
+        return (
+            "🥷 <b>GEROY SOTUVDA!</b>\n\n"
+            f"🥷 Geroy: {safe_hero_name(hero.name)}\n"
+            f"⭐️ Daraja: {info.level}\n"
+            f"👊 Kuch: {info.power_text}\n"
+            f"🖤 Himoya: {int(hero.current_defense or 0)}\n"
+            f"♥️ Max himoya: {info.max_defense}\n"
+            f"🩸 Zaryad miqdori: {int(hero.charge or 0)}\n"
+            f"☑️ Jami ballari: {int(hero.points or 0)} ball\n\n"
+            f"💎 Narxi: {int(hero.sale_price_diamonds or 0)} almaz"
+        )
+
+    async def hero_put_for_sale(self, bot: Bot, telegram_id: int, price: int) -> tuple[bool, str]:
+        if price < 1 or price > 1_000_000:
+            return False, "Narx 1 dan 1 000 000 almazgacha bo'lishi kerak."
+        channel_id = await self.get_hero_market_channel_id()
+        if not channel_id:
+            return False, "❌ Geroy savdo kanali hali admin tomonidan ulanmagan."
+        async with self.session_factory() as session:
+            _, hero = await self._hero_owner_row(session, telegram_id)
+            if hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            hero.is_for_sale = True
+            hero.sale_price_diamonds = price
+            self._sync_hero_level(hero)
+            await session.commit()
+            hero_id = hero.id
+            text = self._hero_market_text(hero)
+        try:
+            sent = await bot.send_message(channel_id, text, reply_markup=hero_market_buy_keyboard(hero_id))
+        except Exception as exc:
+            async with self.session_factory() as session:
+                hero = (await session.execute(select(Hero).where(Hero.id == hero_id))).scalar_one_or_none()
+                if hero:
+                    hero.is_for_sale = False
+                    hero.sale_price_diamonds = None
+                    await session.commit()
+            return False, f"❌ Kanalga post yuborilmadi: {exc}"
+        async with self.session_factory() as session:
+            hero = (await session.execute(select(Hero).where(Hero.id == hero_id))).scalar_one_or_none()
+            if hero:
+                hero.sale_channel_message_id = sent.message_id
+                await session.commit()
+        return True, f"✅ Geroyingiz sotuvga qo'yildi. Narx: 💎 {price}"
+
+    async def hero_cancel_sale(self, bot: Bot, telegram_id: int) -> tuple[bool, str]:
+        channel_id = await self.get_hero_market_channel_id()
+        async with self.session_factory() as session:
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            if not hero.is_for_sale:
+                return False, "Geroy sotuvda emas."
+            if int(user.diamonds or 0) < HERO_CANCEL_SALE_PRICE_DIAMONDS:
+                return False, "❌ Sotuvdan qaytarish uchun 💎 1 almaz kerak."
+            user.diamonds -= HERO_CANCEL_SALE_PRICE_DIAMONDS
+            message_id = hero.sale_channel_message_id
+            hero.is_for_sale = False
+            hero.sale_price_diamonds = None
+            hero.sale_channel_message_id = None
+            await session.commit()
+        if channel_id and message_id:
+            try:
+                await bot.edit_message_text("❌ Geroy sotuvdan olindi.", chat_id=channel_id, message_id=message_id)
+            except Exception:
+                pass
+        return True, "✅ Geroy sotuvdan qaytarildi. Xizmat narxi: 💎 1 almaz."
+
+    async def hero_update_sale_price(self, bot: Bot, telegram_id: int, price: int) -> tuple[bool, str]:
+        if price < 1 or price > 1_000_000:
+            return False, "Narx 1 dan 1 000 000 almazgacha bo'lishi kerak."
+        channel_id = await self.get_hero_market_channel_id()
+        async with self.session_factory() as session:
+            _, hero = await self._hero_owner_row(session, telegram_id)
+            if hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            if not hero.is_for_sale:
+                return False, "Geroy sotuvda emas."
+            hero.sale_price_diamonds = price
+            message_id = hero.sale_channel_message_id
+            text = self._hero_market_text(hero)
+            hero_id = hero.id
+            await session.commit()
+        if channel_id and message_id:
+            try:
+                await bot.edit_message_text(text, chat_id=channel_id, message_id=message_id, reply_markup=hero_market_buy_keyboard(hero_id))
+            except Exception:
+                pass
+        return True, f"✅ Geroy narxi yangilandi: 💎 {price}"
+
+    async def hero_market_buy(self, bot: Bot, buyer_telegram_id: int, hero_id: int) -> tuple[bool, str]:
+        channel_id = await self.get_hero_market_channel_id()
+        seller_telegram_id: Optional[int] = None
+        buyer_text = "✅ Siz geroyni sotib oldingiz."
+        seller_text = ""
+        message_id: Optional[int] = None
+        async with self.session_factory() as session:
+            buyer = (await session.execute(select(User).where(User.telegram_id == buyer_telegram_id))).scalar_one_or_none()
+            if buyer is None:
+                return False, "Avval /start bosing."
+            if (await session.execute(select(Hero.id).where(Hero.owner_user_id == buyer.id))).scalar_one_or_none() is not None:
+                return False, "❌ Avval o'z geroyingizni soting yoki sotuvdan chiqaring."
+            hero = (
+                await session.execute(select(Hero).where(Hero.id == hero_id).with_for_update())
+            ).scalar_one_or_none()
+            if hero is None or not hero.is_for_sale or not hero.sale_price_diamonds:
+                return False, "Geroy sotuvda emas yoki allaqachon sotilgan."
+            seller = (await session.execute(select(User).where(User.id == hero.owner_user_id))).scalar_one_or_none()
+            if seller is None:
+                return False, "Sotuvchi topilmadi."
+            if seller.telegram_id == buyer_telegram_id:
+                return False, "O'z geroyingizni sotib ololmaysiz."
+            price = int(hero.sale_price_diamonds or 0)
+            if int(buyer.diamonds or 0) < price:
+                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {price}, Sizda: 💎 {buyer.diamonds or 0}"
+            buyer.diamonds -= price
+            seller.diamonds += price
+            seller_telegram_id = seller.telegram_id
+            seller_text = f"✅ Geroyingiz sotildi. Hisobingizga 💎 {price} almaz qo'shildi."
+            message_id = hero.sale_channel_message_id
+            hero.owner_user_id = buyer.id
+            hero.is_for_sale = False
+            hero.sale_price_diamonds = None
+            hero.sale_channel_message_id = None
+            await session.commit()
+        if channel_id and message_id:
+            try:
+                await bot.edit_message_text("✅ <b>SOTILDI</b>", chat_id=channel_id, message_id=message_id)
+            except Exception:
+                pass
+        if seller_telegram_id:
+            try:
+                await bot.send_message(seller_telegram_id, seller_text)
+            except Exception:
+                pass
+        return True, buyer_text
+
     async def user_in_running_game(self, telegram_id: int) -> bool:
         async with self.session_factory() as session:
             player_id = (
@@ -3961,6 +4336,306 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             return player_id is not None
+
+    async def _hero_game_context(
+        self,
+        session: AsyncSession,
+        telegram_id: int,
+        *,
+        require_charge: bool = False,
+    ) -> tuple[bool, str, Optional[Game], Optional[GamePlayer], Optional[User], Optional[Hero]]:
+        row = (
+            await session.execute(
+                select(Game, GamePlayer, User, Hero)
+                .join(GamePlayer, GamePlayer.game_id == Game.id)
+                .join(User, User.telegram_id == GamePlayer.telegram_id)
+                .join(Hero, Hero.owner_user_id == User.id)
+                .where(
+                    Game.status == GameStatus.ACTIVE.value,
+                    GamePlayer.telegram_id == telegram_id,
+                )
+                .order_by(Game.id.desc())
+            )
+        ).first()
+        if row is None:
+            return False, "❌ Siz hozir aktiv o'yinda emassiz.", None, None, None, None
+        game, player, user, hero = row
+        if game.phase != GamePhase.DAY_DISCUSSION.value:
+            if game.phase in {GamePhase.DAY_VOTING.value, GamePhase.DAY_CONFIRM.value}:
+                return False, "❌ Geroydan foydalanish vaqti tugagan. Ovoz berish boshlandi.", game, player, user, hero
+            return False, "❌ Geroy faqat tong otgandan keyin, ovoz berish boshlanguncha ishlaydi.", game, player, user, hero
+        if not player.alive:
+            return False, "❌ Siz tirik emassiz.", game, player, user, hero
+        if Role(player.role) not in HERO_ALLOWED_ROLES:
+            return False, "❌ Geroydan o'yinda faqat Don, Mafia, Qotil, Yollanma qotil, Qo'riqchi va Komissar foydalanishi mumkin.", game, player, user, hero
+        if hero.is_for_sale:
+            return False, "❌ Sotuvdagi geroy locked. Sotuvdan qaytarmaguncha o'yinda ishlata olmaysiz.", game, player, user, hero
+        if require_charge and int(hero.charge or 0) <= 0:
+            return False, "❌ Geroy quroli zaryadsiz. Do'kondan zaryadlang.", game, player, user, hero
+        self._sync_hero_level(hero)
+        return True, "", game, player, user, hero
+
+    async def hero_game_panel_text(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            ok, text, _, player, _, hero = await self._hero_game_context(session, telegram_id)
+            if not ok:
+                return False, text
+            return True, (
+                "🥷 Siz geroyingizdan foydalanishingiz mumkin.\n"
+                "Ovoz berish boshlanguncha vaqtingiz bor.\n\n"
+                f"🎭 Rol: {role_label(player.role)}\n"
+                f"🩸 Zaryad: {int(hero.charge or 0)}/{HERO_MAX_CHARGE}\n"
+                f"🖤 Himoya: {int(hero.current_defense or 0)}/{int(hero.max_defense or 0)}"
+            )
+
+    async def hero_game_targets(self, telegram_id: int) -> tuple[bool, str, list[GamePlayer]]:
+        async with self.session_factory() as session:
+            ok, text, game, player, _, _ = await self._hero_game_context(session, telegram_id, require_charge=True)
+            if not ok or game is None or player is None:
+                return False, text, []
+            targets = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game.id,
+                        GamePlayer.alive.is_(True),
+                        GamePlayer.telegram_id != player.telegram_id,
+                    ).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            return True, "⚔️ Kimga zarba berasiz?", targets
+
+    async def hero_game_hp_text(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            ok, text, game, _, _, _ = await self._hero_game_context(session, telegram_id)
+            if not ok or game is None:
+                return False, text
+            players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game.id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            lines = ["📊 <b>O'yinchilar joni:</b>"]
+            for idx, player in enumerate(players, 1):
+                mark = " ☠️" if not player.alive or int(player.hero_hp or 0) <= 0 else ""
+                lines.append(
+                    f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)} — "
+                    f"♥️ {int(player.hero_hp or 0)}/{int(player.hero_max_hp or HERO_DEFAULT_HP)}{mark}"
+                )
+            return True, "\n".join(lines)
+
+    async def hero_game_defend_options(self, telegram_id: int) -> tuple[bool, str, int]:
+        async with self.session_factory() as session:
+            ok, text, _, _, _, hero = await self._hero_game_context(session, telegram_id)
+            if not ok or hero is None:
+                return False, text, 0
+            if int(hero.current_defense or 0) <= 0:
+                return False, "Himoya mavjud emas. Do'kondan himoyani yangilang.", 0
+            return True, "🛡 Qancha himoya ishlatasiz?", int(hero.current_defense or 0)
+
+    async def hero_game_defend(self, telegram_id: int, amount_raw: str) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            ok, text, _, player, _, hero = await self._hero_game_context(session, telegram_id)
+            if not ok or player is None or hero is None:
+                return False, text
+            current = int(hero.current_defense or 0)
+            if current <= 0:
+                return False, "Himoya mavjud emas. Do'kondan himoyani yangilang."
+            amount = current if amount_raw == "max" else int(amount_raw)
+            amount = max(1, min(amount, current))
+            hero.current_defense = current - amount
+            player.hero_defense_active = True
+            player.hero_defense_amount = int(player.hero_defense_amount or 0) + amount
+            await session.commit()
+            return True, f"🛡 Siz {amount} himoya yoqdingiz. Qolgan himoya: 🖤 {hero.current_defense}/{int(hero.max_defense or 0)}"
+
+    async def hero_damage_prompt(self, telegram_id: int, target_player_id: int) -> tuple[bool, str, bool]:
+        async with self.session_factory() as session:
+            ok, text, game, player, _, hero = await self._hero_game_context(session, telegram_id, require_charge=True)
+            if not ok or game is None or player is None or hero is None:
+                return False, text, False
+            target = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.id == target_player_id,
+                        GamePlayer.game_id == game.id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if target is None:
+                return False, "Target topilmadi yoki tirik emas.", False
+            if target.telegram_id == player.telegram_id:
+                return False, "O'zingizni ura olmaysiz.", False
+            info = hero_level_for_points(int(hero.points or 0))
+            if info.max_hit:
+                return True, "Maksimal zarba tugmasini bosing yoki damage sonini yuboring.", True
+            return True, f"Damage kiriting: {info.power_text}", False
+
+    async def hero_game_attack(
+        self,
+        bot: Bot,
+        attacker_telegram_id: int,
+        target_player_id: int,
+        damage_raw: str,
+    ) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            ok, text, game, attacker, _, hero = await self._hero_game_context(
+                session,
+                attacker_telegram_id,
+                require_charge=True,
+            )
+            if not ok or game is None or attacker is None or hero is None:
+                return False, text
+            target = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.id == target_player_id,
+                        GamePlayer.game_id == game.id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if target is None:
+                return False, "Target topilmadi yoki tirik emas."
+            if target.telegram_id == attacker.telegram_id:
+                return False, "O'zingizni ura olmaysiz."
+
+            info = hero_level_for_points(int(hero.points or 0))
+            target_hp = int(target.hero_hp or HERO_DEFAULT_HP)
+            target_defense = int(target.hero_defense_amount or 0) if target.hero_defense_active else 0
+            if damage_raw == "max":
+                if not info.max_hit:
+                    return False, "Bu darajada maksimal zarba mavjud emas."
+                entered_damage = max(1, target_hp + target_defense)
+            else:
+                if not damage_raw.isdigit():
+                    return False, "Damage faqat butun son bo'lishi kerak."
+                entered_damage = int(damage_raw)
+                if info.max_hit:
+                    if entered_damage < 1 or entered_damage > max(1, target_hp + target_defense):
+                        return False, f"Damage 1 dan {max(1, target_hp + target_defense)} gacha bo'lishi kerak."
+                else:
+                    min_power = int(HERO_LEVELS[int(hero.level)]["power_min"])  # type: ignore[index]
+                    max_power = int(HERO_LEVELS[int(hero.level)]["power_max"])  # type: ignore[index]
+                    if entered_damage < min_power or entered_damage > max_power:
+                        return False, f"Damage {min_power}-{max_power} oralig'ida bo'lishi kerak."
+
+            hero.charge = max(0, int(hero.charge or 0) - 1)
+            remaining_damage = entered_damage
+            if target.hero_defense_active and int(target.hero_defense_amount or 0) > 0:
+                absorbed = min(int(target.hero_defense_amount or 0), remaining_damage)
+                target.hero_defense_amount = int(target.hero_defense_amount or 0) - absorbed
+                remaining_damage -= absorbed
+                if int(target.hero_defense_amount or 0) <= 0:
+                    target.hero_defense_active = False
+                    target.hero_defense_amount = 0
+            if remaining_damage > 0:
+                target.hero_hp = max(0, int(target.hero_hp or HERO_DEFAULT_HP) - remaining_damage)
+
+            killed = target.hero_hp <= 0
+            kill_text = ""
+            succession_events: list[tuple[str, int, Role]] = []
+            if killed:
+                target.alive = False
+                target.killed_by_hero = True
+                target.death_day = game.day_number
+                all_players = (
+                    await session.execute(
+                        select(GamePlayer).where(GamePlayer.game_id == game.id).order_by(GamePlayer.id.asc())
+                    )
+                ).scalars().all()
+                succession_events = self._apply_role_successions(all_players, {target.telegram_id})
+                target_name = self._tg_mention(target.telegram_id, target.display_name)
+                kill_text = (
+                    f"⚰️ 🔪 Qotil {target_name}ni {role_label(attacker.role)} "
+                    "o'zining jasur geroyi bilan yer tishlatdi!"
+                )
+                self._add_game_log(
+                    session,
+                    game,
+                    "hero_kill",
+                    actor_role=attacker.role,
+                    target=target,
+                    damage=entered_damage,
+                )
+            else:
+                self._add_game_log(
+                    session,
+                    game,
+                    "hero_attack",
+                    actor_role=attacker.role,
+                    target=target,
+                    damage=entered_damage,
+                    hp=target.hero_hp,
+                )
+            await session.commit()
+            chat_id = game.chat_id
+            target_id = target.telegram_id
+            target_hp_after = int(target.hero_hp or 0)
+            target_max_hp = int(target.hero_max_hp or HERO_DEFAULT_HP)
+            game_id = game.id
+
+        if killed:
+            await bot.send_message(chat_id, kill_text)
+            for line, heir_id, new_role in succession_events:
+                await bot.send_message(chat_id, line)
+                try:
+                    await bot.send_message(
+                        heir_id,
+                        self._private_role_text(new_role),
+                        reply_markup=await self.group_return_keyboard(bot, chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+            winner = await self.check_winner(game_id)
+            if winner:
+                await self.finish_game(bot, game_id, winner)
+            return True, "⚔️ Zarba berildi. Target o'yindan chetlatildi."
+        try:
+            await bot.send_message(
+                target_id,
+                f"💥 Sizga noma'lum geroy tomonidan zarba berildi. Qolgan jon: ♥️ {target_hp_after}/{target_max_hp}",
+                reply_markup=await self.group_return_keyboard(bot, chat_id),
+            )
+        except TelegramForbiddenError:
+            pass
+        return True, f"⚔️ Zarba berildi. Target joni: ♥️ {target_hp_after}/{target_max_hp}"
+
+    async def send_hero_phase_prompts(self, bot: Bot, game_id: int) -> None:
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(Game, GamePlayer, User, Hero)
+                    .join(GamePlayer, GamePlayer.game_id == Game.id)
+                    .join(User, User.telegram_id == GamePlayer.telegram_id)
+                    .join(Hero, Hero.owner_user_id == User.id)
+                    .where(
+                        Game.id == game_id,
+                        Game.status == GameStatus.ACTIVE.value,
+                        Game.phase == GamePhase.DAY_DISCUSSION.value,
+                        GamePlayer.alive.is_(True),
+                        GamePlayer.role.in_([role.value for role in HERO_ALLOWED_ROLES]),
+                        Hero.is_for_sale.is_(False),
+                        Hero.charge > 0,
+                    )
+                )
+            ).all()
+            chat_id = rows[0][0].chat_id if rows else None
+        if not rows:
+            return
+        sent_any = False
+        for _, player, _, _ in rows:
+            try:
+                await bot.send_message(
+                    player.telegram_id,
+                    "🥷 Siz geroyingizdan foydalanishingiz mumkin. Ovoz berish boshlanguncha vaqtingiz bor.",
+                    reply_markup=hero_game_keyboard(),
+                )
+                sent_any = True
+            except TelegramForbiddenError:
+                pass
+        if chat_id and sent_any:
+            await bot.send_message(chat_id, "🥷 Geroy egalari bot shaxsiy xabaridan foydalanishi mumkin.")
 
     async def use_gun(self, bot: Bot, chat_id: int, shooter_id: int, target_id: int) -> tuple[bool, str]:
         if shooter_id == target_id:
@@ -4435,11 +5110,30 @@ class GameEngine:
             "mask": (100, "dollar", "mask", 1),
             "killer_protection": (2, "diamonds", "killer_protection", 1),
             "miner_protection": (300, "dollar", "miner_protection", 1),
-            "role:commissar": (300, "dollar", "next_game_role", Role.COMMISSAR.value),
-            "role:doctor": (260, "dollar", "next_game_role", Role.DOCTOR.value),
-            "role:don": (500, "dollar", "next_game_role", Role.DON.value),
-            "role:killer": (450, "dollar", "next_game_role", Role.KILLER.value),
         }
+        if item_key.startswith("role:"):
+            role_value = item_key.split(":", maxsplit=1)[1]
+            shop_role = SHOP_ROLE_BY_VALUE.get(role_value)
+            if shop_role is None:
+                return False, "Bunday rol do'konda topilmadi."
+            async with self.session_factory() as session:
+                user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+                if user is None:
+                    return False, "Avval /start bosing."
+                if user.next_game_role:
+                    return False, f"Keyingi o'yin uchun rol allaqachon tanlangan: {role_label(user.next_game_role)}"
+                balance = user.diamonds if shop_role.currency == "diamonds" else user.dollar
+                icon = "💎" if shop_role.currency == "diamonds" else "💵"
+                if balance < shop_role.price:
+                    return False, f"Balans yetarli emas. Kerak: {icon} {shop_role.price}"
+                if shop_role.currency == "diamonds":
+                    user.diamonds -= shop_role.price
+                else:
+                    user.dollar -= shop_role.price
+                user.next_game_role = shop_role.role.value
+                await session.commit()
+            return True, f"✅ Keyingi o'yinda sizga {role_label(shop_role.role)} roli beriladi."
+
         if item_key.startswith("disable_role:"):
             role_value = item_key.split(":", maxsplit=1)[1]
             try:
@@ -4454,9 +5148,9 @@ class GameEngine:
                     return False, "Avval /start bosing."
                 if user.next_game_disabled_role:
                     return False, "Keyingi o'yin uchun faol rol allaqachon o'chirilgan."
-                if user.dollar < 200:
-                    return False, "Balans yetarli emas. Kerak: 💵 200"
-                user.dollar -= 200
+                if user.dollar < 100:
+                    return False, "Balans yetarli emas. Kerak: 💵 100"
+                user.dollar -= 100
                 user.next_game_disabled_role = disabled_role.value
                 await session.commit()
             return True, f"✅ Keyingi o'yinda {role_label(disabled_role)} pool'dan olib tashlanadi."

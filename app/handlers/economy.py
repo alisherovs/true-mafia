@@ -115,10 +115,11 @@ async def _finish_giveaway(
 @router.message(Command("shop"))
 async def cmd_shop(message: Message, engine: GameEngine) -> None:
     await engine.ensure_user(message.from_user)
+    has_hero = await engine.user_has_hero(message.from_user.id) if message.from_user else False
     await message.answer(
         "🛒 <b>Do'kon</b>\n\n"
         "Himoya va maxsus imkoniyatlarni 💵 dollar yoki 💎 almaz orqali sotib olishingiz mumkin.",
-        reply_markup=shop_keyboard(),
+        reply_markup=shop_keyboard(has_hero),
     )
 
 
@@ -128,10 +129,11 @@ async def shop_open_callback(callback: CallbackQuery, engine: GameEngine) -> Non
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
     await engine.ensure_user(callback.from_user)
+    has_hero = await engine.user_has_hero(callback.from_user.id)
     await callback.message.edit_text(
         "🛒 <b>Do'kon</b>\n\n"
         "Kerakli itemni tanlang. Xarid summasi profilingizdagi 💵 dollar yoki 💎 almazdan yechiladi.",
-        reply_markup=shop_keyboard(),
+        reply_markup=shop_keyboard(has_hero),
     )
     await callback.answer()
 
@@ -143,7 +145,7 @@ async def shop_roles_callback(callback: CallbackQuery) -> None:
         return
     await callback.message.edit_text(
         "🃏 <b>Keyingi o'yindagi rol</b>\n\n"
-        "Agar tanlangan rol o'sha o'yin role jadvalida mavjud bo'lsa, bot uni sizga berishga harakat qiladi.",
+        "Tanlangan rol keyingi o'yinda sizga beriladi. Agar balans yetarli bo'lsa, xarid faqat bir marta saqlanadi.",
         reply_markup=role_shop_keyboard(),
     )
     await callback.answer()
@@ -157,7 +159,7 @@ async def shop_disable_roles_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "🚫 <b>Faol rolni o'chirish</b>\n\n"
         "Tanlangan faol rol keyingi o'yin role pool'idan olib tashlanadi.\n"
-        "Narx: <b>💵 200</b>",
+        "Narx: <b>💵 100</b>",
         reply_markup=disable_role_shop_keyboard(),
     )
     await callback.answer()

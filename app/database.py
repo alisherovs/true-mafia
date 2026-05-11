@@ -141,6 +141,11 @@ async def _ensure_lightweight_columns(conn) -> None:
             "won": "BOOLEAN DEFAULT FALSE",
             "transformed_to_role": "VARCHAR(64)",
             "transformed_to_team": "VARCHAR(32)",
+            "hero_hp": "INTEGER DEFAULT 100",
+            "hero_max_hp": "INTEGER DEFAULT 100",
+            "hero_defense_active": "BOOLEAN DEFAULT FALSE",
+            "hero_defense_amount": "INTEGER DEFAULT 0",
+            "killed_by_hero": "BOOLEAN DEFAULT FALSE",
         },
     )
 
@@ -197,6 +202,8 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_game_players_telegram_alive ON game_players(telegram_id, alive)")
     )
+    await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_hero_owner ON heroes(owner_user_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_heroes_for_sale ON heroes(is_for_sale, sale_price_diamonds)"))
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_premium_groups_total_diamonds ON premium_groups(total_diamonds)")
     )

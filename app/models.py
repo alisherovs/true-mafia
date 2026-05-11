@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -125,8 +125,37 @@ class GamePlayer(Base):
 
     transformed_to_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     transformed_to_team: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    hero_hp: Mapped[int] = mapped_column(Integer, default=100)
+    hero_max_hp: Mapped[int] = mapped_column(Integer, default=100)
+    hero_defense_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    hero_defense_amount: Mapped[int] = mapped_column(Integer, default=0)
+    killed_by_hero: Mapped[bool] = mapped_column(Boolean, default=False)
 
     game: Mapped[Game] = relationship(back_populates="players")
+
+
+class Hero(Base):
+    __tablename__ = "heroes"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", name="uq_hero_owner"),
+        Index("ix_heroes_for_sale", "is_for_sale", "sale_price_diamonds"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(20), default="Master")
+    points: Mapped[int] = mapped_column(Integer, default=0)
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    current_defense: Mapped[int] = mapped_column(Integer, default=0)
+    max_defense: Mapped[float] = mapped_column(Float, default=0.0)
+    charge: Mapped[int] = mapped_column(Integer, default=10)
+    max_charge: Mapped[int] = mapped_column(Integer, default=10)
+    is_for_sale: Mapped[bool] = mapped_column(Boolean, default=False)
+    sale_price_diamonds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sale_channel_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class NightAction(Base):

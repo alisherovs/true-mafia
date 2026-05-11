@@ -16,6 +16,13 @@ class RoleMeta:
     short_desc_uz: str
 
 
+@dataclass(frozen=True)
+class RoleShopItem:
+    role: Role
+    price: int
+    currency: str
+
+
 ROLE_META: dict[Role, RoleMeta] = {
     Role.CITIZEN: RoleMeta(
         Role.CITIZEN,
@@ -215,6 +222,42 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Agar siz o'lsangiz yoki osilsangiz, siz bilan bog'langan inson ham yuragi ezilib halok bo'ladi.\n"
         "Agar bog'langan inson o'lsa yoki osilsa, siz ham uning ortidan ketasiz.",
     ),
+}
+
+
+SHOP_ROLE_CATALOG: tuple[RoleShopItem, ...] = (
+    RoleShopItem(Role.PRANKSTER, 6, "diamonds"),
+    RoleShopItem(Role.LOVE_ANGEL, 6, "diamonds"),
+    RoleShopItem(Role.MINER, 5, "diamonds"),
+    RoleShopItem(Role.HIRED_KILLER, 5, "diamonds"),
+    RoleShopItem(Role.JUDGE, 4, "diamonds"),
+    RoleShopItem(Role.SNITCH, 4, "diamonds"),
+    RoleShopItem(Role.MAYOR, 3, "diamonds"),
+    RoleShopItem(Role.MAQ, 3, "diamonds"),
+    RoleShopItem(Role.COMMISSAR, 2, "diamonds"),
+    RoleShopItem(Role.DON, 2, "diamonds"),
+    RoleShopItem(Role.KILLER, 2, "diamonds"),
+    RoleShopItem(Role.GUARD, 2, "diamonds"),
+    RoleShopItem(Role.ARSONIST, 1, "diamonds"),
+    RoleShopItem(Role.MAFIA, 1, "diamonds"),
+    RoleShopItem(Role.SERGEANT, 1, "diamonds"),
+    RoleShopItem(Role.CROOK, 1, "diamonds"),
+    RoleShopItem(Role.WATCHER, 1, "diamonds"),
+    RoleShopItem(Role.DOCTOR, 1000, "dollar"),
+    RoleShopItem(Role.MISTRESS, 500, "dollar"),
+    RoleShopItem(Role.JOURNALIST, 500, "dollar"),
+    RoleShopItem(Role.LAWYER, 500, "dollar"),
+    RoleShopItem(Role.SORCERER, 500, "dollar"),
+    RoleShopItem(Role.WOLF, 500, "dollar"),
+    RoleShopItem(Role.BUM, 400, "dollar"),
+    RoleShopItem(Role.JESTER, 300, "dollar"),
+    RoleShopItem(Role.SPY, 300, "dollar"),
+    RoleShopItem(Role.LUCKY, 250, "dollar"),
+    RoleShopItem(Role.CITIZEN, 100, "dollar"),
+)
+
+SHOP_ROLE_BY_VALUE: dict[str, RoleShopItem] = {
+    item.role.value: item for item in SHOP_ROLE_CATALOG
 }
 
 

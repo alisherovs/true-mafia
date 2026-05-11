@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
+    owner_hero_market_keyboard,
     owner_news_channel_keyboard,
     owner_panel_keyboard,
     owner_premium_groups_keyboard,
@@ -249,6 +250,49 @@ async def owner_news_clear_callback(callback: CallbackQuery, engine: GameEngine,
     await callback.answer("O'chirildi.")
 
 
+@router.callback_query(F.data == "owner:hero_market_channel")
+async def owner_hero_market_channel_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    current = await engine.get_hero_market_channel_id()
+    current_text = f"<code>{current}</code>" if current else "<b>ulanmagan</b>"
+    await _safe_edit(
+        callback,
+        "🥷 <b>Geroy savdo kanali</b>\n\n"
+        f"Joriy kanal: {current_text}\n\n"
+        "Kanal ID yoki @username yuborib ulang. Bot kanalda admin bo'lishi kerak.",
+        reply_markup=owner_hero_market_keyboard(bool(current)),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:hero_market_set")
+async def owner_hero_market_set_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "hero_market_channel"
+    await _safe_edit(
+        callback,
+        "🥷 <b>Geroy savdo kanalini sozlash</b>\n\n"
+        "Kanal ID yoki @username yuboring.\n\n"
+        "Masalan:\n<code>@hero_market</code>\n<code>-1001234567890</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:hero_market_clear")
+async def owner_hero_market_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    text = await engine.clear_hero_market_channel()
+    await _safe_edit(callback, text, reply_markup=owner_hero_market_keyboard(False))
+    await callback.answer("O'chirildi.")
+
+
 @router.callback_query(F.data == "owner:broadcast_users")
 async def owner_broadcast_users_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -414,6 +458,15 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_news_channel_keyboard(True))
+        return True
+
+    if action == "hero_market_channel":
+        ok, text = await engine.set_hero_market_channel(message.bot, message.text or "")
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "hero_market_channel"
+            await message.answer(text, reply_markup=owner_wait_keyboard())
+            return True
+        await message.answer(text, reply_markup=owner_hero_market_keyboard(True))
         return True
 
     if action == "premium_timer":
