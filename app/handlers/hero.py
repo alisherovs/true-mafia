@@ -6,7 +6,6 @@ from aiogram.types import CallbackQuery, Message
 
 from app.game_engine import GameEngine
 from app.keyboards import (
-    hero_damage_keyboard,
     hero_defense_keyboard,
     hero_game_keyboard,
     hero_panel_keyboard,
@@ -136,8 +135,8 @@ async def hero_game_panel_callback(callback: CallbackQuery, engine: GameEngine) 
         await callback.message.edit_text("❌ Bekor qilindi.")
         await callback.answer()
         return
-    ok, text = await engine.hero_game_panel_text(callback.from_user.id)
-    await callback.message.edit_text(text, reply_markup=hero_game_keyboard() if ok else None)
+    ok, text, can_attack = await engine.hero_game_panel_text(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=hero_game_keyboard(can_attack=can_attack) if ok else None)
     await callback.answer(text if not ok else None, show_alert=not ok)
 
 
@@ -165,13 +164,13 @@ async def hero_game_target_callback(callback: CallbackQuery, engine: GameEngine)
         await callback.answer("Bad callback", show_alert=True)
         return
     target_player_id = int(raw)
-    ok, text, max_hit = await engine.hero_damage_prompt(callback.from_user.id, target_player_id)
+    ok, text, _ = await engine.hero_damage_prompt(callback.from_user.id, target_player_id)
     if not ok:
         await callback.answer(text, show_alert=True)
         return
-    PENDING_HERO_ACTIONS[callback.from_user.id] = {"action": "damage", "target_player_id": target_player_id}
-    await callback.message.edit_text(text, reply_markup=hero_damage_keyboard() if max_hit else None)
-    await callback.answer()
+    ok, result = await engine.hero_game_attack(callback.bot, callback.from_user.id, target_player_id, "auto")
+    await callback.answer(result, show_alert=True)
+    await callback.message.edit_text(result)
 
 
 @router.callback_query(F.data == "hero:game:damage:max")
@@ -223,7 +222,11 @@ async def hero_game_hp_callback(callback: CallbackQuery, engine: GameEngine) -> 
     if not await _require_private(callback):
         return
     ok, text = await engine.hero_game_hp_text(callback.from_user.id)
-    await callback.message.edit_text(text, reply_markup=hero_game_keyboard() if ok else None)
+    can_attack = False
+    if ok:
+        panel_ok, _, can_attack = await engine.hero_game_panel_text(callback.from_user.id)
+        can_attack = panel_ok and can_attack
+    await callback.message.edit_text(text, reply_markup=hero_game_keyboard(can_attack=can_attack) if ok else None)
     await callback.answer(text if not ok else None, show_alert=not ok)
 
 

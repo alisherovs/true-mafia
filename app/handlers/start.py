@@ -24,6 +24,17 @@ async def _safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> N
             raise
 
 
+@router.message(F.new_chat_members)
+async def greet_new_members(message: Message, engine: GameEngine) -> None:
+    if not message.new_chat_members:
+        return
+    for member in message.new_chat_members:
+        if member.is_bot:
+            continue
+        await engine.ensure_user(member)
+        await engine.send_welcome_message(message.bot, message.chat.id, member)
+
+
 @router.message(CommandStart())
 async def cmd_start(
     message: Message,
@@ -115,6 +126,7 @@ async def cmd_start(
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
                 news_url=await engine.get_news_channel_url(),
+                has_hero=await engine.user_has_hero(message.from_user.id),
             )
         await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
         return

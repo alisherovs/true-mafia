@@ -66,11 +66,13 @@ async def _send_profile(message: Message, engine: GameEngine, settings: Settings
         in_running_game = await engine.user_in_running_game(message.from_user.id)
         reply_markup = None
         if not in_running_game:
+            has_hero = await engine.user_has_hero(message.from_user.id)
             reply_markup = profile_dashboard_keyboard(
                 settings,
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
                 news_url=await engine.get_news_channel_url(),
+                has_hero=has_hero,
             )
         await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
         return
@@ -111,11 +113,13 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
     in_running_game = await engine.user_in_running_game(callback.from_user.id)
     reply_markup = None
     if not in_running_game:
+        has_hero = await engine.user_has_hero(callback.from_user.id)
         reply_markup = profile_dashboard_keyboard(
             settings,
             user=user,
             is_admin=callback.from_user.id in settings.admin_ids,
             news_url=await engine.get_news_channel_url(),
+            has_hero=has_hero,
         )
     await callback.message.edit_text(engine.format_user_dashboard(user), reply_markup=reply_markup)
     await callback.answer()
@@ -161,6 +165,7 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
             user=user,
             is_admin=callback.from_user.id in settings.admin_ids,
             news_url=await engine.get_news_channel_url(),
+            has_hero=await engine.user_has_hero(callback.from_user.id),
         ),
     )
     await callback.answer("Sozlama yangilandi.")

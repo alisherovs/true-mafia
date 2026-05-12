@@ -69,7 +69,7 @@ from app.roles import (
 from app.hero import (
     HERO_ADD_POINTS_AMOUNT,
     HERO_ADD_POINTS_PRICE_DIAMONDS,
-    HERO_ALLOWED_ROLES,
+    HERO_ATTACK_ROLES,
     HERO_BUY_PRICE_DIAMONDS,
     HERO_CANCEL_SALE_PRICE_DIAMONDS,
     HERO_DEFAULT_CHARGE,
@@ -87,6 +87,12 @@ from app.hero import (
 )
 from app.scheduler import scheduler
 from app.texts import t
+
+WELCOME_ENABLED_KEY = "welcome_enabled"
+WELCOME_TEXT_KEY = "welcome_text"
+WELCOME_MEDIA_TYPE_KEY = "welcome_media_type"
+WELCOME_MEDIA_FILE_ID_KEY = "welcome_media_file_id"
+WELCOME_DEFAULT_TEXT = "guruhga xush kelibsiz!"
 
 logger = logging.getLogger(__name__)
 
@@ -258,7 +264,9 @@ class GameEngine:
         if cause == "miner":
             return f"{base} o'lim koniga qulab tushdi..."
         if cause == "love":
-            return f"{base} sevgi rishtasi uzilgani sabab halok bo'ldi..."
+            if Role(player.role) == Role.LOVE_ANGEL:
+                return f"{role_label(player.role)} {name} sevgilisining o'limiga chiday olmadi va o'zini halok qildi."
+            return f"{role_label(player.role)} {name} farishtaning o'limiga chiday olmadi va o'zini halok qildi."
         return f"{base} vaxshiylarcha o'ldirildi..."
 
     def _death_story_line(
@@ -269,6 +277,10 @@ class GameEngine:
     ) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
         role = role_label(player.role)
+        if cause == "love":
+            if Role(player.role) == Role.LOVE_ANGEL:
+                return f"{role} {name} sevgilisining o'limiga chiday olmadi va o'zini halok qildi."
+            return f"{role} {name} farishtaning o'limiga chiday olmadi va o'zini halok qildi."
         if visitor_label:
             visitor = visitor_label
         elif cause == "mafia":
@@ -2227,7 +2239,7 @@ class GameEngine:
                     select(NightAction).where(
                         NightAction.game_id == game_id,
                         NightAction.night_number == night,
-                    )
+                    ).order_by(NightAction.id.asc())
                 )
             ).scalars().all()
             prior_love_actions = (
@@ -2423,14 +2435,8 @@ class GameEngine:
                         miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-o'lim koniga tushdingiz."))
                         miner_group_lines.append("👷🏻‍♂️ Konchi konda sirpanib ketib halok bo'ldi!")
 
-            mafia_vote_counter = Counter(mafia_fallback_kills)
-            mafia_override = mafia_vote_counter.most_common(1)
-            mafia_override_target = mafia_override[0][0] if mafia_override and mafia_override[0][1] >= 3 else None
             mafia_fallback_as_don = False
-            if mafia_override_target is not None:
-                active_mafia_roles = {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
-                active_mafia_kills = [mafia_override_target]
-            elif don_kills:
+            if don_kills:
                 active_mafia_roles = {Role.DON}
                 active_mafia_kills = don_kills
             else:
@@ -2438,6 +2444,10 @@ class GameEngine:
                 active_mafia_kills = mafia_fallback_kills
                 mafia_fallback_as_don = bool(mafia_fallback_kills)
             mafia_target = Counter(active_mafia_kills).most_common(1)
+            if mafia_fallback_as_don and mafia_target:
+                don_activity = self._night_activity_line(Role.DON, "kill")
+                if don_activity:
+                    night_activity_lines.append(don_activity)
             if mafia_target:
                 target = mafia_target[0][0]
                 target_player = player_map.get(target)
@@ -2550,8 +2560,6 @@ class GameEngine:
                         )
 
             love_dead = self._apply_love_link_deaths(love_pairs, player_map, dead, death_causes, death_visitors)
-            if love_dead:
-                night_event_lines.append(self._love_death_message())
 
             # Daydi sees what happened at the house he visited.
             witness_lines: list[tuple[int, str]] = []
@@ -2650,8 +2658,6 @@ class GameEngine:
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
 
             extra_love_dead = self._apply_love_link_deaths(love_pairs, player_map, dead, death_causes, death_visitors)
-            if extra_love_dead and not love_dead:
-                night_event_lines.append(self._love_death_message())
 
             for dead_id in dead:
                 pl = player_map.get(dead_id)
@@ -3316,8 +3322,12 @@ class GameEngine:
             if self._is_day_blocked(player, game)
         )
         sleep_lines: list[str] = []
+        inactivity_exempt_roles = {Role.DON, Role.KILLER, Role.SORCERER, Role.SERGEANT}
         for player in alive_after_vote:
             if player.telegram_id in active_ids:
+                player.inactive_rounds = 0
+                continue
+            if player.role and Role(player.role) in inactivity_exempt_roles:
                 player.inactive_rounds = 0
                 continue
             player.inactive_rounds = (player.inactive_rounds or 0) + 1
@@ -3722,7 +3732,14 @@ class GameEngine:
                     if love_dead or extra_successions:
                         await session.commit()
                     if love_dead:
-                        await bot.send_message(chat_id, self._love_death_message())
+                        love_player_map = {player.telegram_id: player for player in all_players}
+                        love_lines = [
+                            self._death_story_line(love_player_map[love_id], "love")
+                            for love_id in love_dead
+                            if love_id in love_player_map
+                        ]
+                        if love_lines:
+                            await bot.send_message(chat_id, "\n\n".join(love_lines))
                     for line, heir_id, new_role in extra_successions:
                         await bot.send_message(chat_id, line)
                         try:
@@ -3783,8 +3800,10 @@ class GameEngine:
             neutral_count = sum(1 for t in teams if t == Team.NEUTRAL.value)
             city_count = len(alive) - mafia_count - killer_count - neutral_count
             
-            # Mafia nolga tushsa → Shahar yutadi
-            if mafia_count == 0 and killer_count == 0 and neutral_count == 0:
+            singleton_count = killer_count + neutral_count
+
+            # Mafia yo'q va singleton shaharni yenga olmaydigan holat: tirik shahar tomoni yutadi.
+            if mafia_count == 0 and (singleton_count == 0 or city_count >= 2):
                 return Team.CITY
             
             # Qotil o'z qolsa → Qotil yutadi
@@ -3798,6 +3817,14 @@ class GameEngine:
             # Final duel: 2 kishi qolsa va 1 ta mafia bo'lsa → Mafia wins
             # (Don/Mafia vs. istalgan boshqa)
             if len(alive) == 2 and mafia_count == 1 and killer_count == 0:
+                return Team.MAFIA
+
+            # 1 ta shahar + 1 ta mafia + 1 ta singleton bo'lsa o'yin davom etadi.
+            if city_count == 1 and mafia_count == 1 and singleton_count == 1:
+                return None
+
+            # 2 ta mafia + 1 ta singleton bo'lsa mafia tomoni yutadi.
+            if city_count == 0 and mafia_count >= 2 and singleton_count == 1:
                 return Team.MAFIA
             
             # Asosiy qaror: Mafia soni ≥ city + neutral soni bo'lsa → Mafia yutadi
@@ -3926,6 +3953,7 @@ class GameEngine:
                         user=user,
                         is_admin=p.telegram_id in self.settings.admin_ids,
                         news_url=news_url,
+                        has_hero=await self.user_has_hero(p.telegram_id),
                     ),
                 )
             except TelegramForbiddenError:
@@ -4366,8 +4394,6 @@ class GameEngine:
             return False, "❌ Geroy faqat tong otgandan keyin, ovoz berish boshlanguncha ishlaydi.", game, player, user, hero
         if not player.alive:
             return False, "❌ Siz tirik emassiz.", game, player, user, hero
-        if Role(player.role) not in HERO_ALLOWED_ROLES:
-            return False, "❌ Geroydan o'yinda faqat Don, Mafia, Qotil, Yollanma qotil, Qo'riqchi va Komissar foydalanishi mumkin.", game, player, user, hero
         if hero.is_for_sale:
             return False, "❌ Sotuvdagi geroy locked. Sotuvdan qaytarmaguncha o'yinda ishlata olmaysiz.", game, player, user, hero
         if require_charge and int(hero.charge or 0) <= 0:
@@ -4375,24 +4401,27 @@ class GameEngine:
         self._sync_hero_level(hero)
         return True, "", game, player, user, hero
 
-    async def hero_game_panel_text(self, telegram_id: int) -> tuple[bool, str]:
+    async def hero_game_panel_text(self, telegram_id: int) -> tuple[bool, str, bool]:
         async with self.session_factory() as session:
             ok, text, _, player, _, hero = await self._hero_game_context(session, telegram_id)
             if not ok:
-                return False, text
+                return False, text, False
+            can_attack = Role(player.role) in HERO_ATTACK_ROLES
             return True, (
                 "🥷 Siz geroyingizdan foydalanishingiz mumkin.\n"
                 "Ovoz berish boshlanguncha vaqtingiz bor.\n\n"
                 f"🎭 Rol: {role_label(player.role)}\n"
                 f"🩸 Zaryad: {int(hero.charge or 0)}/{HERO_MAX_CHARGE}\n"
                 f"🖤 Himoya: {int(hero.current_defense or 0)}/{int(hero.max_defense or 0)}"
-            )
+            ), can_attack
 
     async def hero_game_targets(self, telegram_id: int) -> tuple[bool, str, list[GamePlayer]]:
         async with self.session_factory() as session:
             ok, text, game, player, _, _ = await self._hero_game_context(session, telegram_id, require_charge=True)
             if not ok or game is None or player is None:
                 return False, text, []
+            if Role(player.role) not in HERO_ATTACK_ROLES:
+                return False, "❌ Bu rol geroy bilan zarba bera olmaydi. Faqat himoyalanish mumkin.", []
             targets = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -4466,10 +4495,12 @@ class GameEngine:
                 return False, "Target topilmadi yoki tirik emas.", False
             if target.telegram_id == player.telegram_id:
                 return False, "O'zingizni ura olmaysiz.", False
+            if Role(player.role) not in HERO_ATTACK_ROLES:
+                return False, "❌ Bu rol geroy bilan zarba bera olmaydi. Faqat himoyalanish mumkin.", False
             info = hero_level_for_points(int(hero.points or 0))
             if info.max_hit:
-                return True, "Maksimal zarba tugmasini bosing yoki damage sonini yuboring.", True
-            return True, f"Damage kiriting: {info.power_text}", False
+                return True, "⚔️ Maksimal zarba beriladi.", True
+            return True, f"⚔️ Geroyingiz {info.power_text} oralig'ida random zarba beradi.", False
 
     async def hero_game_attack(
         self,
@@ -4499,26 +4530,18 @@ class GameEngine:
                 return False, "Target topilmadi yoki tirik emas."
             if target.telegram_id == attacker.telegram_id:
                 return False, "O'zingizni ura olmaysiz."
+            if Role(attacker.role) not in HERO_ATTACK_ROLES:
+                return False, "❌ Bu rol geroy bilan zarba bera olmaydi. Faqat himoyalanish mumkin."
 
             info = hero_level_for_points(int(hero.points or 0))
             target_hp = int(target.hero_hp or HERO_DEFAULT_HP)
             target_defense = int(target.hero_defense_amount or 0) if target.hero_defense_active else 0
-            if damage_raw == "max":
-                if not info.max_hit:
-                    return False, "Bu darajada maksimal zarba mavjud emas."
+            if info.max_hit:
                 entered_damage = max(1, target_hp + target_defense)
             else:
-                if not damage_raw.isdigit():
-                    return False, "Damage faqat butun son bo'lishi kerak."
-                entered_damage = int(damage_raw)
-                if info.max_hit:
-                    if entered_damage < 1 or entered_damage > max(1, target_hp + target_defense):
-                        return False, f"Damage 1 dan {max(1, target_hp + target_defense)} gacha bo'lishi kerak."
-                else:
-                    min_power = int(HERO_LEVELS[int(hero.level)]["power_min"])  # type: ignore[index]
-                    max_power = int(HERO_LEVELS[int(hero.level)]["power_max"])  # type: ignore[index]
-                    if entered_damage < min_power or entered_damage > max_power:
-                        return False, f"Damage {min_power}-{max_power} oralig'ida bo'lishi kerak."
+                min_power = int(HERO_LEVELS[int(hero.level)]["power_min"])  # type: ignore[index]
+                max_power = int(HERO_LEVELS[int(hero.level)]["power_max"])  # type: ignore[index]
+                entered_damage = random.randint(min_power, max_power)
 
             hero.charge = max(0, int(hero.charge or 0) - 1)
             remaining_damage = entered_damage
@@ -4547,7 +4570,7 @@ class GameEngine:
                 succession_events = self._apply_role_successions(all_players, {target.telegram_id})
                 target_name = self._tg_mention(target.telegram_id, target.display_name)
                 kill_text = (
-                    f"⚰️ 🔪 Qotil {target_name}ni {role_label(attacker.role)} "
+                    f"⚰️ {role_label(target.role)} {target_name}ni {role_label(attacker.role)} "
                     "o'zining jasur geroyi bilan yer tishlatdi!"
                 )
                 self._add_game_log(
@@ -4614,9 +4637,7 @@ class GameEngine:
                         Game.status == GameStatus.ACTIVE.value,
                         Game.phase == GamePhase.DAY_DISCUSSION.value,
                         GamePlayer.alive.is_(True),
-                        GamePlayer.role.in_([role.value for role in HERO_ALLOWED_ROLES]),
                         Hero.is_for_sale.is_(False),
-                        Hero.charge > 0,
                     )
                 )
             ).all()
@@ -4629,7 +4650,7 @@ class GameEngine:
                 await bot.send_message(
                     player.telegram_id,
                     "🥷 Siz geroyingizdan foydalanishingiz mumkin. Ovoz berish boshlanguncha vaqtingiz bor.",
-                    reply_markup=hero_game_keyboard(),
+                    reply_markup=hero_game_keyboard(can_attack=Role(player.role) in HERO_ATTACK_ROLES),
                 )
                 sent_any = True
             except TelegramForbiddenError:
@@ -5076,6 +5097,95 @@ class GameEngine:
                 setting.value = ""
             await session.commit()
         return "✅ Yangiliklar kanali o'chirildi. User paneldagi tugma endi ko'rinmaydi."
+
+    async def welcome_settings(self) -> dict[str, str]:
+        async with self.session_factory() as session:
+            keys = [WELCOME_ENABLED_KEY, WELCOME_TEXT_KEY, WELCOME_MEDIA_TYPE_KEY, WELCOME_MEDIA_FILE_ID_KEY]
+            rows = (
+                await session.execute(select(BotSetting).where(BotSetting.key.in_(keys)))
+            ).scalars().all()
+        values = {row.key: row.value for row in rows}
+        return {
+            "enabled": values.get(WELCOME_ENABLED_KEY, "0"),
+            "text": values.get(WELCOME_TEXT_KEY, WELCOME_DEFAULT_TEXT) or WELCOME_DEFAULT_TEXT,
+            "media_type": values.get(WELCOME_MEDIA_TYPE_KEY, ""),
+            "media_file_id": values.get(WELCOME_MEDIA_FILE_ID_KEY, ""),
+        }
+
+    async def welcome_settings_text(self) -> str:
+        settings = await self.welcome_settings()
+        enabled = settings["enabled"] == "1"
+        status = "🟢 yoqilgan" if enabled else "🔴 o'chirilgan"
+        media_type = settings["media_type"] or "yo'q"
+        text = escape(settings["text"])
+        return (
+            "👋 <b>Guruh salomlashuvi</b>\n\n"
+            f"Holat: {status}\n"
+            f"Media: <b>{escape(media_type)}</b>\n\n"
+            "Xabar doim user metkasi bilan boshlanadi. Admin kiritgan matn metkadan keyin chiqadi.\n\n"
+            f"Joriy matn:\n<code>{text}</code>"
+        )
+
+    async def toggle_welcome_enabled(self) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            current = await self._get_bot_setting_value(session, WELCOME_ENABLED_KEY, "0")
+            new_value = "0" if current == "1" else "1"
+            await self._set_bot_setting_value(session, WELCOME_ENABLED_KEY, new_value)
+            await session.commit()
+        return new_value == "1", "✅ Salomlashuv yoqildi." if new_value == "1" else "✅ Salomlashuv o'chirildi."
+
+    async def set_welcome_text(self, text: str) -> tuple[bool, str]:
+        value = " ".join((text or "").strip().split())
+        if not 1 <= len(value) <= 900:
+            return False, "Matn 1 dan 900 belgigacha bo'lishi kerak."
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, WELCOME_TEXT_KEY, value)
+            await session.commit()
+        return True, "✅ Salomlashuv matni yangilandi."
+
+    async def set_welcome_media(self, media_type: str, file_id: str) -> tuple[bool, str]:
+        if media_type not in {"photo", "video", "animation", "document"} or not file_id:
+            return False, "Media noto'g'ri. Photo, video, gif yoki document yuboring."
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, WELCOME_MEDIA_TYPE_KEY, media_type)
+            await self._set_bot_setting_value(session, WELCOME_MEDIA_FILE_ID_KEY, file_id)
+            await session.commit()
+        return True, "✅ Salomlashuv mediasi yangilandi."
+
+    async def clear_welcome_media(self) -> str:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, WELCOME_MEDIA_TYPE_KEY, "")
+            await self._set_bot_setting_value(session, WELCOME_MEDIA_FILE_ID_KEY, "")
+            await session.commit()
+        return "✅ Salomlashuv mediasi o'chirildi."
+
+    async def send_welcome_message(self, bot: Bot, chat_id: int, tg_user: TgUser) -> None:
+        settings = await self.welcome_settings()
+        if settings["enabled"] != "1":
+            return
+        mention = self._tg_mention(tg_user.id, tg_user.full_name)
+        text = escape(settings["text"] or WELCOME_DEFAULT_TEXT)
+        caption = f"{mention} {text}".strip()
+        media_type = settings["media_type"]
+        media_file_id = settings["media_file_id"]
+        try:
+            if media_type == "photo" and media_file_id:
+                await bot.send_photo(chat_id, media_file_id, caption=caption)
+            elif media_type == "video" and media_file_id:
+                await bot.send_video(chat_id, media_file_id, caption=caption)
+            elif media_type == "animation" and media_file_id:
+                await bot.send_animation(chat_id, media_file_id, caption=caption)
+            elif media_type == "document" and media_file_id:
+                await bot.send_document(chat_id, media_file_id, caption=caption)
+            else:
+                await bot.send_message(chat_id, caption)
+        except TelegramBadRequest:
+            try:
+                await bot.send_message(chat_id, caption)
+            except TelegramForbiddenError:
+                return
+        except TelegramForbiddenError:
+            return
 
     async def exchange_diamonds_to_dollars(self, telegram_id: int, diamonds: Union[int, str]) -> tuple[bool, str]:
         async with self.session_factory() as session:
