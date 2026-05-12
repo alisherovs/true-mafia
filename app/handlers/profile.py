@@ -74,10 +74,10 @@ async def _send_profile(message: Message, engine: GameEngine, settings: Settings
                 news_url=await engine.get_news_channel_url(),
                 has_hero=has_hero,
             )
-        await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
+        await message.answer(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
         return
 
-    await message.answer(engine.format_user_dashboard(user))
+    await message.answer(**engine.format_user_dashboard_entities(user))
 
 
 @router.message(Command("profile"))
@@ -121,7 +121,7 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
             news_url=await engine.get_news_channel_url(),
             has_hero=has_hero,
         )
-    await callback.message.edit_text(engine.format_user_dashboard(user), reply_markup=reply_markup)
+    await callback.message.edit_text(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
     await callback.answer()
 
 
@@ -159,7 +159,7 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
         await session.refresh(user)
 
     await callback.message.edit_text(
-        engine.format_user_dashboard(user),
+        **engine.format_user_dashboard_entities(user),
         reply_markup=profile_dashboard_keyboard(
             settings,
             user=user,

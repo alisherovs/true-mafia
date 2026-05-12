@@ -9,6 +9,7 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery, LabeledPrice
+from aiogram.utils.formatting import CustomEmoji, Text, TextLink
 from sqlalchemy import select
 
 from app.config import Settings
@@ -25,10 +26,34 @@ from app.models import DiamondGiveaway, User
 from app.texts import t
 
 router = Router()
+DIAMOND_EMOJI_ID = "5427168083074628963"
 
 
 def _user_link(user_id: int, name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{escape(name)}</a>'
+
+
+def _user_text_link(user_id: int, name: str) -> TextLink:
+    return TextLink(name or str(user_id), url=f"tg://user?id={user_id}")
+
+
+def _diamond_transfer_kwargs(
+    sender_id: int,
+    sender_name: str,
+    target_id: int,
+    target_name: str,
+    amount: int,
+    note: str,
+) -> dict:
+    return Text(
+        _user_text_link(sender_id, sender_name),
+        " ➔ ",
+        _user_text_link(target_id, target_name),
+        ": ",
+        CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID),
+        f" {amount} olmos\n",
+        f"Izoh: {note or '-'}",
+    ).as_kwargs()
 
 
 def _giveaway_keyboard(giveaway_id: int, active: bool = True) -> Optional[InlineKeyboardMarkup]:
@@ -384,16 +409,20 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
             await message.reply(status)
         return
 
-    sender_name = _user_link(sender.telegram_id, sender.display_name or message.from_user.full_name or str(sender.telegram_id))
-    target_name = _user_link(target.telegram_id, target.display_name or str(target.telegram_id))
-    note_text = escape(note) if note else "-"
-    transfer_text = (
-        f"{sender_name} ➔ {target_name}: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos\n"
-        f"Izoh: {note_text}"
+    sender_display = sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+    target_display = target.display_name or str(target.telegram_id)
+    note_text = note if note else "-"
+    transfer_kwargs = _diamond_transfer_kwargs(
+        sender.telegram_id,
+        sender_display,
+        target.telegram_id,
+        target_display,
+        amount,
+        note_text,
     )
-    await message.reply(transfer_text)
+    await message.reply(**transfer_kwargs)
     try:
-        await message.bot.send_message(target_id, transfer_text)
+        await message.bot.send_message(target_id, **transfer_kwargs)
     except Exception:
         pass
 

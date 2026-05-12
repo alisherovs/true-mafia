@@ -128,7 +128,7 @@ async def cmd_start(
                 news_url=await engine.get_news_channel_url(),
                 has_hero=await engine.user_has_hero(message.from_user.id),
             )
-        await message.answer(engine.format_user_dashboard(user), reply_markup=reply_markup)
+        await message.answer(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
         return
 
     existing = await engine.get_user(message.from_user.id)

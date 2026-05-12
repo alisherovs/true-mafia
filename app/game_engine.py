@@ -14,6 +14,7 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import FSInputFile, User as TgUser
+from aiogram.utils.formatting import Bold, Code, CustomEmoji, Text, TextLink
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -93,6 +94,10 @@ WELCOME_TEXT_KEY = "welcome_text"
 WELCOME_MEDIA_TYPE_KEY = "welcome_media_type"
 WELCOME_MEDIA_FILE_ID_KEY = "welcome_media_file_id"
 WELCOME_DEFAULT_TEXT = "guruhga xush kelibsiz!"
+DOLLAR_EMOJI_ID = "5409048419211682843"
+DIAMOND_EMOJI_ID = "5427168083074628963"
+SWORD_EMOJI_ID = "5431774564348605707"
+SKULL_EMOJI_ID = "5357199488115030155"
 
 logger = logging.getLogger(__name__)
 
@@ -4001,6 +4006,39 @@ class GameEngine:
             f"🎯 Побед: <b>{user.wins}</b>\n"
             f"🎲 Всего игр: <b>{user.total_games}</b>"
         )
+
+    @staticmethod
+    def format_user_dashboard_entities(user: User) -> dict:
+        def state(value: bool) -> str:
+            return "🟢 ON" if value is not False else "🔴 OFF"
+
+        def stored_role(value: Optional[str]) -> str:
+            if not value:
+                return "-"
+            try:
+                return role_label(Role(value))
+            except ValueError:
+                return value
+
+        display_name = TextLink(user.display_name or "Unknown", url=f"tg://user?id={user.telegram_id}")
+        return Text(
+            "👤 Nik: ", display_name, "\n",
+            "⭐ ID: ", Code(str(user.telegram_id)), "\n\n",
+            CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID), " Dollar: ", Bold(str(user.dollar)), "\n",
+            CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), "\n\n",
+            "🛡 Himoya: ", Bold(str(user.protection)), f" {state(user.use_protection)}\n",
+            "⛑ Qotildan himoya: ", Bold(str(user.killer_protection)), f" {state(user.use_killer_protection)}\n",
+            "⚖️ Ovoz berishni himoya qilish: ", Bold(str(user.vote_protection)), f" {state(user.use_vote_protection)}\n",
+            "💊 Doridan himoya: ", Bold(str(user.drug_protection)), f" {state(user.use_drug_protection)}\n",
+            "📦 Sirpanishdan himoya: ", Bold(str(user.miner_protection)), f" {state(user.use_miner_protection)}\n",
+            "🔫 Miltiq: ", Bold(str(user.gun)), f" {state(user.use_gun)}\n\n",
+            "🎭 Maska: ", Bold(str(user.mask)), f" {state(user.use_mask)}\n",
+            "📁 Soxta hujjat: ", Bold(str(user.fake_document)), f" {state(user.use_fake_document)}\n",
+            "🃏 Keyingi o'yindagi rolingiz: ", Bold(stored_role(user.next_game_role)), "\n",
+            "🚫 Keyingi o'yinda o'chiriladigan rol: ", Bold(stored_role(user.next_game_disabled_role)), "\n\n",
+            "🎯 Побед: ", Bold(str(user.wins)), "\n",
+            "🎲 Всего игр: ", Bold(str(user.total_games)),
+        ).as_kwargs()
 
     async def user_has_hero(self, telegram_id: int) -> bool:
         async with self.session_factory() as session:
