@@ -204,7 +204,7 @@ ROLE_META: dict[Role, RoleMeta] = {
         Team.NEUTRAL,
         "👷🏻‍♂️",
         "Konchi",
-        "Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta 💎'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.",
+        "Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.",
     ),
     Role.PRANKSTER: RoleMeta(
         Role.PRANKSTER,

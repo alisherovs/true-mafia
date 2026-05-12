@@ -72,7 +72,7 @@ def _giveaway_text(creator: User, giveaway: DiamondGiveaway) -> str:
         participants_text = "-"
     creator_name = _user_link(creator.telegram_id, creator.display_name or str(creator.telegram_id))
     return (
-        f"{creator_name} kimgadir {giveaway.amount} ta 💎 sovg'a qilmoqchi!\n\n"
+        f"{creator_name} kimgadir {giveaway.amount} ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> sovg'a qilmoqchi!\n\n"
         f"Ishtirokchilar:\n{participants_text}\n\n"
         f"Ishtirokchilar soni: {len(participants)}/50"
     )
@@ -106,9 +106,9 @@ async def _finish_giveaway(
     final_text = (
         f"{_giveaway_text(creator, giveaway)}\n\n"
         f"🎉 G'olib: {_user_link(winner_id, winner_name)}\n"
-        f"💎 {giveaway.amount} olmos hisobiga qo'shildi."
+        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {giveaway.amount} olmos hisobiga qo'shildi."
     )
-    private_text = f"🎉 Siz sovg'ada yutdingiz!\n💎 {giveaway.amount} olmos hisobingizga qo'shildi."
+    private_text = f"🎉 Siz sovg'ada yutdingiz!\n<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {giveaway.amount} olmos hisobingizga qo'shildi."
     return winner_id, final_text, private_text
 
 
@@ -118,7 +118,7 @@ async def cmd_shop(message: Message, engine: GameEngine) -> None:
     has_hero = await engine.user_has_hero(message.from_user.id) if message.from_user else False
     await message.answer(
         "🛒 <b>Do'kon</b>\n\n"
-        "Himoya va maxsus imkoniyatlarni 💵 dollar yoki 💎 almaz orqali sotib olishingiz mumkin.",
+        "Himoya va maxsus imkoniyatlarni 💵 dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almaz orqali sotib olishingiz mumkin.",
         reply_markup=shop_keyboard(has_hero),
     )
 
@@ -132,7 +132,7 @@ async def shop_open_callback(callback: CallbackQuery, engine: GameEngine) -> Non
     has_hero = await engine.user_has_hero(callback.from_user.id)
     await callback.message.edit_text(
         "🛒 <b>Do'kon</b>\n\n"
-        "Kerakli itemni tanlang. Xarid summasi profilingizdagi 💵 dollar yoki 💎 almazdan yechiladi.",
+        "Kerakli itemni tanlang. Xarid summasi profilingizdagi 💵 dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazdan yechiladi.",
         reply_markup=shop_keyboard(has_hero),
     )
     await callback.answer()
@@ -204,7 +204,7 @@ async def dollar_shop_open(callback: CallbackQuery, engine: GameEngine) -> None:
     await callback.message.edit_text(
         "💵 <b>Dollar olish</b>\n\n"
         "Bu bo'limda faqat almazni dollarga almashtirasiz.\n"
-        "Kurs: <b>💎 1 almaz = 💵 500 dollar</b>",
+        "Kurs: <b><tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz = 💵 500 dollar</b>",
         reply_markup=dollar_exchange_keyboard(),
     )
     await callback.answer()
@@ -231,7 +231,7 @@ async def cmd_gsend(message: Message, command: CommandObject, engine: GameEngine
 
     raw_amount = (command.args or "").strip()
     if not raw_amount.isdigit():
-        await message.reply("Foydalanish: <code>/gsend 10</code>\nKurs: yuborilgan 💎 premium guruh reytingiga qo'shiladi.")
+        await message.reply("Foydalanish: <code>/gsend 10</code>\nKurs: yuborilgan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> premium guruh reytingiga qo'shiladi.")
         return
 
     ok, text = await engine.contribute_premium_group(
@@ -281,7 +281,7 @@ async def _burn_user_balance(message: Message, settings: Settings, field: str, l
 
 @router.message(Command("bust1"))
 async def cmd_bust_diamonds(message: Message, settings: Settings) -> None:
-    await _burn_user_balance(message, settings, "diamonds", "💎 olmoslar")
+    await _burn_user_balance(message, settings, "diamonds", "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmoslar")
 
 
 @router.message(Command("bust2"))
@@ -388,7 +388,7 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
     target_name = _user_link(target.telegram_id, target.display_name or str(target.telegram_id))
     note_text = escape(note) if note else "-"
     transfer_text = (
-        f"{sender_name} ➔ {target_name}: 💎 {amount} olmos\n"
+        f"{sender_name} ➔ {target_name}: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos\n"
         f"Izoh: {note_text}"
     )
     await message.reply(transfer_text)
@@ -501,7 +501,7 @@ async def diamond_shop_open(callback: CallbackQuery, engine: GameEngine) -> None
         return
     admin_username = await engine.get_purchase_admin_username()
     await callback.message.edit_text(
-        "💎 <b>Almaz xaridi</b>\n\n"
+        "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> <b>Almaz xaridi</b>\n\n"
         "Kerakli almaz paketini tanlang. Telegram Stars orqali to'lov qilishingiz mumkin.",
         reply_markup=diamond_shop_keyboard(admin_username),
     )
@@ -587,5 +587,5 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
     
     await message.answer(
         f"✅ <b>To'lov muvaffaqiyatli!</b>\n\n"
-        f"💎 {diamonds} almaz sizning profilingizga qo'shildi!"
+        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds} almaz sizning profilingizga qo'shildi!"
     )

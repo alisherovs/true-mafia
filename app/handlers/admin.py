@@ -575,7 +575,7 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             "✅ Premium guruh qo'shildi.\n\n"
             f"🎲 Nomi: <b>{group.title}</b>\n"
             f"🔗 Link: {group.invite_link}\n"
-            f"💎 Narx: <b>{group.diamond_price}</b>",
+            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Narx: <b>{group.diamond_price}</b>",
             reply_markup=owner_premium_groups_keyboard(),
         )
         return True

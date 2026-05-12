@@ -2410,9 +2410,9 @@ class GameEngine:
                         amount = 1
                         if user:
                             user.diamonds += amount
-                        miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan 💎 {amount} olmos topdingiz."))
+                        miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos topdingiz."))
                         miner_group_lines.append(
-                            f"👷🏻‍♂️ Konchi konda {amount} 💎 olmos topdi!"
+                            f"👷🏻‍♂️ Konchi konda {amount} <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmos topdi!"
                         )
                     elif result == "dollar":
                         amount = 50
@@ -3987,7 +3987,7 @@ class GameEngine:
             f"👤 Nik: {display_name}\n"
             f"⭐ ID: <code>{user.telegram_id}</code>\n\n"
             f"💵 Dollar: <b>{user.dollar}</b>\n"
-            f"💎 Olmos: <b>{user.diamonds}</b>\n\n"
+            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{user.diamonds}</b>\n\n"
             f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
             f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
             f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b> {state(user.use_vote_protection)}\n"
@@ -4032,7 +4032,7 @@ class GameEngine:
         )
         sale_text = ""
         if hero.is_for_sale:
-            sale_text = f"\n🏷 Sotuvda: 💎 {hero.sale_price_diamonds or 0}"
+            sale_text = f"\n🏷 Sotuvda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {hero.sale_price_diamonds or 0}"
         return (
             "Geroylar haqida\n\n"
             f"🥷 Geroy: {safe_hero_name(hero.name)}\n"
@@ -4044,7 +4044,7 @@ class GameEngine:
             f"☑️ Jami ballari: {int(hero.points or 0)} ball\n"
             f"⏫ Keyingi daraja = {next_text}{sale_text}\n\n"
             "🛒 Xaridlar uchun:\n"
-            f"➕ 1000 Ball qo'shish = 💎 {HERO_ADD_POINTS_PRICE_DIAMONDS}\n"
+            f"➕ 1000 Ball qo'shish = <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_ADD_POINTS_PRICE_DIAMONDS}\n"
             f"🛡 Himoyani yangilash = 💶 {HERO_UPGRADE_DEFENSE_PRICE_DOLLAR}\n"
             f"🩸 Qurolni zaryadlash = 💶 {HERO_RECHARGE_PRICE_DOLLAR}\n"
             f"🖋 Geroy nomini o'zgertirish = 💶 {HERO_RENAME_PRICE_DOLLAR}"
@@ -4060,7 +4060,7 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if row is None:
-                return False, "❌ Sizda hali geroy yo'q. Do'kondan 💎 100 almazga sotib olishingiz mumkin.", False
+                return False, "❌ Sizda hali geroy yo'q. Do'kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 100 almazga sotib olishingiz mumkin.", False
             self._sync_hero_level(row)
             await session.commit()
             return True, self._hero_panel_text(row), bool(row.is_for_sale)
@@ -4074,7 +4074,7 @@ class GameEngine:
             if existing is not None:
                 return False, "Sizda allaqachon geroy bor."
             if int(user.diamonds or 0) < HERO_BUY_PRICE_DIAMONDS:
-                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {HERO_BUY_PRICE_DIAMONDS}, Sizda: 💎 {user.diamonds or 0}"
+                return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_BUY_PRICE_DIAMONDS}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user.diamonds or 0}"
             user.diamonds -= HERO_BUY_PRICE_DIAMONDS
             hero = Hero(
                 owner_user_id=user.id,
@@ -4098,9 +4098,9 @@ class GameEngine:
         async with self.session_factory() as session:
             user, hero = await self._hero_owner_row(session, telegram_id)
             if user is None or hero is None:
-                return False, "❌ Sizda hali geroy yo'q. Do'kondan 💎 100 almazga sotib olishingiz mumkin."
+                return False, "❌ Sizda hali geroy yo'q. Do'kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 100 almazga sotib olishingiz mumkin."
             if int(user.diamonds or 0) < HERO_ADD_POINTS_PRICE_DIAMONDS:
-                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {HERO_ADD_POINTS_PRICE_DIAMONDS}, Sizda: 💎 {user.diamonds or 0}"
+                return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_ADD_POINTS_PRICE_DIAMONDS}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user.diamonds or 0}"
             old_level = int(hero.level or 1)
             user.diamonds -= HERO_ADD_POINTS_PRICE_DIAMONDS
             hero.points = int(hero.points or 0) + HERO_ADD_POINTS_AMOUNT
@@ -4221,7 +4221,7 @@ class GameEngine:
             f"♥️ Max himoya: {info.max_defense}\n"
             f"🩸 Zaryad miqdori: {int(hero.charge or 0)}\n"
             f"☑️ Jami ballari: {int(hero.points or 0)} ball\n\n"
-            f"💎 Narxi: {int(hero.sale_price_diamonds or 0)} almaz"
+            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Narxi: {int(hero.sale_price_diamonds or 0)} almaz"
         )
 
     async def hero_put_for_sale(self, bot: Bot, telegram_id: int, price: int) -> tuple[bool, str]:
@@ -4255,7 +4255,7 @@ class GameEngine:
             if hero:
                 hero.sale_channel_message_id = sent.message_id
                 await session.commit()
-        return True, f"✅ Geroyingiz sotuvga qo'yildi. Narx: 💎 {price}"
+        return True, f"✅ Geroyingiz sotuvga qo'yildi. Narx: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price}"
 
     async def hero_cancel_sale(self, bot: Bot, telegram_id: int) -> tuple[bool, str]:
         channel_id = await self.get_hero_market_channel_id()
@@ -4266,7 +4266,7 @@ class GameEngine:
             if not hero.is_for_sale:
                 return False, "Geroy sotuvda emas."
             if int(user.diamonds or 0) < HERO_CANCEL_SALE_PRICE_DIAMONDS:
-                return False, "❌ Sotuvdan qaytarish uchun 💎 1 almaz kerak."
+                return False, "❌ Sotuvdan qaytarish uchun <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz kerak."
             user.diamonds -= HERO_CANCEL_SALE_PRICE_DIAMONDS
             message_id = hero.sale_channel_message_id
             hero.is_for_sale = False
@@ -4278,7 +4278,7 @@ class GameEngine:
                 await bot.edit_message_text("❌ Geroy sotuvdan olindi.", chat_id=channel_id, message_id=message_id)
             except Exception:
                 pass
-        return True, "✅ Geroy sotuvdan qaytarildi. Xizmat narxi: 💎 1 almaz."
+        return True, "✅ Geroy sotuvdan qaytarildi. Xizmat narxi: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz."
 
     async def hero_update_sale_price(self, bot: Bot, telegram_id: int, price: int) -> tuple[bool, str]:
         if price < 1 or price > 1_000_000:
@@ -4300,7 +4300,7 @@ class GameEngine:
                 await bot.edit_message_text(text, chat_id=channel_id, message_id=message_id, reply_markup=hero_market_buy_keyboard(hero_id))
             except Exception:
                 pass
-        return True, f"✅ Geroy narxi yangilandi: 💎 {price}"
+        return True, f"✅ Geroy narxi yangilandi: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price}"
 
     async def hero_market_buy(self, bot: Bot, buyer_telegram_id: int, hero_id: int) -> tuple[bool, str]:
         channel_id = await self.get_hero_market_channel_id()
@@ -4326,11 +4326,11 @@ class GameEngine:
                 return False, "O'z geroyingizni sotib ololmaysiz."
             price = int(hero.sale_price_diamonds or 0)
             if int(buyer.diamonds or 0) < price:
-                return False, f"❌ Almaz yetarli emas. Kerak: 💎 {price}, Sizda: 💎 {buyer.diamonds or 0}"
+                return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {buyer.diamonds or 0}"
             buyer.diamonds -= price
             seller.diamonds += price
             seller_telegram_id = seller.telegram_id
-            seller_text = f"✅ Geroyingiz sotildi. Hisobingizga 💎 {price} almaz qo'shildi."
+            seller_text = f"✅ Geroyingiz sotildi. Hisobingizga <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price} almaz qo'shildi."
             message_id = hero.sale_channel_message_id
             hero.owner_user_id = buyer.id
             hero.is_for_sale = False
@@ -5199,16 +5199,16 @@ class GameEngine:
                 amount = int(diamonds)
 
             if amount <= 0:
-                return False, "Almashtirish uchun kamida 💎 1 almaz kerak."
+                return False, "Almashtirish uchun kamida <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz kerak."
             if (user.diamonds or 0) < amount:
-                return False, f"Balans yetarli emas. Kerak: 💎 {amount}"
+                return False, f"Balans yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount}"
 
             dollars = amount * 500
             user.diamonds -= amount
             user.dollar += dollars
             await session.commit()
 
-        return True, f"✅ 💎 {amount} almaz → 💵 {dollars} dollar almashtirildi."
+        return True, f"✅ <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} almaz → 💵 {dollars} dollar almashtirildi."
 
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
         prices: dict[str, tuple[int, str, str, Union[int, str]]] = {
@@ -5233,7 +5233,7 @@ class GameEngine:
                 if user.next_game_role:
                     return False, f"Keyingi o'yin uchun rol allaqachon tanlangan: {role_label(user.next_game_role)}"
                 balance = user.diamonds if shop_role.currency == "diamonds" else user.dollar
-                icon = "💎" if shop_role.currency == "diamonds" else "💵"
+                icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if shop_role.currency == "diamonds" else "💵"
                 if balance < shop_role.price:
                     return False, f"Balans yetarli emas. Kerak: {icon} {shop_role.price}"
                 if shop_role.currency == "diamonds":
@@ -5274,7 +5274,7 @@ class GameEngine:
             if user is None:
                 return False, "Avval /start bosing."
             balance = user.diamonds if currency == "diamonds" else user.dollar
-            icon = "💎" if currency == "diamonds" else "💵"
+            icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if currency == "diamonds" else "💵"
             if balance < price:
                 return False, f"Balans yetarli emas. Kerak: {icon} {price}"
             if currency == "diamonds":
@@ -5370,7 +5370,7 @@ class GameEngine:
             user.dollar += dollar
             user.diamonds += diamonds
             await session.commit()
-        return True, f"✅ Berildi: 💵 {dollar}, 💎 {diamonds}"
+        return True, f"✅ Berildi: 💵 {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
 
     async def add_premium_group(
         self,
@@ -5407,7 +5407,7 @@ class GameEngine:
         if not groups:
             return (
                 "🎲 <b>Premium guruhlar</b>\n\n"
-                "Hozircha guruhlar 💎 almaz yubormagan.\n"
+                "Hozircha guruhlar <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almaz yubormagan.\n"
                 "Guruhda <code>/gsend miqdor</code> yozib reytingga chiqish mumkin."
             )
         return "🎲 <b>Premium guruhlar</b>\n\nKerakli guruhni tanlang:"
@@ -5536,7 +5536,7 @@ class GameEngine:
             if status == "aktiv" and group.reset_at:
                 remaining = max(0, int((self._ensure_utc(group.reset_at) - self._now_utc()).total_seconds() // 60))
                 status = f"{status}, {self._format_minutes(remaining)} qoldi"
-            lines.append(f"<b>{group.title}</b> | 💎 {group.total_diamonds or 0} | {status}")
+            lines.append(f"<b>{group.title}</b> | <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {group.total_diamonds or 0} | {status}")
         return "\n".join(lines)
 
     async def premium_blocked_users_text(self) -> str:
@@ -5679,7 +5679,7 @@ class GameEngine:
             if fresh_user is None:
                 return False, "Avval /start bosing."
             if (fresh_user.diamonds or 0) < diamonds:
-                return False, f"Balans yetarli emas. Kerak: 💎 {diamonds}"
+                return False, f"Balans yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
 
             group = (
                 await session.execute(
@@ -5752,9 +5752,9 @@ class GameEngine:
 
         return (
             True,
-            f"✅ {self._tg_mention(tg_user.id, user.display_name)} guruh reytingi uchun 💎 {diamonds} almaz yubordi.\n"
-            f"🎲 Guruh jami: 💎 {total}\n"
-            f"👤 Siz yuborgan jami: 💎 {user_total}",
+            f"✅ {self._tg_mention(tg_user.id, user.display_name)} guruh reytingi uchun <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds} almaz yubordi.\n"
+            f"🎲 Guruh jami: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {total}\n"
+            f"👤 Siz yuborgan jami: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user_total}",
         )
 
     async def buy_premium_group(self, telegram_id: int, premium_group_id: int) -> tuple[bool, str]:
@@ -5772,7 +5772,7 @@ class GameEngine:
             return (
                 True,
                 f"🎲 <b>{group.title}</b>\n\n"
-                f"💎 Kirish narxi: <b>{group.diamond_price}</b>\n"
+                f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Kirish narxi: <b>{group.diamond_price}</b>\n"
                 f"🔗 Guruh linki: {group.invite_link}",
             )
 
