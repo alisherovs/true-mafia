@@ -121,7 +121,7 @@ Agar o'yinda Komissar Katani va serjant tirik bo'lsa sizni hech kim o'ltira olma
 Siz erkinsiz. Hohlasangiz odamlarni davolaysiz, hohlasangiz ularni o'ldirasiz. G'alaba qilish uchun tirik qolsangiz bas!
 
 👷🏻‍♂️ <b>Konchi</b> -
-Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>'li va 5 ta 💵'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.
+Siz tunda 10 ta kondan birini tanlaysiz. U yerda 3 ta o'limli, 2 ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>'li va 5 ta <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji>'li kon bor. Siz tanlagan koningizdagi narsani olasiz. Oxirigacha tirik qolsangiz yutasiz.
 
 ☠️ <b>Minior</b> -
 Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tunda kelgan Miniordan boshqalar o'ladi.""",
@@ -136,7 +136,7 @@ Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tun
     "profile_fmt": (
         "⭐ ID: <code>{telegram_id}</code>\n"
         "👤 {display_name}\n\n"
-        "💵 Dollar: <b>{dollar}</b>\n"
+        "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar: <b>{dollar}</b>\n"
         "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{diamonds}</b>\n\n"
         "🛡 Himoya: {protection}\n"
         "⛑️ Qotildan himoya: {killer_protection}\n"
@@ -159,8 +159,8 @@ Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tun
     "winners": "G'oliblar:",
     "others": "Qolgan o'yinchilar:",
     "duration": "O'yin: {duration} davom etdi",
-    "you_win": "<b>Siz yutdingiz!</b>\nYutganingiz uchun sizga 💵 {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamond} berildi!",
-    "you_lose": "<b>Siz yutqazdingiz!</b>\nLekin o‘yinda qatnashganingiz uchun 💵 {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamond} berildi!",
+    "you_win": "<b>Siz yutdingiz!</b>\nYutganingiz uchun sizga <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamond} berildi!",
+    "you_lose": "<b>Siz yutqazdingiz!</b>\nLekin o‘yinda qatnashganingiz uchun <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamond} berildi!",
     "command_in_group": "Bu buyruq guruhda ishlatiladi.",
     "group_start_no_game": (
         "<b>🎮 O'yin hali boshlanmagan.</b>\n\n"

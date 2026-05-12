@@ -2418,9 +2418,9 @@ class GameEngine:
                         amount = 50
                         if user:
                             user.dollar += amount
-                        miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan 💵 {amount} dollar topdingiz."))
+                        miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {amount} dollar topdingiz."))
                         miner_group_lines.append(
-                            f"👷🏻‍♂️ Konchi konda {amount} 💵 topdi!"
+                            f"👷🏻‍♂️ Konchi konda {amount} <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> topdi!"
                         )
                     elif user and user.use_miner_protection is not False and (user.miner_protection or 0) > 0:
                         user.miner_protection -= 1
@@ -3986,7 +3986,7 @@ class GameEngine:
         return (
             f"👤 Nik: {display_name}\n"
             f"⭐ ID: <code>{user.telegram_id}</code>\n\n"
-            f"💵 Dollar: <b>{user.dollar}</b>\n"
+            f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar: <b>{user.dollar}</b>\n"
             f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{user.diamonds}</b>\n\n"
             f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
             f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
@@ -4431,7 +4431,7 @@ class GameEngine:
                     ).order_by(GamePlayer.id.asc())
                 )
             ).scalars().all()
-            return True, "⚔️ Kimga zarba berasiz?", targets
+            return True, "<tg-emoji emoji-id=\"5431774564348605707\">⚔️</tg-emoji> Kimga zarba berasiz?", targets
 
     async def hero_game_hp_text(self, telegram_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
@@ -4499,8 +4499,8 @@ class GameEngine:
                 return False, "❌ Bu rol geroy bilan zarba bera olmaydi. Faqat himoyalanish mumkin.", False
             info = hero_level_for_points(int(hero.points or 0))
             if info.max_hit:
-                return True, "⚔️ Maksimal zarba beriladi.", True
-            return True, f"⚔️ Geroyingiz {info.power_text} oralig'ida random zarba beradi.", False
+                return True, "<tg-emoji emoji-id=\"5431774564348605707\">⚔️</tg-emoji> Maksimal zarba beriladi.", True
+            return True, f"<tg-emoji emoji-id=\"5431774564348605707\">⚔️</tg-emoji> Geroyingiz {info.power_text} oralig'ida random zarba beradi.", False
 
     async def hero_game_attack(
         self,
@@ -4613,7 +4613,7 @@ class GameEngine:
             winner = await self.check_winner(game_id)
             if winner:
                 await self.finish_game(bot, game_id, winner)
-            return True, "⚔️ Zarba berildi. Target o'yindan chetlatildi."
+            return True, "<tg-emoji emoji-id=\"5431774564348605707\">⚔️</tg-emoji> Zarba berildi. Target o'yindan chetlatildi."
         try:
             await bot.send_message(
                 target_id,
@@ -4622,7 +4622,7 @@ class GameEngine:
             )
         except TelegramForbiddenError:
             pass
-        return True, f"⚔️ Zarba berildi. Target joni: ♥️ {target_hp_after}/{target_max_hp}"
+        return True, f"<tg-emoji emoji-id=\"5431774564348605707\">⚔️</tg-emoji> Zarba berildi. Target joni: ♥️ {target_hp_after}/{target_max_hp}"
 
     async def send_hero_phase_prompts(self, bot: Bot, game_id: int) -> None:
         async with self.session_factory() as session:
@@ -4752,7 +4752,7 @@ class GameEngine:
         await bot.send_message(
             chat_id,
             f"🔫 Kimdir miltiqdan foydalandi.\n"
-            f"💀 {target_name} itdek otib tashlandi.\n"
+            f"<tg-emoji emoji-id=\"5357199488115030155\">💀</tg-emoji> {target_name} itdek otib tashlandi.\n"
             f"U edi {role_label(target.role)}.",
         )
         winner = await self.check_winner(game_id)
@@ -5208,7 +5208,7 @@ class GameEngine:
             user.dollar += dollars
             await session.commit()
 
-        return True, f"✅ <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} almaz → 💵 {dollars} dollar almashtirildi."
+        return True, f"✅ <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} almaz → <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollars} dollar almashtirildi."
 
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
         prices: dict[str, tuple[int, str, str, Union[int, str]]] = {
@@ -5233,7 +5233,7 @@ class GameEngine:
                 if user.next_game_role:
                     return False, f"Keyingi o'yin uchun rol allaqachon tanlangan: {role_label(user.next_game_role)}"
                 balance = user.diamonds if shop_role.currency == "diamonds" else user.dollar
-                icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if shop_role.currency == "diamonds" else "💵"
+                icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if shop_role.currency == "diamonds" else "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji>"
                 if balance < shop_role.price:
                     return False, f"Balans yetarli emas. Kerak: {icon} {shop_role.price}"
                 if shop_role.currency == "diamonds":
@@ -5259,7 +5259,7 @@ class GameEngine:
                 if user.next_game_disabled_role:
                     return False, "Keyingi o'yin uchun faol rol allaqachon o'chirilgan."
                 if user.dollar < 100:
-                    return False, "Balans yetarli emas. Kerak: 💵 100"
+                    return False, "Balans yetarli emas. Kerak: <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 100"
                 user.dollar -= 100
                 user.next_game_disabled_role = disabled_role.value
                 await session.commit()
@@ -5274,7 +5274,7 @@ class GameEngine:
             if user is None:
                 return False, "Avval /start bosing."
             balance = user.diamonds if currency == "diamonds" else user.dollar
-            icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if currency == "diamonds" else "💵"
+            icon = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>" if currency == "diamonds" else "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji>"
             if balance < price:
                 return False, f"Balans yetarli emas. Kerak: {icon} {price}"
             if currency == "diamonds":
@@ -5370,7 +5370,7 @@ class GameEngine:
             user.dollar += dollar
             user.diamonds += diamonds
             await session.commit()
-        return True, f"✅ Berildi: 💵 {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
+        return True, f"✅ Berildi: <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
 
     async def add_premium_group(
         self,

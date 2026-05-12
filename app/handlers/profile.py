@@ -27,7 +27,7 @@ PRIVATE_COMMANDS_TEXT = (
     "/lastwords matn - o'lim oldi so'zingiz\n"
     "/gun - guruhda reply qilib miltiq ishlatish\n\n"
     "<b>Iqtisod:</b>\n"
-    "💵 Dollar olish - profildagi <b>Xarid qilish 💵</b> tugmasi orqali <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazni 💵 dollarga almashtirish\n"
+    "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar olish - profildagi <b>Xarid qilish <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji></b> tugmasi orqali <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazni <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarga almashtirish\n"
     "/give miqdor - guruhda sovg'a paneli ochish\n"
     "/give miqdor izoh - reply qilingan userga almaz berish\n"
     "/give user_id miqdor izoh - userga almaz berish"

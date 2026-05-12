@@ -118,7 +118,7 @@ async def cmd_shop(message: Message, engine: GameEngine) -> None:
     has_hero = await engine.user_has_hero(message.from_user.id) if message.from_user else False
     await message.answer(
         "🛒 <b>Do'kon</b>\n\n"
-        "Himoya va maxsus imkoniyatlarni 💵 dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almaz orqali sotib olishingiz mumkin.",
+        "Himoya va maxsus imkoniyatlarni <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almaz orqali sotib olishingiz mumkin.",
         reply_markup=shop_keyboard(has_hero),
     )
 
@@ -132,7 +132,7 @@ async def shop_open_callback(callback: CallbackQuery, engine: GameEngine) -> Non
     has_hero = await engine.user_has_hero(callback.from_user.id)
     await callback.message.edit_text(
         "🛒 <b>Do'kon</b>\n\n"
-        "Kerakli itemni tanlang. Xarid summasi profilingizdagi 💵 dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazdan yechiladi.",
+        "Kerakli itemni tanlang. Xarid summasi profilingizdagi <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazdan yechiladi.",
         reply_markup=shop_keyboard(has_hero),
     )
     await callback.answer()
@@ -159,7 +159,7 @@ async def shop_disable_roles_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "🚫 <b>Faol rolni o'chirish</b>\n\n"
         "Tanlangan faol rol keyingi o'yin role pool'idan olib tashlanadi.\n"
-        "Narx: <b>💵 100</b>",
+        "Narx: <b><tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 100</b>",
         reply_markup=disable_role_shop_keyboard(),
     )
     await callback.answer()
@@ -202,9 +202,9 @@ async def dollar_shop_open(callback: CallbackQuery, engine: GameEngine) -> None:
         return
     await engine.ensure_user(callback.from_user)
     await callback.message.edit_text(
-        "💵 <b>Dollar olish</b>\n\n"
+        "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> <b>Dollar olish</b>\n\n"
         "Bu bo'limda faqat almazni dollarga almashtirasiz.\n"
-        "Kurs: <b><tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz = 💵 500 dollar</b>",
+        "Kurs: <b><tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz = <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 500 dollar</b>",
         reply_markup=dollar_exchange_keyboard(),
     )
     await callback.answer()
@@ -286,7 +286,7 @@ async def cmd_bust_diamonds(message: Message, settings: Settings) -> None:
 
 @router.message(Command("bust2"))
 async def cmd_bust_dollars(message: Message, settings: Settings) -> None:
-    await _burn_user_balance(message, settings, "dollar", "💵 dollarlar")
+    await _burn_user_balance(message, settings, "dollar", "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarlar")
 
 
 @router.message(Command("give", "giveto"))
