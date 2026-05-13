@@ -320,18 +320,13 @@ class DiamondGiveaway(Base):
 
 class DiamondTransaction(Base):
     __tablename__ = "diamond_transactions"
-    __table_args__ = (
-        Index("ix_diamond_transactions_created_at", "created_at"),
-        Index("ix_diamond_transactions_user_created", "user_telegram_id", "created_at"),
-        Index("ix_diamond_transactions_action", "action"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger)
     user_name: Mapped[str] = mapped_column(String(255), default="User")
     amount: Mapped[int] = mapped_column(Integer)
     balance_after: Mapped[int] = mapped_column(Integer, default=0)
-    action: Mapped[str] = mapped_column(String(64), index=True)
+    action: Mapped[str] = mapped_column(String(64))
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     counterparty_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     counterparty_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
