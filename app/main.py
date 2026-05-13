@@ -99,6 +99,17 @@ async def main() -> None:
         coalesce=True,
         misfire_grace_time=30,
     )
+    scheduler.add_job(
+        engine.send_pending_diamond_logs,
+        "interval",
+        seconds=30,
+        args=[bot],
+        id="diamond_log_watchdog",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=30,
+    )
     await set_commands(bot)
 
     try:

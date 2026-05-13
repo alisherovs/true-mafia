@@ -549,6 +549,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
             [InlineKeyboardButton(text="💎 Almaz loglari", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
             [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text="👋 Salomlashuv", callback_data="owner:welcome")],
@@ -568,10 +569,20 @@ def owner_diamond_audit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:diamond_audit")],
-            [InlineKeyboardButton(text="💬 Guruxga yuborish", callback_data="owner:diamond_audit:send_group")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
+
+
+def owner_admin_group_keyboard(has_group: bool, can_use_current_chat: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if can_use_current_chat:
+        rows.append([InlineKeyboardButton(text="✅ Shu guruhni ulash", callback_data="owner:admin_group:current")])
+    rows.append([InlineKeyboardButton(text="✏️ ID bilan ulash", callback_data="owner:admin_group:set")])
+    if has_group:
+        rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:admin_group:clear")])
+    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def owner_welcome_keyboard(enabled: bool, has_media: bool) -> InlineKeyboardMarkup:

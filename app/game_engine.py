@@ -103,6 +103,9 @@ SKULL_EMOJI_ID = "5357199488115030155"
 logger = logging.getLogger(__name__)
 
 PREMIUM_RESET_INTERVAL_MINUTES_KEY = "premium_reset_interval_minutes"
+DIAMOND_LOG_LAST_SENT_ID_KEY = "diamond_log_last_sent_id"
+ADMIN_GROUP_ID_KEY = "admin_group_id"
+DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
     "\u034f",
@@ -5069,6 +5072,40 @@ class GameEngine:
             await session.commit()
         return "✅ Yangiliklar kanali o'chirildi. User paneldagi tugma endi ko'rinmaydi."
 
+    async def get_admin_group_id(self) -> int:
+        async with self.session_factory() as session:
+            raw = await self._get_bot_setting_value(session, ADMIN_GROUP_ID_KEY, "")
+        try:
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    async def set_admin_group(self, bot: Bot, raw_chat_id: Union[int, str]) -> tuple[bool, str]:
+        try:
+            chat_id = int(str(raw_chat_id).strip())
+        except (TypeError, ValueError):
+            return False, "Guruh ID faqat son bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        if chat_id >= 0:
+            return False, "Guruh ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        try:
+            chat = await bot.get_chat(chat_id)
+            await bot.send_message(chat_id, "✅ Admin guruh ulandi. Almaz loglari shu yerga avtomatik yuboriladi.")
+        except (TelegramBadRequest, TelegramForbiddenError) as exc:
+            return False, f"Bot bu guruhni topa olmadi yoki xabar yubora olmaydi: {escape(str(exc))}"
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, ADMIN_GROUP_ID_KEY, str(chat_id))
+            latest_tx_id = await session.scalar(select(func.max(DiamondTransaction.id)))
+            await self._set_bot_setting_value(session, DIAMOND_LOG_LAST_SENT_ID_KEY, str(int(latest_tx_id or 0)))
+            await session.commit()
+        title = escape(getattr(chat, "title", None) or str(chat_id))
+        return True, f"✅ Admin guruh ulandi: <b>{title}</b>\nID: <code>{chat_id}</code>"
+
+    async def clear_admin_group(self) -> str:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, ADMIN_GROUP_ID_KEY, "")
+            await session.commit()
+        return "✅ Admin guruh o'chirildi. Almaz loglari avtomatik yuborilmaydi."
+
     async def welcome_settings(self) -> dict[str, str]:
         async with self.session_factory() as session:
             keys = [WELCOME_ENABLED_KEY, WELCOME_TEXT_KEY, WELCOME_MEDIA_TYPE_KEY, WELCOME_MEDIA_FILE_ID_KEY]
@@ -5299,6 +5336,7 @@ class GameEngine:
     def _diamond_action_label(action: str) -> str:
         labels = {
             "admin_grant": "admin kredit",
+            "admin_bust": "admin bankrot",
             "diamond_payment": "Stars xarid",
             "diamond_to_dollar": "dollarga almashtirish",
             "game_participation_reward": "o'yin ishtirok mukofoti",
@@ -5320,8 +5358,45 @@ class GameEngine:
         }
         return labels.get(action, action.replace("_", " "))
 
-    async def owner_diamond_audit_text(self, limit: int = 15) -> str:
+    @staticmethod
+    def _split_report_lines(lines: list[str], max_chars: int = 3600) -> list[str]:
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+        for line in lines:
+            line_len = len(line) + 1
+            if current and current_len + line_len > max_chars:
+                chunks.append("\n".join(current))
+                current = []
+                current_len = 0
+            current.append(line)
+            current_len += line_len
+        if current:
+            chunks.append("\n".join(current))
+        return chunks
+
+    @staticmethod
+    def _format_tx_time(value: Optional[datetime]) -> str:
+        if value is None:
+            return "--"
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+    @staticmethod
+    def _short_text(value: Optional[str], limit: int = 140) -> str:
+        text = str(value or "").strip()
+        if len(text) <= limit:
+            return text
+        return f"{text[: max(0, limit - 1)]}…"
+
+    @staticmethod
+    def _diamond_log_threshold_filter():
+        return func.abs(DiamondTransaction.amount) >= DIAMOND_LOG_MIN_AMOUNT
+
+    async def _owner_diamond_audit_lines(self, limit: int = 15, *, title: str = "💎 <b>Almaz loglari</b>") -> list[str]:
         limit = min(max(5, int(limit)), 50)
+        threshold_filter = self._diamond_log_threshold_filter()
         async with self.session_factory() as session:
             income_expr = func.coalesce(
                 func.sum(case((DiamondTransaction.amount > 0, DiamondTransaction.amount), else_=0)),
@@ -5333,7 +5408,7 @@ class GameEngine:
             )
             total_income, total_expense, tx_count = (
                 await session.execute(
-                    select(income_expr, expense_expr, func.count(DiamondTransaction.id))
+                    select(income_expr, expense_expr, func.count(DiamondTransaction.id)).where(threshold_filter)
                 )
             ).one()
             by_action = (
@@ -5351,6 +5426,7 @@ class GameEngine:
                             0,
                         ),
                     )
+                    .where(threshold_filter)
                     .group_by(DiamondTransaction.action)
                     .order_by(func.count(DiamondTransaction.id).desc())
                     .limit(10)
@@ -5372,6 +5448,7 @@ class GameEngine:
                         user_income_expr,
                         user_expense_expr,
                     )
+                    .where(threshold_filter)
                     .group_by(DiamondTransaction.user_telegram_id)
                     .order_by(user_expense_expr.desc(), user_income_expr.desc())
                     .limit(10)
@@ -5380,21 +5457,24 @@ class GameEngine:
             recent = (
                 await session.execute(
                     select(DiamondTransaction)
+                    .where(threshold_filter)
                     .order_by(DiamondTransaction.created_at.desc(), DiamondTransaction.id.desc())
                     .limit(limit)
                 )
             ).scalars().all()
 
         if not tx_count:
-            return (
-                "💎 <b>Almaz loglari</b>\n\n"
-                "Hali almaz kirim-chiqim logi yozilmagan.\n"
-                "Eslatma: bu bo'lim yangilanishdan keyingi amallarni aniq yozadi."
-            )
+            return [
+                title,
+                "",
+                f"Hali <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz yoki undan yuqori kirim-chiqim logi yozilmagan.\n"
+                "Mayda amallar bu bo'limda ko'rsatilmaydi.",
+            ]
 
         lines = [
-            "💎 <b>Almaz loglari</b>",
+            title,
             "",
+            f"Filter: <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz va undan yuqori",
             f"📥 Jami kirim: <b>{int(total_income or 0)}</b>",
             f"📤 Jami sarf: <b>{int(total_expense or 0)}</b>",
             f"🧾 Amallar soni: <b>{int(tx_count or 0)}</b>",
@@ -5417,14 +5497,126 @@ class GameEngine:
         for item in recent:
             sign = "+" if int(item.amount or 0) > 0 else ""
             label = self._diamond_action_label(item.action)
-            when = item.created_at.strftime("%m-%d %H:%M") if item.created_at else "--"
-            note = f" | {escape(item.note)}" if item.note else ""
+            when = self._format_tx_time(item.created_at)
+            note = f"\n   📝 {escape(self._short_text(item.note))}" if item.note else ""
+            counterparty = ""
+            if item.counterparty_telegram_id:
+                counterparty_name = escape(self._short_text(item.counterparty_name or str(item.counterparty_telegram_id), 64))
+                counterparty = f"\n   ↔️ {counterparty_name} (<code>{item.counterparty_telegram_id}</code>)"
+            chat = f"\n   🏠 chat: <code>{item.chat_id}</code>" if item.chat_id else ""
             user_link = self._tg_mention(item.user_telegram_id, item.user_name)
             lines.append(
                 f"{when} • {user_link}: <b>{sign}{int(item.amount or 0)}</b> "
-                f"({escape(label)}) → balans <b>{int(item.balance_after or 0)}</b>{note}"
+                f"({escape(label)}) → balans <b>{int(item.balance_after or 0)}</b>{counterparty}{chat}{note}"
             )
-        return "\n".join(lines)
+        return lines
+
+    async def owner_diamond_audit_text(self, limit: int = 15) -> str:
+        return "\n".join(await self._owner_diamond_audit_lines(limit))
+
+    async def owner_diamond_audit_chunks(self, limit: int = 30) -> list[str]:
+        lines = await self._owner_diamond_audit_lines(limit, title="💎 <b>Almaz loglari hisoboti</b>")
+        chunks = self._split_report_lines(lines)
+        if len(chunks) <= 1:
+            return chunks
+        total = len(chunks)
+        return [f"{chunk}\n\n<b>Qism:</b> {index}/{total}" for index, chunk in enumerate(chunks, start=1)]
+
+    async def send_owner_diamond_audit(self, bot: Bot, chat_id: int, limit: int = 30) -> tuple[bool, str, int]:
+        if chat_id == 0:
+            return False, "Admin guruh sozlanmagan. Admin paneldan <b>Admin guruh</b> bo'limida ulang.", 0
+        if chat_id > 0:
+            return False, "Admin guruh ID guruh/superguruh ID bo'lishi kerak. Odatda u manfiy son bo'ladi.", 0
+
+        chunks = await self.owner_diamond_audit_chunks(limit)
+        sent = 0
+        try:
+            chat = await bot.get_chat(chat_id)
+            chat_title = getattr(chat, "title", None) or str(chat_id)
+            for chunk in chunks:
+                await bot.send_message(chat_id=chat_id, text=chunk)
+                sent += 1
+                await asyncio.sleep(0.05)
+        except TelegramForbiddenError:
+            return False, "Bot admin guruhga kira olmayapti yoki xabar yuborishga ruxsati yo'q.", sent
+        except TelegramBadRequest as exc:
+            return False, f"Telegram xatosi: {escape(str(exc))}", sent
+        return True, f"Almaz loglari <b>{escape(chat_title)}</b> guruhiga yuborildi. Xabarlar: <b>{sent}</b> ta.", sent
+
+    def _diamond_transaction_line(self, item: DiamondTransaction) -> str:
+        sign = "+" if int(item.amount or 0) > 0 else ""
+        label = self._diamond_action_label(item.action)
+        when = self._format_tx_time(item.created_at)
+        user_link = self._tg_mention(item.user_telegram_id, item.user_name)
+        parts = [
+            f"#{item.id} • {when}",
+            f"{user_link}: <b>{sign}{int(item.amount or 0)}</b> ({escape(label)})",
+            f"Balans: <b>{int(item.balance_after or 0)}</b>",
+        ]
+        if item.counterparty_telegram_id:
+            counterparty = escape(self._short_text(item.counterparty_name or str(item.counterparty_telegram_id), 64))
+            parts.append(f"↔️ {counterparty} (<code>{item.counterparty_telegram_id}</code>)")
+        if item.chat_id:
+            parts.append(f"🏠 <code>{item.chat_id}</code>")
+        if item.note:
+            parts.append(f"📝 {escape(self._short_text(item.note, 120))}")
+        return "\n".join(parts)
+
+    async def send_pending_diamond_logs(self, bot: Bot) -> int:
+        chat_id = await self.get_admin_group_id()
+        if chat_id == 0:
+            return 0
+        if chat_id > 0:
+            logger.warning("Admin group id must be a group/supergroup id, got %s", chat_id)
+            return 0
+
+        async with self.session_factory() as session:
+            raw_last_id = await self._get_bot_setting_value(session, DIAMOND_LOG_LAST_SENT_ID_KEY, "0")
+            try:
+                last_id = max(0, int(raw_last_id))
+            except (TypeError, ValueError):
+                last_id = 0
+            rows = (
+                await session.execute(
+                    select(DiamondTransaction)
+                    .where(DiamondTransaction.id > last_id)
+                    .order_by(DiamondTransaction.id.asc())
+                    .limit(200)
+                )
+            ).scalars().all()
+
+        if not rows:
+            return 0
+
+        newest_id = max(int(item.id) for item in rows)
+        visible_rows = [item for item in rows if abs(int(item.amount or 0)) >= DIAMOND_LOG_MIN_AMOUNT]
+        if not visible_rows:
+            async with self.session_factory() as session:
+                await self._set_bot_setting_value(session, DIAMOND_LOG_LAST_SENT_ID_KEY, str(newest_id))
+                await session.commit()
+            return 0
+
+        lines = ["💎 <b>Yangi almaz loglari</b>", ""]
+        lines.append(f"Filter: <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz va undan yuqori")
+        lines.append("")
+        for item in visible_rows:
+            lines.extend([self._diamond_transaction_line(item), ""])
+        chunks = self._split_report_lines(lines)
+
+        sent = 0
+        try:
+            for chunk in chunks:
+                await bot.send_message(chat_id=chat_id, text=chunk)
+                sent += 1
+                await asyncio.sleep(0.05)
+        except (TelegramBadRequest, TelegramForbiddenError) as exc:
+            logger.warning("Failed to send pending diamond logs to %s: %s", chat_id, exc)
+            return sent
+
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, DIAMOND_LOG_LAST_SENT_ID_KEY, str(newest_id))
+            await session.commit()
+        return sent
 
     async def broadcast(self, bot: Bot, target: str, text: str) -> tuple[int, int]:
         if target not in {"users", "groups"}:

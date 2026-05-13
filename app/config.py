@@ -25,7 +25,6 @@ class Settings(BaseSettings):
     support_url: str = Field(default="https://t.me", alias="SUPPORT_URL")
     admin_username: str = Field(default="support", alias="ADMIN_USERNAME")
     admin_ids_raw: str = Field(default="", alias="ADMIN_IDS")
-    admin_group_id: int = Field(default=0, alias="ADMIN_GROUP_ID")
 
     min_players: int = Field(default=4, alias="MIN_PLAYERS")
     registration_timeout: int = Field(default=90, alias="REGISTRATION_TIMEOUT")

@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
+    owner_admin_group_keyboard,
     owner_diamond_audit_keyboard,
     owner_hero_market_keyboard,
     owner_news_channel_keyboard,
@@ -73,6 +74,7 @@ OWNER_COMMANDS_TEXT = (
     "🧩 <b>Admin panel tugmalari</b>\n"
     "📊 Statistika - bot statistikasi\n"
     "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
+    "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
     "🎲 Premium guruhlar - premium guruhlarni boshqarish\n"
     "🚷 Blacklist - bloklangan foydalanuvchilar bo'limi\n"
     "👋 Salomlashuv - yangi user kirganda avtomatik xabar/media sozlash\n"
@@ -131,29 +133,66 @@ async def owner_diamond_audit_callback(callback: CallbackQuery, engine: GameEngi
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    await _safe_edit(callback, await engine.owner_diamond_audit_text(), reply_markup=owner_diamond_audit_keyboard())
+    await _safe_edit(callback, await engine.owner_diamond_audit_text(limit=10), reply_markup=owner_diamond_audit_keyboard())
     await callback.answer()
 
 
-@router.callback_query(F.data == "owner:diamond_audit:send_group")
-async def owner_diamond_audit_send_group_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+@router.callback_query(F.data == "owner:admin_group")
+async def owner_admin_group_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    
-    if settings.admin_group_id <= 0:
-        await callback.answer("Admin guruh sozlanmagan.", show_alert=True)
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    group_id = await engine.get_admin_group_id()
+    current = f"<code>{group_id}</code>" if group_id else "<b>ulanmagan</b>"
+    can_use_current = callback.message is not None and callback.message.chat.type != "private"
+    text = (
+        "🏠 <b>Admin guruh</b>\n\n"
+        f"Joriy guruh: {current}\n\n"
+        "Almaz loglari shu guruhga avtomatik yuboriladi. "
+        "Bot ulangan guruhda bo'lishi va xabar yubora olishi kerak."
+    )
+    await _safe_edit(callback, text, reply_markup=owner_admin_group_keyboard(bool(group_id), can_use_current))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:admin_group:current")
+async def owner_admin_group_current_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    
-    try:
-        await callback.bot.send_message(
-            chat_id=settings.admin_group_id,
-            text=await engine.owner_diamond_audit_text(),
-            parse_mode="HTML",
-        )
-        await callback.answer("Guruhga yuborildi.", show_alert=True)
-    except Exception as e:
-        await callback.answer(f"Xato: {str(e)}", show_alert=True)
+    if callback.message is None or callback.message.chat.type == "private":
+        await callback.answer("Bu tugmani ulanishi kerak bo'lgan guruhda bosing.", show_alert=True)
+        return
+    ok, text = await engine.set_admin_group(callback.bot, callback.message.chat.id)
+    await _safe_edit(callback, text, reply_markup=owner_admin_group_keyboard(ok, True))
+    await callback.answer("Ulandi." if ok else "Xato", show_alert=not ok)
+
+
+@router.callback_query(F.data == "owner:admin_group:set")
+async def owner_admin_group_set_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "admin_group_id"
+    await _safe_edit(
+        callback,
+        "🏠 <b>Admin guruhni ulash</b>\n\n"
+        "Guruh ID yuboring. Masalan:\n<code>-1001234567890</code>\n\n"
+        "Yoki /admin buyrug'ini kerakli guruhda ochib, <b>Shu guruhni ulash</b> tugmasini bosing.",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:admin_group:clear")
+async def owner_admin_group_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    text = await engine.clear_admin_group()
+    await _safe_edit(callback, text, reply_markup=owner_admin_group_keyboard(False, callback.message is not None and callback.message.chat.type != "private"))
+    await callback.answer("O'chirildi.")
 
 
 @router.callback_query(F.data == "owner:commands")
@@ -522,6 +561,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🧾 <b>Admin panel yordam</b>\n\n"
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
             "💎 Almaz loglari - almaz kirim-chiqimi, sarf sabablari va oxirgi amallarni ko'rsatadi.\n"
+            "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulaydi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
             "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
@@ -631,6 +671,15 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_news_channel_keyboard(True))
+        return True
+
+    if action == "admin_group_id":
+        ok, text = await engine.set_admin_group(message.bot, message.text or "")
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "admin_group_id"
+            await message.answer(text, reply_markup=owner_wait_keyboard())
+            return True
+        await message.answer(text, reply_markup=owner_admin_group_keyboard(True, message.chat.type != "private"))
         return True
 
     if action == "hero_market_channel":
