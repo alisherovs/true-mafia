@@ -569,6 +569,7 @@ def owner_diamond_audit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text="🏠 Log guruhini ulash", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )

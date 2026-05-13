@@ -5512,7 +5512,12 @@ class GameEngine:
         return lines
 
     async def owner_diamond_audit_text(self, limit: int = 15) -> str:
-        return "\n".join(await self._owner_diamond_audit_lines(limit))
+        group_id = await self.get_admin_group_id()
+        group_text = f"<code>{group_id}</code>" if group_id else "<b>ulanmagan</b>"
+        lines = await self._owner_diamond_audit_lines(limit)
+        if len(lines) >= 2:
+            lines.insert(2, f"🏠 Log guruhi: {group_text}")
+        return "\n".join(lines)
 
     async def owner_diamond_audit_chunks(self, limit: int = 30) -> list[str]:
         lines = await self._owner_diamond_audit_lines(limit, title="💎 <b>Almaz loglari hisoboti</b>")
