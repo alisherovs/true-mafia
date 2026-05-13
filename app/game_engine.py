@@ -40,6 +40,7 @@ from app.keyboards import (
 )
 from app.models import (
     BotSetting,
+    DiamondTransaction,
     Game,
     GameLog,
     GamePlayer,
@@ -183,6 +184,33 @@ class GameEngine:
     def _tg_mention(user_id: int, display_name: str) -> str:
         safe_name = escape(display_name or "Unknown")
         return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
+    @staticmethod
+    def _record_diamond_transaction(
+        session: AsyncSession,
+        user: User,
+        amount: int,
+        action: str,
+        *,
+        note: str = "",
+        counterparty: Optional[User] = None,
+        chat_id: Optional[int] = None,
+    ) -> None:
+        if amount == 0:
+            return
+        session.add(
+            DiamondTransaction(
+                user_telegram_id=user.telegram_id,
+                user_name=(user.display_name or "User")[:255],
+                amount=int(amount),
+                balance_after=int(user.diamonds or 0),
+                action=action[:64],
+                note=(note or None),
+                counterparty_telegram_id=counterparty.telegram_id if counterparty else None,
+                counterparty_name=(counterparty.display_name or "User")[:255] if counterparty else None,
+                chat_id=chat_id,
+            )
+        )
 
     async def _get_bot_setting_value(self, session: AsyncSession, key: str, default: str = "") -> str:
         setting = (await session.execute(select(BotSetting).where(BotSetting.key == key))).scalar_one_or_none()
@@ -1303,12 +1331,6 @@ class GameEngine:
             await session.commit()
 
             lang = await self.get_group_language(game.chat_id)
-            document_user_ids = [
-                user.telegram_id
-                for user in users.values()
-                if (user.fake_document or 0) > 0 and user.use_fake_document is not False
-            ]
-            document_text = self._fake_document_roles_text(players)
 
         for player in players:
             role = Role(player.role)
@@ -1320,14 +1342,6 @@ class GameEngine:
                 )
             except TelegramForbiddenError:
                 await bot.send_message(game.chat_id, f"{player.display_name}: {t(lang, 'need_start_for_role')}")
-
-        used_document_ids: list[int] = []
-        for telegram_id in document_user_ids:
-            sent = await self._send_fake_document_report(bot, telegram_id, document_text, game.chat_id)
-            if sent:
-                used_document_ids.append(telegram_id)
-        if used_document_ids:
-            await self._consume_fake_documents(used_document_ids)
 
         # Send team messages for Mafia
         mafia_team = [player for player in players if player.team == Team.MAFIA.value]
@@ -1386,61 +1400,6 @@ class GameEngine:
                     )
                 except TelegramForbiddenError:
                     pass
-
-    def _fake_document_roles_text(self, players: list[GamePlayer]) -> str:
-        lines = [
-            "📁 <b>Hujjat ishga tushdi!</b>",
-            "",
-            "Ushbu o'yindagi rollar:",
-        ]
-        for idx, player in enumerate(players, 1):
-            lines.append(
-                f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)} - {role_label(player.role)}"
-            )
-        return "\n".join(lines)
-
-    async def _send_fake_document_report(
-        self,
-        bot: Bot,
-        telegram_id: int,
-        text: str,
-        chat_id: int,
-    ) -> bool:
-        chunks: list[str] = []
-        current = ""
-        for line in text.splitlines():
-            candidate = f"{current}\n{line}" if current else line
-            if len(candidate) > 3800:
-                if current:
-                    chunks.append(current)
-                current = line
-            else:
-                current = candidate
-        if current:
-            chunks.append(current)
-
-        try:
-            for index, chunk in enumerate(chunks):
-                await bot.send_message(
-                    telegram_id,
-                    chunk,
-                    reply_markup=await self.group_return_keyboard(bot, chat_id) if index == len(chunks) - 1 else None,
-                )
-            return True
-        except TelegramForbiddenError:
-            return False
-
-    async def _consume_fake_documents(self, telegram_ids: list[int]) -> None:
-        if not telegram_ids:
-            return
-        async with self.session_factory() as session:
-            users = (
-                await session.execute(select(User).where(User.telegram_id.in_(telegram_ids)))
-            ).scalars().all()
-            for user in users:
-                if (user.fake_document or 0) > 0:
-                    user.fake_document -= 1
-            await session.commit()
 
     def _night_prompt_for_player(
         self,
@@ -2415,6 +2374,14 @@ class GameEngine:
                         amount = 1
                         if user:
                             user.diamonds += amount
+                            self._record_diamond_transaction(
+                                session,
+                                user,
+                                amount,
+                                "miner_reward",
+                                note=f"O'yin #{game.id}: konchi {mine_number:02d}-kondan olmos topdi",
+                                chat_id=game.chat_id,
+                            )
                         miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos topdingiz."))
                         miner_group_lines.append(
                             f"👷🏻‍♂️ Konchi konda {amount} <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmos topdi!"
@@ -2531,8 +2498,8 @@ class GameEngine:
                         dead.discard(victim_id)
                         death_causes.pop(victim_id, None)
                         death_visitors.pop(victim_id, None)
-                        protected_notices.append((victim_id, "⛑ Qotildan himoya sizni qutqarib qoldi."))
-                        protected_group_lines.append("⛑ Kimdir qotildan himoyasini ishlatdi.")
+                        protected_notices.append((victim_id, "🧿 Qotildan himoya sizni qutqarib qoldi."))
+                        protected_group_lines.append("🧿 Kimdir qotildan himoyasini ishlatdi.")
                         self._add_game_log(
                             session,
                             game,
@@ -2861,7 +2828,6 @@ class GameEngine:
                 seen_role = Role.CITIZEN
             if hidden_by_item:
                 seen_role = Role.CITIZEN
-                await bot.send_message(chat_id, "🎭 Kimdir tekshiruvdan yashirinish uchun maska yoki soxta hujjat ishlatdi.")
                 try:
                     await bot.send_message(
                         target_id,
@@ -3881,9 +3847,25 @@ class GameEngine:
                         user.wins += 1
                         user.dollar += self.settings.winner_reward_dollar
                         user.diamonds += self.settings.winner_reward_diamond
+                        self._record_diamond_transaction(
+                            session,
+                            user,
+                            self.settings.winner_reward_diamond,
+                            "game_winner_reward",
+                            note=f"O'yin #{game.id}: g'olib mukofoti",
+                            chat_id=game.chat_id,
+                        )
                     else:
                         user.dollar += self.settings.loser_reward_dollar
                         user.diamonds += self.settings.loser_reward_diamond
+                        self._record_diamond_transaction(
+                            session,
+                            user,
+                            self.settings.loser_reward_diamond,
+                            "game_participation_reward",
+                            note=f"O'yin #{game.id}: ishtirok mukofoti",
+                            chat_id=game.chat_id,
+                        )
                 (winners if is_winner else losers).append(p)
 
             self._add_game_log(
@@ -3994,11 +3976,11 @@ class GameEngine:
             f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar: <b>{user.dollar}</b>\n"
             f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{user.diamonds}</b>\n\n"
             f"🛡 Himoya: <b>{user.protection}</b> {state(user.use_protection)}\n"
-            f"⛑ Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
+            f"🧿 Qotildan himoya: <b>{user.killer_protection}</b> {state(user.use_killer_protection)}\n"
             f"⚖️ Ovoz berishni himoya qilish: <b>{user.vote_protection}</b> {state(user.use_vote_protection)}\n"
             f"💊 Doridan himoya: <b>{user.drug_protection}</b> {state(user.use_drug_protection)}\n"
             f"📦 Sirpanishdan himoya: <b>{user.miner_protection}</b> {state(user.use_miner_protection)}\n"
-            f"🔫 Miltiq: <b>{user.gun}</b> {state(user.use_gun)}\n\n"
+            "\n"
             f"🎭 Maska: <b>{user.mask}</b> {state(user.use_mask)}\n"
             f"📁 Soxta hujjat: <b>{user.fake_document}</b> {state(user.use_fake_document)}\n"
             f"🃏 Keyingi o'yindagi rolingiz: <b>{stored_role(user.next_game_role)}</b>\n"
@@ -4010,7 +3992,7 @@ class GameEngine:
     @staticmethod
     def format_user_dashboard_entities(user: User) -> dict:
         def state(value: bool) -> str:
-            return "🟢 ON" if value is not False else "🔴 OFF"
+            return ""
 
         def stored_role(value: Optional[str]) -> str:
             if not value:
@@ -4027,11 +4009,11 @@ class GameEngine:
             CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID), " Dollar: ", Bold(str(user.dollar)), "\n",
             CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), "\n\n",
             "🛡 Himoya: ", Bold(str(user.protection)), f" {state(user.use_protection)}\n",
-            "⛑ Qotildan himoya: ", Bold(str(user.killer_protection)), f" {state(user.use_killer_protection)}\n",
+            "🧿 Qotildan himoya: ", Bold(str(user.killer_protection)), f" {state(user.use_killer_protection)}\n",
             "⚖️ Ovoz berishni himoya qilish: ", Bold(str(user.vote_protection)), f" {state(user.use_vote_protection)}\n",
             "💊 Doridan himoya: ", Bold(str(user.drug_protection)), f" {state(user.use_drug_protection)}\n",
             "📦 Sirpanishdan himoya: ", Bold(str(user.miner_protection)), f" {state(user.use_miner_protection)}\n",
-            "🔫 Miltiq: ", Bold(str(user.gun)), f" {state(user.use_gun)}\n\n",
+            "\n",
             "🎭 Maska: ", Bold(str(user.mask)), f" {state(user.use_mask)}\n",
             "📁 Soxta hujjat: ", Bold(str(user.fake_document)), f" {state(user.use_fake_document)}\n",
             "🃏 Keyingi o'yindagi rolingiz: ", Bold(stored_role(user.next_game_role)), "\n",
@@ -4114,6 +4096,13 @@ class GameEngine:
             if int(user.diamonds or 0) < HERO_BUY_PRICE_DIAMONDS:
                 return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_BUY_PRICE_DIAMONDS}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user.diamonds or 0}"
             user.diamonds -= HERO_BUY_PRICE_DIAMONDS
+            self._record_diamond_transaction(
+                session,
+                user,
+                -HERO_BUY_PRICE_DIAMONDS,
+                "hero_buy",
+                note="Geroy sotib olish",
+            )
             hero = Hero(
                 owner_user_id=user.id,
                 name=HERO_DEFAULT_NAME,
@@ -4141,6 +4130,13 @@ class GameEngine:
                 return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_ADD_POINTS_PRICE_DIAMONDS}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user.diamonds or 0}"
             old_level = int(hero.level or 1)
             user.diamonds -= HERO_ADD_POINTS_PRICE_DIAMONDS
+            self._record_diamond_transaction(
+                session,
+                user,
+                -HERO_ADD_POINTS_PRICE_DIAMONDS,
+                "hero_add_points",
+                note=f"Geroyga +{HERO_ADD_POINTS_AMOUNT} ball qo'shish",
+            )
             hero.points = int(hero.points or 0) + HERO_ADD_POINTS_AMOUNT
             self._sync_hero_level(hero)
             await session.commit()
@@ -4306,6 +4302,13 @@ class GameEngine:
             if int(user.diamonds or 0) < HERO_CANCEL_SALE_PRICE_DIAMONDS:
                 return False, "❌ Sotuvdan qaytarish uchun <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz kerak."
             user.diamonds -= HERO_CANCEL_SALE_PRICE_DIAMONDS
+            self._record_diamond_transaction(
+                session,
+                user,
+                -HERO_CANCEL_SALE_PRICE_DIAMONDS,
+                "hero_sale_cancel",
+                note="Geroyni sotuvdan qaytarish",
+            )
             message_id = hero.sale_channel_message_id
             hero.is_for_sale = False
             hero.sale_price_diamonds = None
@@ -4367,6 +4370,22 @@ class GameEngine:
                 return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {buyer.diamonds or 0}"
             buyer.diamonds -= price
             seller.diamonds += price
+            self._record_diamond_transaction(
+                session,
+                buyer,
+                -price,
+                "hero_market_buy",
+                note=f"Geroy #{hero.id} sotib olindi",
+                counterparty=seller,
+            )
+            self._record_diamond_transaction(
+                session,
+                seller,
+                price,
+                "hero_market_sale",
+                note=f"Geroy #{hero.id} sotildi",
+                counterparty=buyer,
+            )
             seller_telegram_id = seller.telegram_id
             seller_text = f"✅ Geroyingiz sotildi. Hisobingizga <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price} almaz qo'shildi."
             message_id = hero.sale_channel_message_id
@@ -4696,108 +4715,6 @@ class GameEngine:
         if chat_id and sent_any:
             await bot.send_message(chat_id, "🥷 Geroy egalari bot shaxsiy xabaridan foydalanishi mumkin.")
 
-    async def use_gun(self, bot: Bot, chat_id: int, shooter_id: int, target_id: int) -> tuple[bool, str]:
-        if shooter_id == target_id:
-            return False, "O'zingizga miltiq ishlata olmaysiz."
-
-        async with self.session_factory() as session:
-            game = await self.find_active_game(session, chat_id)
-            if game is None or game.status != GameStatus.ACTIVE.value:
-                return False, "Aktiv o'yin topilmadi."
-
-            shooter = (
-                await session.execute(
-                    select(GamePlayer).where(
-                        GamePlayer.game_id == game.id,
-                        GamePlayer.telegram_id == shooter_id,
-                        GamePlayer.alive.is_(True),
-                    )
-                )
-            ).scalar_one_or_none()
-            target = (
-                await session.execute(
-                    select(GamePlayer).where(
-                        GamePlayer.game_id == game.id,
-                        GamePlayer.telegram_id == target_id,
-                        GamePlayer.alive.is_(True),
-                    )
-                )
-            ).scalar_one_or_none()
-            user = (await session.execute(select(User).where(User.telegram_id == shooter_id))).scalar_one_or_none()
-            target_user = (await session.execute(select(User).where(User.telegram_id == target_id))).scalar_one_or_none()
-
-            if shooter is None:
-                return False, "Siz bu o'yinda tirik ishtirokchi emassiz."
-            if self._is_day_blocked(shooter, game):
-                return False, "Kezuvchi sabab bugun hech qanday amal bajara olmaysiz."
-            if target is None:
-                return False, "Nishon topilmadi yoki allaqachon o'lgan."
-            if user is None or (user.gun or 0) <= 0:
-                return False, "Profilingizda miltiq yo'q. Do'kondan sotib oling."
-            if user.use_gun is False:
-                return False, "Profilingizda miltiq OFF holatda. Ishlatish uchun profil panelidan ON qiling."
-
-            user.gun -= 1
-            shooter.inactive_rounds = 0
-            blocked_by_protection = (
-                target_user is not None
-                and target_user.use_protection is not False
-                and (target_user.protection or 0) > 0
-            )
-            if blocked_by_protection:
-                target_user.protection -= 1
-                self._add_game_log(
-                    session,
-                    game,
-                    "gun_blocked_by_protection",
-                    actor=shooter,
-                    target=target,
-                    remaining_gun=user.gun,
-                    remaining_protection=target_user.protection,
-                )
-            else:
-                target.alive = False
-                target.death_day = game.day_number
-                self._add_game_log(
-                    session,
-                    game,
-                    "gun_used",
-                    actor=shooter,
-                    target=target,
-                    remaining_gun=user.gun,
-                )
-            target_name = self._tg_mention(target.telegram_id, target.display_name)
-            shooter_name = self._tg_mention(shooter.telegram_id, shooter.display_name)
-            game_id = game.id
-            await session.commit()
-
-        if blocked_by_protection:
-            await bot.send_message(
-                chat_id,
-                f"🔫 {shooter_name} miltiq ishlatdi.\n"
-                f"🛡 {target_name} o'z himoyasini ishlatdi. Miltiqdan omon qoldi.",
-            )
-            try:
-                await bot.send_message(
-                    target_id,
-                    "🛡 Himoya sizni miltiqdan saqlab qoldi.",
-                    reply_markup=await self.group_return_keyboard(bot, chat_id),
-                )
-            except TelegramForbiddenError:
-                pass
-            return True, "Miltiq ishlatildi, lekin nishon himoyalangan ekan."
-
-        await bot.send_message(
-            chat_id,
-            f"🔫 Kimdir miltiqdan foydalandi.\n"
-            f"<tg-emoji emoji-id=\"5357199488115030155\">💀</tg-emoji> {target_name} itdek otib tashlandi.\n"
-            f"U edi {role_label(target.role)}.",
-        )
-        winner = await self.check_winner(game_id)
-        if winner:
-            await self.finish_game(bot, game_id, winner)
-        return True, "Miltiq ishlatildi."
-
     async def active_game_for_chat(self, chat_id: int) -> Optional[Game]:
         async with self.session_factory() as session:
             return await self.find_active_game(session, chat_id)
@@ -5046,6 +4963,22 @@ class GameEngine:
                 return False, "Balans yetarli emas."
             sender.diamonds -= amount
             receiver.diamonds += amount
+            self._record_diamond_transaction(
+                session,
+                sender,
+                -amount,
+                "transfer_out",
+                note="Userga almaz o'tkazma",
+                counterparty=receiver,
+            )
+            self._record_diamond_transaction(
+                session,
+                receiver,
+                amount,
+                "transfer_in",
+                note="Userdan almaz qabul qilindi",
+                counterparty=sender,
+            )
             await session.commit()
             return True, "ok"
 
@@ -5244,6 +5177,13 @@ class GameEngine:
             dollars = amount * 500
             user.diamonds -= amount
             user.dollar += dollars
+            self._record_diamond_transaction(
+                session,
+                user,
+                -amount,
+                "diamond_to_dollar",
+                note=f"Almaz dollarga almashtirildi: {dollars} dollar",
+            )
             await session.commit()
 
         return True, f"✅ <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} almaz → <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollars} dollar almashtirildi."
@@ -5251,9 +5191,7 @@ class GameEngine:
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
         prices: dict[str, tuple[int, str, str, Union[int, str]]] = {
             "protection": (100, "dollar", "protection", 1),
-            "fake_document": (190, "dollar", "fake_document", 1),
             "vote_protection": (1, "diamonds", "vote_protection", 1),
-            "gun": (1, "diamonds", "gun", 1),
             "drug_protection": (100, "dollar", "drug_protection", 1),
             "mask": (100, "dollar", "mask", 1),
             "killer_protection": (2, "diamonds", "killer_protection", 1),
@@ -5276,6 +5214,13 @@ class GameEngine:
                     return False, f"Balans yetarli emas. Kerak: {icon} {shop_role.price}"
                 if shop_role.currency == "diamonds":
                     user.diamonds -= shop_role.price
+                    self._record_diamond_transaction(
+                        session,
+                        user,
+                        -shop_role.price,
+                        "shop_role_buy",
+                        note=f"Keyingi o'yin roli: {role_label(shop_role.role)}",
+                    )
                 else:
                     user.dollar -= shop_role.price
                 user.next_game_role = shop_role.role.value
@@ -5317,6 +5262,13 @@ class GameEngine:
                 return False, f"Balans yetarli emas. Kerak: {icon} {price}"
             if currency == "diamonds":
                 user.diamonds -= price
+                self._record_diamond_transaction(
+                    session,
+                    user,
+                    -price,
+                    "shop_item_buy",
+                    note=f"Do'kon mahsuloti: {item_key}",
+                )
             else:
                 user.dollar -= price
             if field_name == "next_game_role":
@@ -5325,8 +5277,6 @@ class GameEngine:
                 current = int(getattr(user, field_name) or 0)
                 setattr(user, field_name, current + int(value))
             await session.commit()
-        if item_key == "fake_document":
-            return True, "✅ 📁 Hujjat sotib olindi. Keyingi o'yin boshlanganda rollar haqida ma'lumot botdan avtomatik keladi."
         return True, "✅ Xarid muvaffaqiyatli amalga oshirildi."
 
     async def owner_stats(self) -> str:
@@ -5344,6 +5294,137 @@ class GameEngine:
             f"🎮 Aktiv o'yinlar: <b>{active_games or 0}</b>\n"
             f"✅ Tugagan o'yinlar: <b>{completed_games or 0}</b>"
         )
+
+    @staticmethod
+    def _diamond_action_label(action: str) -> str:
+        labels = {
+            "admin_grant": "admin kredit",
+            "diamond_payment": "Stars xarid",
+            "diamond_to_dollar": "dollarga almashtirish",
+            "game_participation_reward": "o'yin ishtirok mukofoti",
+            "game_winner_reward": "g'olib mukofoti",
+            "giveaway_create": "sovg'a ochish",
+            "giveaway_refund": "sovg'a qaytarish",
+            "giveaway_win": "sovg'a yutish",
+            "hero_add_points": "geroy ball",
+            "hero_buy": "geroy xarid",
+            "hero_market_buy": "geroy marketplace xarid",
+            "hero_market_sale": "geroy marketplace sotuv",
+            "hero_sale_cancel": "geroy sotuvdan qaytarish",
+            "miner_reward": "konchi topilmasi",
+            "premium_group_contribution": "premium guruh",
+            "shop_item_buy": "do'kon mahsulot",
+            "shop_role_buy": "rol xarid",
+            "transfer_in": "o'tkazma kirim",
+            "transfer_out": "o'tkazma chiqim",
+        }
+        return labels.get(action, action.replace("_", " "))
+
+    async def owner_diamond_audit_text(self, limit: int = 15) -> str:
+        limit = min(max(5, int(limit)), 50)
+        async with self.session_factory() as session:
+            income_expr = func.coalesce(
+                func.sum(case((DiamondTransaction.amount > 0, DiamondTransaction.amount), else_=0)),
+                0,
+            )
+            expense_expr = func.coalesce(
+                func.sum(case((DiamondTransaction.amount < 0, -DiamondTransaction.amount), else_=0)),
+                0,
+            )
+            total_income, total_expense, tx_count = (
+                await session.execute(
+                    select(income_expr, expense_expr, func.count(DiamondTransaction.id))
+                )
+            ).one()
+            by_action = (
+                await session.execute(
+                    select(
+                        DiamondTransaction.action,
+                        func.count(DiamondTransaction.id),
+                        func.coalesce(func.sum(DiamondTransaction.amount), 0),
+                        func.coalesce(
+                            func.sum(case((DiamondTransaction.amount > 0, DiamondTransaction.amount), else_=0)),
+                            0,
+                        ),
+                        func.coalesce(
+                            func.sum(case((DiamondTransaction.amount < 0, -DiamondTransaction.amount), else_=0)),
+                            0,
+                        ),
+                    )
+                    .group_by(DiamondTransaction.action)
+                    .order_by(func.count(DiamondTransaction.id).desc())
+                    .limit(10)
+                )
+            ).all()
+            user_income_expr = func.coalesce(
+                func.sum(case((DiamondTransaction.amount > 0, DiamondTransaction.amount), else_=0)),
+                0,
+            ).label("income")
+            user_expense_expr = func.coalesce(
+                func.sum(case((DiamondTransaction.amount < 0, -DiamondTransaction.amount), else_=0)),
+                0,
+            ).label("expense")
+            top_users = (
+                await session.execute(
+                    select(
+                        DiamondTransaction.user_telegram_id,
+                        func.max(DiamondTransaction.user_name),
+                        user_income_expr,
+                        user_expense_expr,
+                    )
+                    .group_by(DiamondTransaction.user_telegram_id)
+                    .order_by(user_expense_expr.desc(), user_income_expr.desc())
+                    .limit(10)
+                )
+            ).all()
+            recent = (
+                await session.execute(
+                    select(DiamondTransaction)
+                    .order_by(DiamondTransaction.created_at.desc(), DiamondTransaction.id.desc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+
+        if not tx_count:
+            return (
+                "💎 <b>Almaz loglari</b>\n\n"
+                "Hali almaz kirim-chiqim logi yozilmagan.\n"
+                "Eslatma: bu bo'lim yangilanishdan keyingi amallarni aniq yozadi."
+            )
+
+        lines = [
+            "💎 <b>Almaz loglari</b>",
+            "",
+            f"📥 Jami kirim: <b>{int(total_income or 0)}</b>",
+            f"📤 Jami sarf: <b>{int(total_expense or 0)}</b>",
+            f"🧾 Amallar soni: <b>{int(tx_count or 0)}</b>",
+            "",
+            "📌 <b>Nimalarga sarflanmoqda / olinmoqda:</b>",
+        ]
+        for action, count, net, income, expense in by_action:
+            label = self._diamond_action_label(str(action))
+            lines.append(
+                f"• {escape(label)}: kirim <b>{int(income or 0)}</b>, "
+                f"sarf <b>{int(expense or 0)}</b>, net <b>{int(net or 0)}</b> ({int(count or 0)} ta)"
+            )
+
+        lines.extend(["", "👥 <b>TOP userlar:</b>"])
+        for index, (telegram_id, name, income, expense) in enumerate(top_users, start=1):
+            mention = self._tg_mention(int(telegram_id), str(name or telegram_id))
+            lines.append(f"{index}. {mention}: kirim <b>{int(income or 0)}</b>, sarf <b>{int(expense or 0)}</b>")
+
+        lines.extend(["", f"🕘 <b>Oxirgi {limit} amal:</b>"])
+        for item in recent:
+            sign = "+" if int(item.amount or 0) > 0 else ""
+            label = self._diamond_action_label(item.action)
+            when = item.created_at.strftime("%m-%d %H:%M") if item.created_at else "--"
+            note = f" | {escape(item.note)}" if item.note else ""
+            user_link = self._tg_mention(item.user_telegram_id, item.user_name)
+            lines.append(
+                f"{when} • {user_link}: <b>{sign}{int(item.amount or 0)}</b> "
+                f"({escape(label)}) → balans <b>{int(item.balance_after or 0)}</b>{note}"
+            )
+        return "\n".join(lines)
 
     async def broadcast(self, bot: Bot, target: str, text: str) -> tuple[int, int]:
         if target not in {"users", "groups"}:
@@ -5407,6 +5488,13 @@ class GameEngine:
                 return False, "User topilmadi. U avval /start qilgan bo'lishi kerak."
             user.dollar += dollar
             user.diamonds += diamonds
+            self._record_diamond_transaction(
+                session,
+                user,
+                diamonds,
+                "admin_grant",
+                note=f"Admin kredit: dollar={dollar}, almaz={diamonds}",
+            )
             await session.commit()
         return True, f"✅ Berildi: <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
 
@@ -5759,6 +5847,14 @@ class GameEngine:
                 session.add(contribution)
 
             fresh_user.diamonds -= diamonds
+            self._record_diamond_transaction(
+                session,
+                fresh_user,
+                -diamonds,
+                "premium_group_contribution",
+                note=f"Premium guruh reytingi: {chat_title or chat_id}",
+                chat_id=chat_id,
+            )
             group.total_diamonds = int(group.total_diamonds or 0) + diamonds
             group.diamond_price = group.total_diamonds
             reset_interval_minutes = await self._premium_reset_interval_minutes_in_session(session)

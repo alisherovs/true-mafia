@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
 from app.config import Settings
@@ -24,8 +24,7 @@ PRIVATE_COMMANDS_TEXT = (
     "/lang - tilni o'zgartirish\n"
     "/top - TOP reyting\n\n"
     "<b>O'yin paytida:</b>\n"
-    "/lastwords matn - o'lim oldi so'zingiz\n"
-    "/gun - guruhda reply qilib miltiq ishlatish\n\n"
+    "/lastwords matn - o'lim oldi so'zingiz\n\n"
     "<b>Iqtisod:</b>\n"
     "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar olish - profildagi <b>Xarid qilish <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji></b> tugmasi orqali <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazni <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarga almashtirish\n"
     "/give miqdor - guruhda sovg'a paneli ochish\n"
@@ -50,9 +49,9 @@ GROUP_COMMANDS_TEXT = (
     "/roles - rollar haqida ma'lumot\n"
     "/lang - guruh tilini o'zgartirish\n"
     "/profile - profilingiz\n"
+    "/you - reply yoki user ID orqali profilni ko'rish\n"
     "/give miqdor - sovg'a paneli ochish\n"
-    "/gsend miqdor - guruhni premium reytingga chiqarish uchun almaz yuborish\n"
-    "/gun - reply qilingan o'yinchiga miltiq ishlatish"
+    "/gsend miqdor - guruhni premium reytingga chiqarish uchun almaz yuborish"
 )
 
 
@@ -85,6 +84,42 @@ async def cmd_profile(message: Message, engine: GameEngine, settings: Settings) 
     if message.from_user is None:
         return
     await _send_profile(message, engine, settings)
+
+
+async def _resolve_you_target(message: Message, command: CommandObject, engine: GameEngine) -> User | None:
+    if message.reply_to_message and message.reply_to_message.from_user:
+        return await engine.ensure_user(message.reply_to_message.from_user)
+
+    args = (command.args or "").strip()
+    if args:
+        target_id_raw = args.split(maxsplit=1)[0]
+        if not target_id_raw.isdigit():
+            await message.answer("Foydalanish: <code>/you</code>, reply qilib <code>/you</code> yoki <code>/you user_id</code>")
+            return None
+        user = await engine.get_user(int(target_id_raw))
+        if user is None:
+            await message.answer("❌ Bu ID bo'yicha profil topilmadi. User avval botda /start bosgan bo'lishi kerak.")
+            return None
+        return user
+
+    if message.from_user is None:
+        return None
+    return await engine.ensure_user(message.from_user)
+
+
+@router.message(Command("you"))
+async def cmd_you(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.chat.type == "private":
+        if message.from_user is None:
+            return
+        user = await engine.ensure_user(message.from_user)
+        await message.answer(**engine.format_user_dashboard_entities(user))
+        return
+
+    user = await _resolve_you_target(message, command, engine)
+    if user is None:
+        return
+    await message.answer(**engine.format_user_dashboard_entities(user))
 
 
 @router.message(Command("commands"))
@@ -137,7 +172,6 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
         "use_vote_protection",
         "use_miner_protection",
         "use_drug_protection",
-        "use_gun",
         "use_mask",
         "use_fake_document",
     }

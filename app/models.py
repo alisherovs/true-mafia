@@ -27,7 +27,6 @@ class User(Base):
     vote_protection: Mapped[int] = mapped_column(Integer, default=0)
     miner_protection: Mapped[int] = mapped_column(Integer, default=0)
     drug_protection: Mapped[int] = mapped_column(Integer, default=0)
-    gun: Mapped[int] = mapped_column(Integer, default=0)
     mask: Mapped[int] = mapped_column(Integer, default=0)
     fake_document: Mapped[int] = mapped_column(Integer, default=0)
     next_game_role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -37,7 +36,6 @@ class User(Base):
     use_vote_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_miner_protection: Mapped[bool] = mapped_column(Boolean, default=True)
     use_drug_protection: Mapped[bool] = mapped_column(Boolean, default=True)
-    use_gun: Mapped[bool] = mapped_column(Boolean, default=True)
     use_mask: Mapped[bool] = mapped_column(Boolean, default=True)
     use_fake_document: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -318,6 +316,28 @@ class DiamondGiveaway(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DiamondTransaction(Base):
+    __tablename__ = "diamond_transactions"
+    __table_args__ = (
+        Index("ix_diamond_transactions_created_at", "created_at"),
+        Index("ix_diamond_transactions_user_created", "user_telegram_id", "created_at"),
+        Index("ix_diamond_transactions_action", "action"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_name: Mapped[str] = mapped_column(String(255), default="User")
+    amount: Mapped[int] = mapped_column(Integer)
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    counterparty_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    counterparty_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class BotSetting(Base):

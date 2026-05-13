@@ -74,7 +74,6 @@ async def _ensure_lightweight_columns(conn) -> None:
             "vote_protection": "INTEGER DEFAULT 0",
             "miner_protection": "INTEGER DEFAULT 0",
             "drug_protection": "INTEGER DEFAULT 0",
-            "gun": "INTEGER DEFAULT 0",
             "mask": "INTEGER DEFAULT 0",
             "fake_document": "INTEGER DEFAULT 0",
             "next_game_role": "VARCHAR(64)",
@@ -84,7 +83,6 @@ async def _ensure_lightweight_columns(conn) -> None:
             "use_vote_protection": "BOOLEAN DEFAULT TRUE",
             "use_miner_protection": "BOOLEAN DEFAULT TRUE",
             "use_drug_protection": "BOOLEAN DEFAULT TRUE",
-            "use_gun": "BOOLEAN DEFAULT TRUE",
             "use_mask": "BOOLEAN DEFAULT TRUE",
             "use_fake_document": "BOOLEAN DEFAULT TRUE",
             "wins": "INTEGER DEFAULT 0",
@@ -227,6 +225,24 @@ async def _ensure_lightweight_columns(conn) -> None:
         text(
             "CREATE INDEX IF NOT EXISTS ix_premium_blocked_users_created_at "
             "ON premium_blocked_users(created_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_diamond_transactions_created_at "
+            "ON diamond_transactions(created_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_diamond_transactions_user_created "
+            "ON diamond_transactions(user_telegram_id, created_at)"
+        )
+    )
+    await conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_diamond_transactions_action "
+            "ON diamond_transactions(action)"
         )
     )
 

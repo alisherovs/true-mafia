@@ -37,40 +37,14 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
 
 
 async def set_commands(bot: Bot) -> None:
-    private_commands = [
-        BotCommand(command="start", description="Start game"),
-        BotCommand(command="lang", description="Change language"),
-        BotCommand(command="profile", description="Profile"),
-        BotCommand(command="commands", description="Commands"),
-        BotCommand(command="roles", description="Rules"),
-        BotCommand(command="top", description="TOP Rating"),
+    visible_commands = [
+        BotCommand(command="start", description="O'yinni boshlash"),
+        BotCommand(command="profile", description="Profilingizni ko'rish (Shaxsiy chatda)"),
+        BotCommand(command="roles", description="O'yin rollarini ko'rish"),
     ]
-    group_commands = [
-        BotCommand(command="start", description="Start"),
-        BotCommand(command="game", description="Start registration"),
-        BotCommand(command="classic", description="Start Classic mode"),
-        BotCommand(command="super", description="Start Super mode"),
-        BotCommand(command="mega", description="Start Mega mode"),
-        BotCommand(command="leave", description="Leave game"),
-        BotCommand(command="teamgame", description="Start turnire game"),
-        BotCommand(command="extend", description="Extend registration timeout"),
-        BotCommand(command="lang", description="Change language"),
-        BotCommand(command="give", description="Give diamonds"),
-        BotCommand(command="gsend", description="Boost premium group"),
-        BotCommand(command="shop", description="Shop"),
-        BotCommand(command="profile", description="Profile"),
-        BotCommand(command="commands", description="Commands"),
-        BotCommand(command="roles", description="Rules"),
-        BotCommand(command="settings", description="Settings"),
-        BotCommand(command="settimeout", description="Set registration timeout"),
-        BotCommand(command="stop", description="Stop game"),
-        BotCommand(command="top", description="TOP Rating"),
-        BotCommand(command="lastwords", description="Set last words"),
-        BotCommand(command="gun", description="Use gun"),
-    ]
-    await bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
-    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
-    await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+    await bot.set_my_commands(visible_commands, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(visible_commands, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(visible_commands, scope=BotCommandScopeAllGroupChats())
 
 
 async def main() -> None:

@@ -42,12 +42,10 @@ def start_menu_keyboard(
     rows = [
         [InlineKeyboardButton(text=t(lang, "add_to_group"), url=add_url)],
         [InlineKeyboardButton(text=t(lang, "premium_groups"), callback_data="premium:info")],
-        [InlineKeyboardButton(text="💎 Almaz sotib olish", callback_data="diamond:shop")],
         [
             InlineKeyboardButton(text=t(lang, "lang"), callback_data="lang:menu:user:0"),
             InlineKeyboardButton(text=t(lang, "rules_btn"), callback_data="rules:show"),
         ],
-        [InlineKeyboardButton(text="📋 Buyruqlar", callback_data="commands:open")],
     ]
     if news_url:
         rows.insert(3, [InlineKeyboardButton(text=t(lang, "news"), url=news_url)])
@@ -71,30 +69,24 @@ def profile_dashboard_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [
         [
-            _toggle_button("📁", "use_fake_document", user),
             _toggle_button("🛡", "use_protection", user),
-            _toggle_button("🎭", "use_mask", user),
-        ],
-        [
-            _toggle_button("⛑", "use_killer_protection", user),
-            _toggle_button("🔫", "use_gun", user),
+            _toggle_button("📁", "use_fake_document", user),
             _toggle_button("⚖️", "use_vote_protection", user),
         ],
         [
             _toggle_button("💊", "use_drug_protection", user),
-            _toggle_button("📦", "use_miner_protection", user),
+            _toggle_button("🧿", "use_killer_protection", user),
+        ],
+        [
+            _toggle_button("🎭", "use_mask", user),
+            _toggle_button("🛡", "use_protection", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
+        [
+            InlineKeyboardButton(text="💎 Xarid qilish", callback_data="diamond:shop"),
+            InlineKeyboardButton(text="💵 Xarid qilish", callback_data="dollar:shop"),
+        ],
         *([[InlineKeyboardButton(text="🥷 Mening geroyim", callback_data="hero:panel")]] if has_hero else []),
-        [
-            InlineKeyboardButton(text="Xarid qilish 💵", callback_data="dollar:shop"),
-            InlineKeyboardButton(text="Xarid qilish 💎", callback_data="diamond:shop"),
-        ],
-        [
-            InlineKeyboardButton(text="🌍 Til", callback_data="lang:menu:user:0"),
-            InlineKeyboardButton(text="🃏 O'yin qoidalari", callback_data="rules:show"),
-        ],
-        [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
     ]
     if news_url:
         rows.append([InlineKeyboardButton(text="Yangiliklar ↗", url=news_url)])
@@ -396,16 +388,14 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [hero_button],
             [InlineKeyboardButton(text="🛡 Himoya - 100💵", callback_data="shop:buy:protection")],
-            [InlineKeyboardButton(text="📁 Hujjat - 190💵", callback_data="shop:buy:fake_document")],
             [InlineKeyboardButton(text="⚖️ Ovozdan himoya - 1💎", callback_data="shop:buy:vote_protection")],
-            [InlineKeyboardButton(text="🔫 Miltiq - 1💎", callback_data="shop:buy:gun")],
             [InlineKeyboardButton(text="💊 Doridan himoya - 100💵", callback_data="shop:buy:drug_protection")],
             [InlineKeyboardButton(text="🎭 Maska - 100💵", callback_data="shop:buy:mask")],
-            [InlineKeyboardButton(text="⛑️ Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
+            [InlineKeyboardButton(text="🧿 Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
             [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
             [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
         ]
     )
 
@@ -558,6 +548,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
+            [InlineKeyboardButton(text="💎 Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
             [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text="👋 Salomlashuv", callback_data="owner:welcome")],
@@ -569,6 +560,16 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],
             [InlineKeyboardButton(text="📋 Barcha buyruqlar", callback_data="owner:commands")],
             [InlineKeyboardButton(text="🧾 Yordam", callback_data="owner:help")],
+        ]
+    )
+
+
+def owner_diamond_audit_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text="💬 Guruxga yuborish", callback_data="owner:diamond_audit:send_group")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
 

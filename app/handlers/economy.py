@@ -22,11 +22,12 @@ from app.keyboards import (
     role_shop_keyboard,
     shop_keyboard,
 )
-from app.models import DiamondGiveaway, User
+from app.models import DiamondGiveaway, DiamondTransaction, User
 from app.texts import t
 
 router = Router()
 DIAMOND_EMOJI_ID = "5427168083074628963"
+LARGE_TRANSFER_THRESHOLD = 5000
 
 
 def _user_link(user_id: int, name: str) -> str:
@@ -54,6 +55,52 @@ def _diamond_transfer_kwargs(
         f" {amount} olmos\n",
         f"Izoh: {note or '-'}",
     ).as_kwargs()
+
+
+def _record_diamond_transaction(
+    session,
+    user: User,
+    amount: int,
+    action: str,
+    *,
+    note: str = "",
+    counterparty: Optional[User] = None,
+    chat_id: Optional[int] = None,
+) -> None:
+    if amount == 0:
+        return
+    session.add(
+        DiamondTransaction(
+            user_telegram_id=user.telegram_id,
+            user_name=(user.display_name or "User")[:255],
+            amount=int(amount),
+            balance_after=int(user.diamonds or 0),
+            action=action[:64],
+            note=note or None,
+            counterparty_telegram_id=counterparty.telegram_id if counterparty else None,
+            counterparty_name=(counterparty.display_name or "User")[:255] if counterparty else None,
+            chat_id=chat_id,
+        )
+    )
+
+
+def _large_transfer_notice(
+    *,
+    currency_icon: str,
+    amount: int,
+    sender_name: str,
+    sender_id: int,
+    target_name: str,
+    target_id: int,
+    chat_title: str,
+    chat_id: int,
+) -> str:
+    return (
+        f"{currency_icon} {amount} o'tkazma aniqlandi.\n"
+        f"    💸 O'tkazuvchi: {escape(sender_name or str(sender_id))} {sender_id}\n"
+        f"    🎯 Qabul qiluvchi: {escape(target_name or str(target_id))} {target_id}\n"
+        f"    🏠 Guruh: {escape(chat_title or 'Private')} ({chat_id})"
+    )
 
 
 def _giveaway_keyboard(giveaway_id: int, active: bool = True) -> Optional[InlineKeyboardMarkup]:
@@ -124,6 +171,15 @@ async def _finish_giveaway(
         )
         session.add(winner_user)
     winner_user.diamonds += giveaway.amount
+    _record_diamond_transaction(
+        session,
+        winner_user,
+        giveaway.amount,
+        "giveaway_win",
+        note=f"Sovg'a #{giveaway.id} yutildi",
+        counterparty=creator,
+        chat_id=giveaway.chat_id,
+    )
     giveaway.status = "finished"
     giveaway.winner_telegram_id = winner_id
     giveaway.ended_at = datetime.now(timezone.utc)
@@ -298,6 +354,15 @@ async def _burn_user_balance(message: Message, settings: Settings, field: str, l
 
         burned = int(getattr(user, field, 0) or 0)
         setattr(user, field, 0)
+        if field == "diamonds":
+            _record_diamond_transaction(
+                session,
+                user,
+                -burned,
+                "admin_bust",
+                note=f"Admin tomonidan olmoslar 0 qilindi: admin={message.from_user.id}",
+                chat_id=message.chat.id,
+            )
         await session.commit()
 
     target_name = _user_link(target_tg.id, user.display_name or target_tg.full_name or str(target_tg.id))
@@ -349,6 +414,14 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
                 await message.reply(t(lang, "give_not_enough"))
                 return
             fresh_sender.diamonds -= amount
+            _record_diamond_transaction(
+                session,
+                fresh_sender,
+                -amount,
+                "giveaway_create",
+                note="Guruhda almaz sovg'asi ochildi",
+                chat_id=message.chat.id,
+            )
             giveaway = DiamondGiveaway(
                 chat_id=message.chat.id,
                 creator_telegram_id=sender.telegram_id,
@@ -420,7 +493,27 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
         amount,
         note_text,
     )
-    await message.reply(**transfer_kwargs)
+    if message.chat.type != "private":
+        if amount >= LARGE_TRANSFER_THRESHOLD:
+            await message.reply(
+                _large_transfer_notice(
+                    currency_icon="<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>",
+                    amount=amount,
+                    sender_name=sender_display,
+                    sender_id=sender.telegram_id,
+                    target_name=target_display,
+                    target_id=target.telegram_id,
+                    chat_title=message.chat.title or "Guruh",
+                    chat_id=message.chat.id,
+                )
+            )
+        else:
+            try:
+                await message.bot.send_message(sender.telegram_id, **transfer_kwargs)
+            except Exception:
+                pass
+    else:
+        await message.reply(**transfer_kwargs)
     try:
         await message.bot.send_message(target_id, **transfer_kwargs)
     except Exception:
@@ -496,6 +589,14 @@ async def giveaway_callback(callback: CallbackQuery, engine: GameEngine) -> None
             participants = _giveaway_participants(giveaway.participants_json)
             if not participants:
                 creator.diamonds += giveaway.amount
+                _record_diamond_transaction(
+                    session,
+                    creator,
+                    giveaway.amount,
+                    "giveaway_refund",
+                    note=f"Sovg'a #{giveaway.id}: ishtirokchi yo'q, qaytarildi",
+                    chat_id=giveaway.chat_id,
+                )
                 giveaway.status = "cancelled"
                 giveaway.ended_at = datetime.now(timezone.utc)
                 await session.commit()
@@ -612,6 +713,14 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
             return
         
         user.diamonds = (user.diamonds or 0) + diamonds
+        _record_diamond_transaction(
+            session,
+            user,
+            diamonds,
+            "diamond_payment",
+            note=f"Telegram Stars orqali xarid: payload={payload}",
+            chat_id=message.chat.id,
+        )
         await session.commit()
     
     await message.answer(

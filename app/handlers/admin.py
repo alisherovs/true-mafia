@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
+    owner_diamond_audit_keyboard,
     owner_hero_market_keyboard,
     owner_news_channel_keyboard,
     owner_panel_keyboard,
@@ -40,6 +41,7 @@ OWNER_COMMANDS_TEXT = (
     "👤 <b>User/private buyruqlar</b>\n"
     "/start - asosiy menyuni ochish\n"
     "/profile - profil va balans ma'lumotlari\n"
+    "/you - reply yoki user ID orqali profilni ko'rish\n"
     "/commands - user buyruqlari ro'yxati\n"
     "/roles - rollar haqida ma'lumot\n"
     "/lang - tilni o'zgartirish\n"
@@ -54,10 +56,10 @@ OWNER_COMMANDS_TEXT = (
     "/extend - ro'yxatdan o'tish vaqtini uzaytirish\n"
     "/stop - aktiv o'yinni to'xtatish\n"
     "/settings - guruh sozlamalarini bot private chatida ochish\n"
+    "/you user_id - user profilidagi balans va itemlarni ko'rish\n"
     "/settimeout soniya - ro'yxatdan o'tish vaqtini sozlash\n"
     "/teamgame - turnir o'yini bo'limi\n"
-    "/lastwords matn - o'lim oldi so'zini yozish\n"
-    "/gun - reply qilingan o'yinchiga miltiq ishlatish\n\n"
+    "/lastwords matn - o'lim oldi so'zini yozish\n\n"
     "💰 <b>Iqtisod buyruqlari</b>\n"
     "/give miqdor - guruhda sovg'a paneli ochish\n"
     "/give miqdor izoh - reply qilingan userga almaz berish\n"
@@ -70,6 +72,7 @@ OWNER_COMMANDS_TEXT = (
     "/gbust - bot admin bo'lgan guruhni premium ro'yxatdan bankrot qilish\n\n"
     "🧩 <b>Admin panel tugmalari</b>\n"
     "📊 Statistika - bot statistikasi\n"
+    "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
     "🎲 Premium guruhlar - premium guruhlarni boshqarish\n"
     "🚷 Blacklist - bloklangan foydalanuvchilar bo'limi\n"
     "👋 Salomlashuv - yangi user kirganda avtomatik xabar/media sozlash\n"
@@ -120,6 +123,37 @@ async def owner_stats_callback(callback: CallbackQuery, engine: GameEngine, sett
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     await _safe_edit(callback, await engine.owner_stats(), reply_markup=owner_panel_keyboard())
     await callback.answer()
+
+
+@router.callback_query(F.data == "owner:diamond_audit")
+async def owner_diamond_audit_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    await _safe_edit(callback, await engine.owner_diamond_audit_text(), reply_markup=owner_diamond_audit_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:diamond_audit:send_group")
+async def owner_diamond_audit_send_group_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    
+    if settings.admin_group_id <= 0:
+        await callback.answer("Admin guruh sozlanmagan.", show_alert=True)
+        return
+    
+    try:
+        await callback.bot.send_message(
+            chat_id=settings.admin_group_id,
+            text=await engine.owner_diamond_audit_text(),
+            parse_mode="HTML",
+        )
+        await callback.answer("Guruhga yuborildi.", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"Xato: {str(e)}", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:commands")
@@ -487,6 +521,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
         await callback.message.edit_text(
             "🧾 <b>Admin panel yordam</b>\n\n"
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
+            "💎 Almaz loglari - almaz kirim-chiqimi, sarf sabablari va oxirgi amallarni ko'rsatadi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
             "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
