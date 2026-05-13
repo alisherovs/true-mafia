@@ -86,6 +86,7 @@ def profile_dashboard_keyboard(
             InlineKeyboardButton(text="💎 Xarid qilish", callback_data="diamond:shop"),
             InlineKeyboardButton(text="💵 Xarid qilish", callback_data="dollar:shop"),
         ],
+        [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
         *([[InlineKeyboardButton(text="🥷 Mening geroyim", callback_data="hero:panel")]] if has_hero else []),
     ]
     if news_url:

@@ -37,14 +37,37 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
 
 
 async def set_commands(bot: Bot) -> None:
-    visible_commands = [
+    private_commands = [
         BotCommand(command="start", description="O'yinni boshlash"),
         BotCommand(command="profile", description="Profilingizni ko'rish (Shaxsiy chatda)"),
         BotCommand(command="roles", description="O'yin rollarini ko'rish"),
     ]
-    await bot.set_my_commands(visible_commands, scope=BotCommandScopeDefault())
-    await bot.set_my_commands(visible_commands, scope=BotCommandScopeAllPrivateChats())
-    await bot.set_my_commands(visible_commands, scope=BotCommandScopeAllGroupChats())
+    group_commands = [
+        BotCommand(command="start", description="O'yinni boshlash"),
+        BotCommand(command="game", description="Ro'yxatdan o'tishni boshlash"),
+        BotCommand(command="classic", description="Classic mode"),
+        BotCommand(command="super", description="Super mode"),
+        BotCommand(command="mega", description="Mega mode"),
+        BotCommand(command="leave", description="O'yindan chiqish"),
+        BotCommand(command="extend", description="Ro'yxat vaqtini uzaytirish"),
+        BotCommand(command="stop", description="O'yinni to'xtatish"),
+        BotCommand(command="teamgame", description="Turnir o'yini"),
+        BotCommand(command="lastwords", description="O'lim oldi so'zi"),
+        BotCommand(command="settings", description="Guruh sozlamalari"),
+        BotCommand(command="settimeout", description="Ro'yxat vaqtini sozlash"),
+        BotCommand(command="lang", description="Tilni o'zgartirish"),
+        BotCommand(command="profile", description="Profilingiz"),
+        BotCommand(command="you", description="User profilini ko'rish"),
+        BotCommand(command="shop", description="Do'kon"),
+        BotCommand(command="give", description="Almaz berish"),
+        BotCommand(command="gsend", description="Premium guruh reytingi"),
+        BotCommand(command="roles", description="Rollar"),
+        BotCommand(command="top", description="TOP reyting"),
+        BotCommand(command="commands", description="Buyruqlar"),
+    ]
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
 
 
 async def main() -> None:
