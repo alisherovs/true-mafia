@@ -19,6 +19,10 @@ from app.keyboards import (
     diamond_shop_keyboard,
     disable_role_shop_keyboard,
     dollar_exchange_keyboard,
+    gift_confirm_keyboard,
+    gift_shop_keyboard,
+    premium_confirm_keyboard,
+    premium_shop_keyboard,
     role_shop_keyboard,
     shop_keyboard,
 )
@@ -46,15 +50,17 @@ def _diamond_transfer_kwargs(
     amount: int,
     note: str,
 ) -> dict:
-    return Text(
+    parts = [
         _user_text_link(sender_id, sender_name),
         " ➔ ",
         _user_text_link(target_id, target_name),
         ": ",
         CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID),
-        f" {amount} olmos\n",
-        f"Izoh: {note or '-'}",
-    ).as_kwargs()
+        f" {amount} olmos",
+    ]
+    if note and note != "-":
+        parts.append(f"\nIzoh: {note}")
+    return Text(*parts).as_kwargs()
 
 
 def _record_diamond_transaction(
@@ -391,55 +397,6 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
     note = ""
     raw_args = (command.args or "").strip()
 
-    if (
-        message.chat.type != "private"
-        and not message.reply_to_message
-        and raw_args.isdigit()
-    ):
-        amount = int(raw_args)
-        if amount <= 0:
-            await message.reply("Miqdor musbat bo'lishi kerak.")
-            return
-        if sender.diamonds < amount:
-            await message.reply(t(lang, "give_not_enough"))
-            return
-        async with SessionLocal() as session:
-            fresh_sender = (
-                await session.execute(select(User).where(User.telegram_id == sender.telegram_id))
-            ).scalar_one_or_none()
-            if fresh_sender is None:
-                await message.reply("Avval /start bosing.")
-                return
-            if fresh_sender.diamonds < amount:
-                await message.reply(t(lang, "give_not_enough"))
-                return
-            fresh_sender.diamonds -= amount
-            _record_diamond_transaction(
-                session,
-                fresh_sender,
-                -amount,
-                "giveaway_create",
-                note="Guruhda almaz sovg'asi ochildi",
-                chat_id=message.chat.id,
-            )
-            giveaway = DiamondGiveaway(
-                chat_id=message.chat.id,
-                creator_telegram_id=sender.telegram_id,
-                amount=amount,
-                participants_json="[]",
-            )
-            session.add(giveaway)
-            await session.commit()
-            text = _giveaway_text(fresh_sender, giveaway)
-
-        sent = await message.answer(text, reply_markup=_giveaway_keyboard(giveaway.id))
-        async with SessionLocal() as session:
-            row = (await session.execute(select(DiamondGiveaway).where(DiamondGiveaway.id == giveaway.id))).scalar_one_or_none()
-            if row:
-                row.message_id = sent.message_id
-                await session.commit()
-        return
-
     if message.reply_to_message and message.reply_to_message.from_user and command.args:
         parts = command.args.split(maxsplit=1)
         if parts and parts[0].isdigit():
@@ -461,7 +418,6 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
                 target_id = int(raw_target)
 
     if target_id is None or amount is None:
-        await message.reply(t(lang, "give_usage"))
         return
 
     if target_id == sender.telegram_id:
@@ -493,31 +449,239 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
         amount,
         note_text,
     )
-    if message.chat.type != "private":
-        if amount >= LARGE_TRANSFER_THRESHOLD:
-            await message.reply(
-                _large_transfer_notice(
-                    currency_icon="<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>",
-                    amount=amount,
-                    sender_name=sender_display,
-                    sender_id=sender.telegram_id,
-                    target_name=target_display,
-                    target_id=target.telegram_id,
-                    chat_title=message.chat.title or "Guruh",
-                    chat_id=message.chat.id,
-                )
+    await message.reply(**transfer_kwargs)
+    if message.chat.type != "private" and amount >= LARGE_TRANSFER_THRESHOLD:
+        await message.reply(
+            _large_transfer_notice(
+                currency_icon="<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>",
+                amount=amount,
+                sender_name=sender_display,
+                sender_id=sender.telegram_id,
+                target_name=target_display,
+                target_id=target.telegram_id,
+                chat_title=message.chat.title or "Guruh",
+                chat_id=message.chat.id,
             )
-        else:
-            try:
-                await message.bot.send_message(sender.telegram_id, **transfer_kwargs)
-            except Exception:
-                pass
-    else:
-        await message.reply(**transfer_kwargs)
+        )
     try:
         await message.bot.send_message(target_id, **transfer_kwargs)
     except Exception:
         pass
+
+
+@router.message(Command("change"))
+async def cmd_change(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        return
+    sender = await engine.ensure_user(message.from_user)
+    lang = sender.language
+    raw_args = (command.args or "").strip()
+    if not raw_args.isdigit():
+        return
+    amount = int(raw_args)
+    if amount < 2:
+        await message.reply("Minimal miqdor 2 olmos.")
+        return
+    if sender.diamonds < amount:
+        await message.reply(t(lang, "give_not_enough"))
+        return
+    async with SessionLocal() as session:
+        fresh_sender = (
+            await session.execute(select(User).where(User.telegram_id == sender.telegram_id))
+        ).scalar_one_or_none()
+        if fresh_sender is None:
+            await message.reply("Avval /start bosing.")
+            return
+        if fresh_sender.diamonds < amount:
+            await message.reply(t(lang, "give_not_enough"))
+            return
+        fresh_sender.diamonds -= amount
+        _record_diamond_transaction(
+            session,
+            fresh_sender,
+            -amount,
+            "giveaway_create",
+            note="Guruhda almaz sovg'asi ochildi",
+            chat_id=message.chat.id,
+        )
+        giveaway = DiamondGiveaway(
+            chat_id=message.chat.id,
+            creator_telegram_id=sender.telegram_id,
+            amount=amount,
+            participants_json="[]",
+        )
+        session.add(giveaway)
+        await session.commit()
+        text = _giveaway_text(fresh_sender, giveaway)
+
+    sent = await message.answer(text, reply_markup=_giveaway_keyboard(giveaway.id))
+    async with SessionLocal() as session:
+        row = (await session.execute(select(DiamondGiveaway).where(DiamondGiveaway.id == giveaway.id))).scalar_one_or_none()
+        if row:
+            row.message_id = sent.message_id
+            await session.commit()
+
+
+@router.message(Command("send"))
+async def cmd_send(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        return
+    sender = await engine.ensure_user(message.from_user)
+    lang = sender.language
+    raw_args = (command.args or "").strip()
+    if not raw_args.isdigit():
+        return
+    amount = int(raw_args)
+    if amount < 1:
+        await message.reply("Miqdor musbat bo'lishi kerak.")
+        return
+    if sender.diamonds < amount:
+        await message.reply(t(lang, "give_not_enough"))
+        return
+    async with SessionLocal() as session:
+        fresh_sender = (
+            await session.execute(select(User).where(User.telegram_id == sender.telegram_id))
+        ).scalar_one_or_none()
+        if fresh_sender is None:
+            await message.reply("Avval /start bosing.")
+            return
+        if fresh_sender.diamonds < amount:
+            await message.reply(t(lang, "give_not_enough"))
+            return
+        fresh_sender.diamonds -= amount
+        _record_diamond_transaction(
+            session,
+            fresh_sender,
+            -amount,
+            "send_gift_create",
+            note=f"Guruhda sovg'a ochildi: {amount} olmos",
+            chat_id=message.chat.id,
+        )
+        giveaway = DiamondGiveaway(
+            chat_id=message.chat.id,
+            creator_telegram_id=sender.telegram_id,
+            amount=amount,
+            participants_json="[]",
+            status="send_active",
+        )
+        session.add(giveaway)
+        await session.commit()
+        giveaway_id = giveaway.id
+        sender_name = fresh_sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+
+    remaining = amount
+    text = (
+        f'{_user_link(sender.telegram_id, sender_name)} guruhga {amount} ta 💎 sovg\'a qildi!\n\n'
+        f'💎 Qoldi: {remaining}/{amount} — 1 ta olish uchun bosing.'
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway_id}")]
+        ]
+    )
+    sent = await message.answer(text, reply_markup=kb)
+    async with SessionLocal() as session:
+        row = (await session.execute(select(DiamondGiveaway).where(DiamondGiveaway.id == giveaway_id))).scalar_one_or_none()
+        if row:
+            row.message_id = sent.message_id
+            await session.commit()
+
+
+@router.callback_query(F.data.startswith("sendgift:claim:"))
+async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    giveaway_id = int(parts[2])
+
+    async with SessionLocal() as session:
+        giveaway = (
+            await session.execute(select(DiamondGiveaway).where(DiamondGiveaway.id == giveaway_id))
+        ).scalar_one_or_none()
+        if giveaway is None or giveaway.status != "send_active":
+            await callback.answer("Bu sovg'a allaqachon tugagan yoki mavjud emas.", show_alert=True)
+            return
+        if callback.from_user.id == giveaway.creator_telegram_id:
+            await callback.answer("O'zingiz yuborgan sovg'ani o'zingiz ololmaysiz.", show_alert=True)
+            return
+
+        participants = _giveaway_participants(giveaway.participants_json)
+        if any(int(item["id"]) == callback.from_user.id for item in participants):
+            await callback.answer("Siz allaqachon 1 💎 oldingiz.", show_alert=True)
+            return
+
+        claimer = await engine.ensure_user(callback.from_user)
+        claimer_user = (
+            await session.execute(select(User).where(User.telegram_id == claimer.telegram_id))
+        ).scalar_one_or_none()
+        creator = (
+            await session.execute(select(User).where(User.telegram_id == giveaway.creator_telegram_id))
+        ).scalar_one_or_none()
+        if claimer_user is None or creator is None:
+            await callback.answer("Foydalanuvchi topilmadi.", show_alert=True)
+            return
+
+        claimer_user.diamonds = (claimer_user.diamonds or 0) + 1
+        _record_diamond_transaction(
+            session,
+            claimer_user,
+            1,
+            "send_gift_claim",
+            note=f"Sovg'a #{giveaway.id} dan 1 olmos olindi",
+            counterparty=creator,
+            chat_id=giveaway.chat_id,
+        )
+        participants.append({"id": callback.from_user.id, "name": claimer.display_name or callback.from_user.full_name})
+        giveaway.participants_json = json.dumps(participants, ensure_ascii=False)
+
+        claimed_count = len(participants)
+        total = giveaway.amount
+        remaining = total - claimed_count
+        creator_name = creator.display_name or str(creator.telegram_id)
+
+        if remaining <= 0:
+            giveaway.status = "finished"
+            giveaway.ended_at = datetime.now(timezone.utc)
+            giveaway.winner_telegram_id = callback.from_user.id
+            await session.commit()
+
+            lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
+            final_text = (
+                f'{_user_link(creator.telegram_id, creator_name)} ajratgan sovg\'alar tugadi!\n\n'
+                f'Olganlar:\n' + "\n".join(lines)
+            )
+            try:
+                await callback.message.edit_text(final_text, reply_markup=None)
+            except TelegramBadRequest:
+                await callback.message.answer(final_text)
+            await callback.answer("Tabriklaymiz! 1 💎 olmos oldingiz!", show_alert=True)
+        else:
+            await session.commit()
+
+            lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
+            progress_text = (
+                f'{_user_link(creator.telegram_id, creator_name)} guruhga {total} ta 💎 sovg\'a qildi!\n\n'
+                f'💎 Qoldi: {remaining}/{total} — 1 ta olish uchun bosing.\n\n'
+                f'Olganlar:\n' + "\n".join(lines)
+            )
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway_id}")]
+                ]
+            )
+            try:
+                await callback.message.edit_text(progress_text, reply_markup=kb)
+            except TelegramBadRequest:
+                pass
+            await callback.answer("Tabriklaymiz! 1 💎 olmos oldingiz!", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("giveaway:"))
@@ -727,3 +891,325 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
         f"✅ <b>To'lov muvaffaqiyatli!</b>\n\n"
         f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds} almaz sizning profilingizga qo'shildi!"
     )
+
+
+# ===== Diamond -> Telegram Gift exchange =====
+# Exchange rate: how many Telegram Stars 1 diamond redeems for when buying gifts.
+STARS_PER_DIAMOND = 5
+# Cap how many gifts to display in the menu to keep the keyboard readable.
+GIFT_LIST_LIMIT = 30
+
+# Telegram Premium subscription plans. Star prices are FIXED by Telegram Bot API
+# (see giftPremiumSubscription): 3mo=1000, 6mo=1500, 12mo=2500.
+# Diamond cost is set manually based on real-world pricing (~1000 som per 💎).
+# Note: 1-month Premium cannot be gifted via Bot API.
+PREMIUM_PLANS: list[tuple[int, int, int]] = [
+    (3, 1000, 175),   # 175,000 som
+    (6, 1500, 230),   # 230,000 som
+    (12, 2500, 390),  # 390,000 som
+]
+PREMIUM_BY_MONTHS: dict[int, tuple[int, int]] = {
+    months: (stars, diamonds) for months, stars, diamonds in PREMIUM_PLANS
+}
+
+
+def _diamonds_for_stars(stars: int) -> int:
+    import math
+    return max(1, math.ceil(int(stars) / STARS_PER_DIAMOND))
+
+
+async def _fetch_sorted_gifts(bot) -> list:
+    try:
+        gifts_obj = await bot.get_available_gifts()
+    except Exception:
+        return []
+    gifts = list(getattr(gifts_obj, "gifts", []) or [])
+    # Filter out limited gifts that are sold out, then sort by star_count asc.
+    filtered = []
+    for g in gifts:
+        remaining = getattr(g, "remaining_count", None)
+        if remaining is not None and remaining <= 0:
+            continue
+        if int(getattr(g, "star_count", 0) or 0) <= 0:
+            continue
+        filtered.append(g)
+    filtered.sort(key=lambda g: int(getattr(g, "star_count", 0) or 0))
+    return filtered[:GIFT_LIST_LIMIT]
+
+
+@router.callback_query(F.data == "shop:gifts")
+async def shop_gifts_open(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    gifts = await _fetch_sorted_gifts(callback.bot)
+    if not gifts:
+        await callback.message.edit_text(
+            "🎁 <b>Telegram sovg'alari</b>\n\n"
+            "Hozircha mavjud sovg'alar topilmadi yoki Telegram javob bermadi. Birozdan keyin urinib ko'ring.",
+            reply_markup=gift_shop_keyboard([], STARS_PER_DIAMOND),
+        )
+        await callback.answer()
+        return
+    text = (
+        "🎁 <b>Telegram sovg'alari</b>\n\n"
+        f"Almazingizni Telegram sovg'asiga almashtiring.\n"
+        f"Kurs: <b>1<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> = {STARS_PER_DIAMOND}⭐</b>\n"
+        "Sovg'a sizga shaxsiy chatingizga yuboriladi."
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=gift_shop_keyboard(gifts, STARS_PER_DIAMOND))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gift:buy:"))
+async def gift_buy_confirm(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    gift_id = callback.data.split(":", maxsplit=2)[2]
+    gifts = await _fetch_sorted_gifts(callback.bot)
+    target = next((g for g in gifts if getattr(g, "id", None) == gift_id), None)
+    if target is None:
+        await callback.answer("Bu sovg'a endi mavjud emas.", show_alert=True)
+        await shop_gifts_open(callback)
+        return
+    stars = int(getattr(target, "star_count", 0) or 0)
+    diamonds = _diamonds_for_stars(stars)
+    text = (
+        "🎁 <b>Sovg'ani tasdiqlang</b>\n\n"
+        f"Narx: <b>{stars}⭐</b>\n"
+        f"Sizdan yechiladi: <b>{diamonds}<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji></b>\n\n"
+        "Tasdiqlasangiz, sovg'a darhol botning shaxsiy chatingizga yuboriladi."
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=gift_confirm_keyboard(gift_id))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gift:confirm:"))
+async def gift_confirm(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    gift_id = callback.data.split(":", maxsplit=2)[2]
+
+    # Re-fetch gift to validate price at confirm time.
+    gifts = await _fetch_sorted_gifts(callback.bot)
+    target = next((g for g in gifts if getattr(g, "id", None) == gift_id), None)
+    if target is None:
+        await callback.answer("Sovg'a endi mavjud emas.", show_alert=True)
+        await shop_gifts_open(callback)
+        return
+    stars = int(getattr(target, "star_count", 0) or 0)
+    diamonds_cost = _diamonds_for_stars(stars)
+
+    # Atomically deduct diamonds.
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval botga /start bosing.", show_alert=True)
+            return
+        if (user.diamonds or 0) < diamonds_cost:
+            await callback.answer(
+                f"Balans yetarli emas. Kerak: 💎 {diamonds_cost}", show_alert=True,
+            )
+            return
+        user.diamonds -= diamonds_cost
+        _record_diamond_transaction(
+            session,
+            user,
+            -diamonds_cost,
+            "gift_redeem",
+            note=f"Telegram sovg'a {gift_id} ({stars}⭐)",
+        )
+        await session.commit()
+
+    # Try to send the gift; refund on failure.
+    try:
+        await callback.bot.send_gift(
+            gift_id=gift_id,
+            user_id=callback.from_user.id,
+            text="🎁 Mafia bot sovg'asi",
+        )
+    except Exception as exc:
+        # Refund
+        async with SessionLocal() as session:
+            user = (await session.execute(
+                select(User).where(User.telegram_id == callback.from_user.id)
+            )).scalar_one_or_none()
+            if user is not None:
+                user.diamonds = (user.diamonds or 0) + diamonds_cost
+                _record_diamond_transaction(
+                    session,
+                    user,
+                    diamonds_cost,
+                    "gift_refund",
+                    note=f"Sovg'a {gift_id} yuborilmadi: {exc}",
+                )
+                await session.commit()
+        await callback.answer(
+            "❌ Sovg'a yuborilmadi. Olmoslar qaytarildi.", show_alert=True,
+        )
+        try:
+            await callback.message.edit_text(
+                "❌ Sovg'a yuborilmadi. Olmoslar hisobingizga qaytarildi.\n"
+                "Iltimos, birozdan keyin yana urinib ko'ring.",
+                reply_markup=gift_shop_keyboard(await _fetch_sorted_gifts(callback.bot), STARS_PER_DIAMOND),
+            )
+        except TelegramBadRequest:
+            pass
+        return
+
+    await callback.answer("🎁 Sovg'a yuborildi!", show_alert=True)
+    try:
+        await callback.message.edit_text(
+            "✅ <b>Sovg'a muvaffaqiyatli yuborildi!</b>\n\n"
+            f"💎 {diamonds_cost} olmos hisobingizdan yechildi.\n"
+            f"Telegramdagi sovg'alaringizni tekshirib ko'ring.",
+            reply_markup=gift_shop_keyboard(await _fetch_sorted_gifts(callback.bot), STARS_PER_DIAMOND),
+        )
+    except TelegramBadRequest:
+        pass
+
+
+# ===== Diamond -> Telegram Premium subscription =====
+@router.callback_query(F.data == "gift:premium")
+async def premium_open(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    text = (
+        "👑 <b>Telegram Premium</b>\n\n"
+        "Almazingizni Telegram Premium obunasiga almashtiring.\n"
+        "Quyidagi rejalardan birini tanlang:"
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=premium_shop_keyboard(PREMIUM_PLANS))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gift:premium:buy:"))
+async def premium_buy_confirm(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    raw = callback.data.split(":", maxsplit=3)[3]
+    try:
+        months = int(raw)
+    except ValueError:
+        await callback.answer("Noto'g'ri reja.", show_alert=True)
+        return
+    plan = PREMIUM_BY_MONTHS.get(months)
+    if plan is None:
+        await callback.answer("Bunday reja topilmadi.", show_alert=True)
+        return
+    stars, diamonds = plan
+    text = (
+        "👑 <b>Premium obunani tasdiqlang</b>\n\n"
+        f"Muddat: <b>{months} oy</b>\n"
+        f"Narx: <b>{diamonds}<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji></b>\n\n"
+        "Tasdiqlasangiz, Premium darhol sizning hisobingizga ulanadi."
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=premium_confirm_keyboard(months))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("gift:premium:confirm:"))
+async def premium_confirm_buy(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    raw = callback.data.split(":", maxsplit=3)[3]
+    try:
+        months = int(raw)
+    except ValueError:
+        await callback.answer("Noto'g'ri reja.", show_alert=True)
+        return
+    plan = PREMIUM_BY_MONTHS.get(months)
+    if plan is None:
+        await callback.answer("Bunday reja topilmadi.", show_alert=True)
+        return
+    stars, diamonds_cost = plan
+
+    # Atomically deduct diamonds.
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval botga /start bosing.", show_alert=True)
+            return
+        if (user.diamonds or 0) < diamonds_cost:
+            await callback.answer(
+                f"Balans yetarli emas. Kerak: 💎 {diamonds_cost}", show_alert=True,
+            )
+            return
+        user.diamonds -= diamonds_cost
+        _record_diamond_transaction(
+            session,
+            user,
+            -diamonds_cost,
+            "premium_redeem",
+            note=f"Telegram Premium {months} oy ({stars}⭐)",
+        )
+        await session.commit()
+
+    # Try to gift the premium subscription; refund on failure.
+    try:
+        await callback.bot.gift_premium_subscription(
+            user_id=callback.from_user.id,
+            month_count=months,
+            star_count=stars,
+            text="👑 Mafia bot sovg'asi: Telegram Premium",
+        )
+    except Exception as exc:
+        async with SessionLocal() as session:
+            user = (await session.execute(
+                select(User).where(User.telegram_id == callback.from_user.id)
+            )).scalar_one_or_none()
+            if user is not None:
+                user.diamonds = (user.diamonds or 0) + diamonds_cost
+                _record_diamond_transaction(
+                    session,
+                    user,
+                    diamonds_cost,
+                    "premium_refund",
+                    note=f"Premium {months} oy yuborilmadi: {exc}",
+                )
+                await session.commit()
+        await callback.answer(
+            "❌ Premium yuborilmadi. Olmoslar qaytarildi.", show_alert=True,
+        )
+        try:
+            await callback.message.edit_text(
+                "❌ <b>Premium yuborilmadi.</b>\n\n"
+                "Olmoslar hisobingizga qaytarildi.\n"
+                "Iltimos, birozdan keyin yana urinib ko'ring.",
+                reply_markup=premium_shop_keyboard(PREMIUM_PLANS),
+            )
+        except TelegramBadRequest:
+            pass
+        return
+
+    await callback.answer("👑 Premium ulandi!", show_alert=True)
+    try:
+        await callback.message.edit_text(
+            "✅ <b>Telegram Premium muvaffaqiyatli ulandi!</b>\n\n"
+            f"Muddat: <b>{months} oy</b>\n"
+            f"💎 {diamonds_cost} olmos hisobingizdan yechildi.",
+            reply_markup=premium_shop_keyboard(PREMIUM_PLANS),
+        )
+    except TelegramBadRequest:
+        pass

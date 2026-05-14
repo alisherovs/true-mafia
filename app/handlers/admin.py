@@ -4,7 +4,7 @@ from typing import Union
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, LabeledPrice, Message
 
 from app.config import Settings
 from app.game_engine import GameEngine
@@ -12,6 +12,9 @@ from app.keyboards import (
     owner_admin_group_keyboard,
     owner_diamond_audit_keyboard,
     owner_hero_market_keyboard,
+    owner_invoice_after_keyboard,
+    owner_invoice_delivery_keyboard,
+    owner_invoice_menu_keyboard,
     owner_news_channel_keyboard,
     owner_panel_keyboard,
     owner_premium_groups_keyboard,
@@ -22,6 +25,18 @@ from app.keyboards import (
 router = Router()
 PENDING_OWNER_ACTIONS: dict[int, str] = {}
 PENDING_PREMIUM_GROUPS: dict[int, dict[str, Union[str, int]]] = {}
+PENDING_INVOICE_DATA: dict[int, dict[str, Union[str, int]]] = {}
+
+
+def _invoice_summary(data: dict) -> str:
+    diamonds = int(data.get("diamonds", 0))
+    stars = int(data.get("stars", 0))
+    return (
+        "🧾 <b>Almaz invoice</b>\n\n"
+        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
+        f"⭐ Telegram Stars: <b>{stars}</b>\n\n"
+        "Yetkazib berish usulini tanlang:"
+    )
 
 
 def _is_owner(user_id: int, settings: Settings) -> bool:
@@ -585,6 +600,7 @@ async def owner_cancel_callback(callback: CallbackQuery, engine: GameEngine, set
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     PENDING_PREMIUM_GROUPS.pop(callback.from_user.id, None)
+    PENDING_INVOICE_DATA.pop(callback.from_user.id, None)
     if callback.message:
         await callback.message.edit_text(_owner_panel_text(await engine.owner_stats()), reply_markup=owner_panel_keyboard())
     await callback.answer("Bekor qilindi.")

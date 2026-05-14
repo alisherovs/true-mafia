@@ -8,15 +8,15 @@ from typing import Any
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
-from aiogram.types import Message
+from aiogram.types import ErrorEvent, Message
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
-from app.handlers import admin, callbacks, economy, game, hero, language, profile, roles, settings as settings_handler, start, top
+from app.handlers import admin, callbacks, economy, emoji_debug, game, hero, language, profile, roles, settings as settings_handler, start, top
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
 
@@ -31,9 +31,38 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
         if event.chat.type != "private" and event.text and event.text.startswith("/"):
             try:
                 await event.delete()
-            except TelegramBadRequest:
+            except (TelegramBadRequest, TelegramForbiddenError):
                 pass
         return result
+
+
+async def global_error_handler(event: ErrorEvent) -> bool:
+    exc = event.exception
+    if isinstance(exc, TelegramForbiddenError):
+        logging.warning("Telegram forbidden (bot kicked/blocked): %s", exc)
+        return True
+    if isinstance(exc, TelegramBadRequest):
+        msg = str(exc).lower()
+        ignorable = (
+            "message to be replied not found",
+            "message to delete not found",
+            "message to edit not found",
+            "message can't be deleted",
+            "message is not modified",
+            "chat not found",
+            "have no rights to send a message",
+            "not enough rights",
+            "user is deactivated",
+            "bot was blocked by the user",
+            "query is too old",
+        )
+        if any(s in msg for s in ignorable):
+            logging.warning("Ignoring Telegram error: %s", exc)
+            return True
+    if isinstance(exc, TelegramRetryAfter):
+        logging.warning("Telegram rate-limit: retry after %s", getattr(exc, "retry_after", "?"))
+        return True
+    return False
 
 
 async def set_commands(bot: Bot) -> None:
@@ -86,6 +115,7 @@ async def main() -> None:
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
     dp.message.middleware(DeleteGroupCommandMiddleware())
+    dp.errors.register(global_error_handler)
 
     engine = GameEngine(settings=settings, session_factory=SessionLocal)
     await engine.cleanup_stale_games_on_startup()
@@ -101,6 +131,7 @@ async def main() -> None:
     dp.include_router(top.router)
     dp.include_router(callbacks.router)
     dp.include_router(admin.router)
+    dp.include_router(emoji_debug.router)
 
     start_scheduler()
     scheduler.add_job(

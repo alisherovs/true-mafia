@@ -213,21 +213,11 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Hazilkash",
         "Siz tunda bir kishini tanlaysiz va unga hazil qilasiz. U o'sha tunda hazilomus harakatlar qiladi.",
     ),
-    Role.LOVE_ANGEL: RoleMeta(
-        Role.LOVE_ANGEL,
-        Team.CITY,
-        "💘",
-        "Sevgi farishtasi",
-        "Siz tunda bir kishining uyiga tashrif buyurasiz va u bilan sevgi rishtasi o'rnatasiz.\n"
-        "Agar siz o'lsangiz yoki osilsangiz, siz bilan bog'langan inson ham yuragi ezilib halok bo'ladi.\n"
-        "Agar bog'langan inson o'lsa yoki osilsa, siz ham uning ortidan ketasiz.",
-    ),
 }
 
 
 SHOP_ROLE_CATALOG: tuple[RoleShopItem, ...] = (
     RoleShopItem(Role.PRANKSTER, 6, "diamonds"),
-    RoleShopItem(Role.LOVE_ANGEL, 6, "diamonds"),
     RoleShopItem(Role.MINER, 5, "diamonds"),
     RoleShopItem(Role.HIRED_KILLER, 5, "diamonds"),
     RoleShopItem(Role.JUDGE, 4, "diamonds"),
@@ -287,7 +277,6 @@ MER = Role.MAYOR
 HIRED_KILLER = Role.HIRED_KILLER
 MINER = Role.MINER
 PRANKSTER = Role.PRANKSTER
-LOVE_ANGEL = Role.LOVE_ANGEL
 
 BASE_ROLE_TABLE: dict[int, list[Role]] = {
     4: _expand_role_counts((Role.DON, 1), (Role.COMMISSAR, 1), (C, 2)),
@@ -346,21 +335,8 @@ def _with_prankster(player_count: int, roles: list[Role]) -> list[Role]:
     return updated
 
 
-def _with_love_angel(player_count: int, roles: list[Role]) -> list[Role]:
-    if player_count < 17 or Role.LOVE_ANGEL in roles:
-        return roles
-    updated = list(roles)
-    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
-    for role in replacement_priority:
-        if role in updated:
-            updated[updated.index(role)] = Role.LOVE_ANGEL
-            return updated
-    updated[-1] = Role.LOVE_ANGEL
-    return updated
-
-
 EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
-    count: _with_love_angel(count, _with_prankster(count, _with_miner(count, roles)))
+    count: _with_prankster(count, _with_miner(count, roles))
     for count, roles in BASE_ROLE_TABLE.items()
 }
 
@@ -374,8 +350,8 @@ ROLE_PRESET_LABELS = {
 
 ROLE_PRESET_MAX_PLAYERS = {
     "classic": 30,
-    "super": 30,
-    "mega": 30,
+    "super": 40,
+    "mega": 40,
     "black23": 30,
     "extended35": 30,
 }
@@ -397,7 +373,6 @@ ROLE_MIN_PLAYERS: dict[str, int] = {
     "hired_killer": 12,
     "werewolf": 19,
     "prankster": 10,
-    "love_angel": 12,
 }
 
 ROLE_MIN_KEYS: dict[Role, str] = {
@@ -412,22 +387,114 @@ ROLE_MIN_KEYS: dict[Role, str] = {
     Role.JOURNALIST: "journalist",
     Role.HIRED_KILLER: "hired_killer",
     Role.PRANKSTER: "prankster",
-    Role.LOVE_ANGEL: "love_angel",
 }
 
-ACTIVE_ROLE_POOL: tuple[Role, ...] = (
+SUPER_ROLE_ORDER: tuple[Role, ...] = (
+    Role.CITIZEN,
+    Role.CITIZEN,
     Role.DON,
     Role.COMMISSAR,
     Role.DOCTOR,
     Role.MAFIA,
+    Role.MISTRESS,
+    Role.LUCKY,
+    Role.GUARD,
+    Role.SORCERER,
     Role.LAWYER,
-    Role.SPY,
-    Role.KILLER,
-    Role.WOLF,
     Role.PRANKSTER,
-    Role.LOVE_ANGEL,
-    Role.JOURNALIST,
+    Role.MAYOR,
+    Role.ARSONIST,
+    Role.SPY,
+    Role.WATCHER,
     Role.HIRED_KILLER,
+    Role.MINER,
+    Role.MAQ,
+    Role.WATCHER,
+    Role.DOCTOR,
+    Role.CROOK,
+    Role.KILLER,
+    Role.BUM,
+    Role.JOURNALIST,
+    Role.WOLF,
+    Role.SNITCH,
+    Role.MAFIA,
+    Role.JUDGE,
+    Role.WOLF,
+    Role.SERGEANT,
+    Role.SORCERER,
+    Role.MAFIA,
+    Role.SERGEANT,
+    Role.MAYOR,
+    Role.WOLF,
+    Role.CROOK,
+    Role.MAFIA,
+    Role.SORCERER,
+    Role.JESTER,
+)
+
+MEGA_ROLE_ORDER: tuple[Role, ...] = (
+    Role.DON,
+    Role.COMMISSAR,
+    Role.DOCTOR,
+    Role.BUM,
+    Role.MISTRESS,
+    Role.MAFIA,
+    Role.GUARD,
+    Role.ARSONIST,
+    Role.LAWYER,
+    Role.PRANKSTER,
+    Role.JUDGE,
+    Role.SORCERER,
+    Role.MAYOR,
+    Role.GUARD,
+    Role.HIRED_KILLER,
+    Role.MINER,
+    Role.MAQ,
+    Role.WATCHER,
+    Role.DOCTOR,
+    Role.SERGEANT,
+    Role.KILLER,
+    Role.MAFIA,
+    Role.JOURNALIST,
+    Role.CROOK,
+    Role.SNITCH,
+    Role.MAFIA,
+    Role.JUDGE,
+    Role.WOLF,
+    Role.SERGEANT,
+    Role.SORCERER,
+    Role.MAFIA,
+    Role.SERGEANT,
+    Role.SPY,
+    Role.WOLF,
+    Role.CROOK,
+    Role.MAFIA,
+    Role.SORCERER,
+    Role.JESTER,
+    Role.MAFIA,
+    Role.LUCKY,
+)
+
+ACTIVE_ROLE_POOL: tuple[Role, ...] = tuple(dict.fromkeys(SUPER_ROLE_ORDER + MEGA_ROLE_ORDER))
+
+SUPER_FILLER_ORDER: tuple[Role, ...] = (
+    Role.CITIZEN,
+    Role.DOCTOR,
+    Role.COMMISSAR,
+    Role.SERGEANT,
+    Role.MAFIA,
+    Role.SORCERER,
+    Role.KILLER,
+)
+
+MEGA_FILLER_ORDER: tuple[Role, ...] = (
+    Role.COMMISSAR,
+    Role.DOCTOR,
+    Role.SERGEANT,
+    Role.SORCERER,
+    Role.MAFIA,
+    Role.KILLER,
+    Role.GUARD,
 )
 
 MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
@@ -445,7 +512,6 @@ NON_MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.KILLER,
     Role.WOLF,
     Role.PRANKSTER,
-    Role.LOVE_ANGEL,
 )
 
 REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (
@@ -480,11 +546,12 @@ def get_available_roles(
     if normalize_game_mode(mode) == GAME_MODE_CLASSIC:
         return [role for role in build_role_set(player_count, GAME_MODE_CLASSIC) if role not in disabled]
 
-    max_threshold = max(ROLE_MIN_PLAYERS.values()) if include_future_thresholds else player_count
+    order = MEGA_ROLE_ORDER if normalize_game_mode(mode) == GAME_MODE_MEGA else SUPER_ROLE_ORDER
+    max_count = len(order) if include_future_thresholds else max(4, player_count)
     return [
         role
-        for role in ACTIVE_ROLE_POOL
-        if ROLE_MIN_PLAYERS[ROLE_MIN_KEYS[role]] <= max_threshold and role not in disabled
+        for role in dict.fromkeys(order[:max_count])
+        if role not in disabled
     ]
 
 
@@ -514,60 +581,22 @@ def _split_active_roles(player_count: int, disabled_roles: set[Role]) -> tuple[l
 
 
 def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
-    mafia_roles, non_mafia_roles = _split_active_roles(player_count, disabled_roles)
-    roles = mafia_roles + non_mafia_roles
-    if len(roles) < player_count:
-        roles.extend([Role.CITIZEN] * (player_count - len(roles)))
+    roles = [role for role in SUPER_ROLE_ORDER[:player_count] if role not in disabled_roles]
+    filler = [role for role in SUPER_FILLER_ORDER if role not in disabled_roles] or [Role.CITIZEN]
+    idx = 0
+    while len(roles) < player_count:
+        roles.append(filler[idx % len(filler)])
+        idx += 1
     return roles[:player_count]
 
 
 def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
-    mafia_roles, non_mafia_roles = _split_active_roles(player_count, disabled_roles)
-    roles = mafia_roles + non_mafia_roles
-
-    future_non_mafia = [
-        role
-        for role in NON_MAFIA_ACTIVE_ROLES
-        if role not in disabled_roles
-        and role not in roles
-        and (role != Role.WOLF or player_count > 18)
-    ]
-    for role in future_non_mafia:
-        if len(roles) >= player_count:
-            break
-        roles.append(role)
-
-    repeatable = [
-        role
-        for role in REPEATABLE_ACTIVE_ROLES
-        if role not in disabled_roles
-    ] or list(REPEATABLE_ACTIVE_ROLES)
+    roles = [role for role in MEGA_ROLE_ORDER[:player_count] if role not in disabled_roles]
+    filler = [role for role in MEGA_FILLER_ORDER if role not in disabled_roles] or [Role.COMMISSAR]
     idx = 0
-    while len(roles) < player_count and repeatable:
-        roles.append(repeatable[idx % len(repeatable)])
+    while len(roles) < player_count:
+        roles.append(filler[idx % len(filler)])
         idx += 1
-
-    max_mafia = _max_mafia_slots(player_count)
-    future_mafia = [
-        role
-        for role in MAFIA_ACTIVE_ROLES
-        if role not in disabled_roles and role not in roles
-    ]
-    idx = 0
-    while len(roles) < player_count and future_mafia:
-        current_mafia = sum(1 for role in roles if role_team(role) == Team.MAFIA)
-        if current_mafia >= max_mafia:
-            break
-        roles.append(future_mafia[idx % len(future_mafia)])
-        idx += 1
-
-    if len(roles) < player_count:
-        emergency = [Role.COMMISSAR, Role.DOCTOR, Role.KILLER]
-        idx = 0
-        while len(roles) < player_count:
-            roles.append(emergency[idx % len(emergency)])
-            idx += 1
-
     return roles[:player_count]
 
 

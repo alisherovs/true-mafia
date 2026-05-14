@@ -120,7 +120,6 @@ ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.MAFIA,
     Role.MINER,
     Role.PRANKSTER,
-    Role.LOVE_ANGEL,
     Role.JUDGE,
     Role.KILLER,
     Role.LUCKY,
@@ -395,8 +394,93 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🧿 Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
             [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
-            [InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")],
+            [InlineKeyboardButton(text="🎁 Telegram sovg'asiga almashtirish", callback_data="shop:gifts")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
+        ]
+    )
+
+
+_GIFT_TIER_EMOJI = [
+    (15, "💝"),
+    (25, "🌹"),
+    (50, "🎂"),
+    (100, "🧸"),
+    (250, "🍾"),
+    (500, "💎"),
+    (1000, "👑"),
+    (2500, "🏆"),
+    (5000, "💍"),
+    (10000, "💖"),
+]
+
+
+def _pick_gift_emoji(sticker_emoji: str | None, stars: int) -> str:
+    # Prefer a real plain-emoji from sticker if present and not a generic gift-box.
+    if sticker_emoji and sticker_emoji not in {"🎁", "📦"}:
+        return sticker_emoji
+    fallback = "🎁"
+    for threshold, em in _GIFT_TIER_EMOJI:
+        if stars <= threshold:
+            return em
+        fallback = em
+    return fallback
+
+
+def gift_shop_keyboard(gifts: list[object], stars_per_diamond: int) -> InlineKeyboardMarkup:
+    import math
+    rows: list[list[InlineKeyboardButton]] = []
+    for gift in gifts:
+        gift_id = getattr(gift, "id", None)
+        stars = int(getattr(gift, "star_count", 0) or 0)
+        if not gift_id or stars <= 0:
+            continue
+        diamonds = max(1, math.ceil(stars / stars_per_diamond))
+        remaining = getattr(gift, "remaining_count", None)
+        total = getattr(gift, "total_count", None)
+        suffix = ""
+        if remaining is not None and total is not None:
+            suffix = f"  ({remaining}/{total})"
+        sticker = getattr(gift, "sticker", None)
+        emoji = _pick_gift_emoji(getattr(sticker, "emoji", None), stars)
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{emoji} {stars}⭐ — {diamonds}💎{suffix}",
+                callback_data=f"gift:buy:{gift_id}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="👑 Telegram Premium", callback_data="gift:premium")])
+    rows.append([InlineKeyboardButton(text="🔄 Yangilash", callback_data="shop:gifts")])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def premium_shop_keyboard(plans: list[tuple[int, int, int]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for months, stars, diamonds in plans:
+        rows.append([
+            InlineKeyboardButton(
+                text=f"👑 {months} oy — {diamonds}💎",
+                callback_data=f"gift:premium:buy:{months}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:gifts")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def premium_confirm_keyboard(months: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"gift:premium:confirm:{months}")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="gift:premium")],
+        ]
+    )
+
+
+def gift_confirm_keyboard(gift_id: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"gift:confirm:{gift_id}")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="shop:gifts")],
         ]
     )
 
@@ -490,6 +574,7 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
                 callback_data=f"shop:role:{item.role.value}",
             )
         ])
+    rows.append([InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")])
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -500,7 +585,7 @@ def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
         for role in ACTIVE_ROLE_POOL
         if role not in {Role.CITIZEN, Role.DON}
     ]
-    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:roles")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -539,7 +624,7 @@ def diamond_shop_keyboard(admin_username: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="👤 Admin orqali", url=admin_url),
-                InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back"),
+                InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open"),
             ],
         ]
     )
@@ -560,8 +645,10 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],
+            [InlineKeyboardButton(text="🧾 Almaz invoice", callback_data="owner:invoice")],
             [InlineKeyboardButton(text="📋 Barcha buyruqlar", callback_data="owner:commands")],
             [InlineKeyboardButton(text="🧾 Yordam", callback_data="owner:help")],
+            [InlineKeyboardButton(text="◀️ User panel", callback_data="start:back")],
         ]
     )
 
@@ -602,6 +689,34 @@ def owner_welcome_keyboard(enabled: bool, has_media: bool) -> InlineKeyboardMark
         rows.append([InlineKeyboardButton(text="🗑 Mediani o'chirish", callback_data="owner:welcome_media_clear")])
     rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def owner_invoice_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Yangi invoice yaratish", callback_data="owner:invoice:new")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
+        ]
+    )
+
+
+def owner_invoice_delivery_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔗 Sharable link yaratish", callback_data="owner:invoice:make_link")],
+            [InlineKeyboardButton(text="📤 Aniq userga yuborish", callback_data="owner:invoice:make_send")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="owner:invoice")],
+        ]
+    )
+
+
+def owner_invoice_after_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Yana invoice yaratish", callback_data="owner:invoice:new")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
+        ]
+    )
 
 
 def owner_wait_keyboard() -> InlineKeyboardMarkup:
