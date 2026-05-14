@@ -578,6 +578,9 @@ class GameEngine:
                     title=title,
                     language=self.settings.default_language,
                     registration_timeout=self.settings.registration_timeout,
+                    night_timeout=self.settings.night_timeout,
+                    day_discussion_timeout=self.settings.day_discussion_timeout,
+                    day_voting_timeout=self.settings.day_voting_timeout,
                     min_players=self.settings.min_players,
                 )
                 session.add(group)
@@ -792,6 +795,9 @@ class GameEngine:
                     title=chat_title,
                     language=self.settings.default_language,
                     registration_timeout=self.settings.registration_timeout,
+                    night_timeout=self.settings.night_timeout,
+                    day_discussion_timeout=self.settings.day_discussion_timeout,
+                    day_voting_timeout=self.settings.day_voting_timeout,
                     min_players=self.settings.min_players,
                 )
                 session.add(group)
@@ -1535,7 +1541,8 @@ class GameEngine:
         )
         await bot.send_message(chat_id, alive_status)
         await self.send_night_prompts(bot, game_id)
-        run_at = datetime.now(timezone.utc) + timedelta(seconds=self.settings.night_timeout)
+        night_timeout = await self.group_timeout(chat_id, "night_timeout")
+        run_at = datetime.now(timezone.utc) + timedelta(seconds=night_timeout)
         scheduler.add_job(
             self.resolve_night,
             "date",
@@ -2793,10 +2800,11 @@ class GameEngine:
 
         await self.send_hero_phase_prompts(bot, game_id)
 
+        discussion_timeout = await self.group_timeout(chat_id, "day_discussion_timeout")
         scheduler.add_job(
             self.start_voting,
             "date",
-            run_date=datetime.now(timezone.utc) + timedelta(seconds=self.settings.day_discussion_timeout),
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=discussion_timeout),
             args=[bot, game_id],
             id=f"discussion_end_{game_id}",
             replace_existing=True,
@@ -2817,11 +2825,12 @@ class GameEngine:
                 game,
                 "voting_started",
                 alive_count=len(alive),
-                timeout=self.settings.day_voting_timeout,
+                timeout=await self.group_timeout(game.chat_id, "day_voting_timeout"),
             )
             await session.commit()
             choices = [(p.telegram_id, p.display_name) for p in alive]
             lang = await self.get_group_language(game.chat_id)
+            voting_timeout = await self.group_timeout(game.chat_id, "day_voting_timeout")
 
         if len(choices) <= 1:
             winner = await self.check_winner(game_id)
@@ -2832,7 +2841,7 @@ class GameEngine:
         await bot.send_message(
             (await self._game_chat_id(game_id)),
             "Aybdorlarni aniqlash va jazolash vaqti keldi.\n"
-            f"Ovoz berish uchun {self.settings.day_voting_timeout} sekund.",
+            f"Ovoz berish uchun {voting_timeout} sekund.",
             reply_markup=go_vote_private_keyboard(self.settings, game_id),
         )
         for player_id, _ in choices:
@@ -2842,7 +2851,7 @@ class GameEngine:
         scheduler.add_job(
             self.resolve_voting,
             "date",
-            run_date=datetime.now(timezone.utc) + timedelta(seconds=self.settings.day_voting_timeout),
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=voting_timeout),
             args=[bot, game_id],
             id=f"vote_end_{game_id}",
             replace_existing=True,
@@ -4978,22 +4987,22 @@ class GameEngine:
             await session.commit()
         return "✅ Admin guruh o'chirildi. Almaz loglari avtomatik yuborilmaydi."
 
-    async def welcome_settings(self) -> dict[str, str]:
+    async def welcome_settings(self, chat_id: int) -> dict[str, str]:
         async with self.session_factory() as session:
-            keys = [WELCOME_ENABLED_KEY, WELCOME_TEXT_KEY, WELCOME_MEDIA_TYPE_KEY, WELCOME_MEDIA_FILE_ID_KEY]
-            rows = (
-                await session.execute(select(BotSetting).where(BotSetting.key.in_(keys)))
-            ).scalars().all()
-        values = {row.key: row.value for row in rows}
-        return {
-            "enabled": values.get(WELCOME_ENABLED_KEY, "0"),
-            "text": values.get(WELCOME_TEXT_KEY, WELCOME_DEFAULT_TEXT) or WELCOME_DEFAULT_TEXT,
-            "media_type": values.get(WELCOME_MEDIA_TYPE_KEY, ""),
-            "media_file_id": values.get(WELCOME_MEDIA_FILE_ID_KEY, ""),
-        }
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                group = Group(chat_id=chat_id, title="Group")
+                session.add(group)
+                await session.commit()
+            return {
+                "enabled": "1" if group.welcome_enabled is not False else "0",
+                "text": group.welcome_text or WELCOME_DEFAULT_TEXT,
+                "media_type": group.welcome_media_type or "",
+                "media_file_id": group.welcome_media_file_id or "",
+            }
 
-    async def welcome_settings_text(self) -> str:
-        settings = await self.welcome_settings()
+    async def welcome_settings_text(self, chat_id: int) -> str:
+        settings = await self.welcome_settings(chat_id)
         enabled = settings["enabled"] == "1"
         status = "🟢 yoqilgan" if enabled else "🔴 o'chirilgan"
         media_type = settings["media_type"] or "yo'q"
@@ -5006,41 +5015,56 @@ class GameEngine:
             f"Joriy matn:\n<code>{text}</code>"
         )
 
-    async def toggle_welcome_enabled(self) -> tuple[bool, str]:
+    async def toggle_welcome_enabled(self, chat_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
-            current = await self._get_bot_setting_value(session, WELCOME_ENABLED_KEY, "0")
-            new_value = "0" if current == "1" else "1"
-            await self._set_bot_setting_value(session, WELCOME_ENABLED_KEY, new_value)
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                group = Group(chat_id=chat_id, title="Group")
+                session.add(group)
+            group.welcome_enabled = group.welcome_enabled is False
+            enabled = group.welcome_enabled is not False
             await session.commit()
-        return new_value == "1", "✅ Salomlashuv yoqildi." if new_value == "1" else "✅ Salomlashuv o'chirildi."
+        return enabled, "✅ Salomlashuv yoqildi." if enabled else "✅ Salomlashuv o'chirildi."
 
-    async def set_welcome_text(self, text: str) -> tuple[bool, str]:
+    async def set_welcome_text(self, chat_id: int, text: str) -> tuple[bool, str]:
         value = " ".join((text or "").strip().split())
         if not 1 <= len(value) <= 900:
             return False, "Matn 1 dan 900 belgigacha bo'lishi kerak."
         async with self.session_factory() as session:
-            await self._set_bot_setting_value(session, WELCOME_TEXT_KEY, value)
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                group = Group(chat_id=chat_id, title="Group")
+                session.add(group)
+            group.welcome_text = value
             await session.commit()
         return True, "✅ Salomlashuv matni yangilandi."
 
-    async def set_welcome_media(self, media_type: str, file_id: str) -> tuple[bool, str]:
+    async def set_welcome_media(self, chat_id: int, media_type: str, file_id: str) -> tuple[bool, str]:
         if media_type not in {"photo", "video", "animation", "document"} or not file_id:
             return False, "Media noto'g'ri. Photo, video, gif yoki document yuboring."
         async with self.session_factory() as session:
-            await self._set_bot_setting_value(session, WELCOME_MEDIA_TYPE_KEY, media_type)
-            await self._set_bot_setting_value(session, WELCOME_MEDIA_FILE_ID_KEY, file_id)
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                group = Group(chat_id=chat_id, title="Group")
+                session.add(group)
+            group.welcome_media_type = media_type
+            group.welcome_media_file_id = file_id
             await session.commit()
         return True, "✅ Salomlashuv mediasi yangilandi."
 
-    async def clear_welcome_media(self) -> str:
+    async def clear_welcome_media(self, chat_id: int) -> str:
         async with self.session_factory() as session:
-            await self._set_bot_setting_value(session, WELCOME_MEDIA_TYPE_KEY, "")
-            await self._set_bot_setting_value(session, WELCOME_MEDIA_FILE_ID_KEY, "")
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                group = Group(chat_id=chat_id, title="Group")
+                session.add(group)
+            group.welcome_media_type = ""
+            group.welcome_media_file_id = ""
             await session.commit()
         return "✅ Salomlashuv mediasi o'chirildi."
 
     async def send_welcome_message(self, bot: Bot, chat_id: int, tg_user: TgUser) -> None:
-        settings = await self.welcome_settings()
+        settings = await self.welcome_settings(chat_id)
         if settings["enabled"] != "1":
             return
         mention = self._tg_mention(tg_user.id, tg_user.full_name)
@@ -6007,6 +6031,20 @@ class GameEngine:
         group = await self.get_or_create_group(chat_id, "Group")
         return group
 
+    async def group_timeout(self, chat_id: int, field: str) -> int:
+        defaults = {
+            "registration_timeout": self.settings.registration_timeout,
+            "night_timeout": self.settings.night_timeout,
+            "day_discussion_timeout": self.settings.day_discussion_timeout,
+            "day_voting_timeout": self.settings.day_voting_timeout,
+        }
+        default = defaults.get(field, 60)
+        async with self.session_factory() as session:
+            group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
+            if group is None:
+                return default
+            return max(10, int(getattr(group, field, None) or default))
+
     async def latest_group_game_logs_text(self, chat_id: int, limit: int = 15) -> str:
         async with self.session_factory() as session:
             game = (
@@ -6069,6 +6107,18 @@ class GameEngine:
                 group.registration_timeout = max(10, int(value))
                 await session.commit()
                 return True, f"✅ Registration timeout: {group.registration_timeout} soniya"
+            elif field == "night_timeout":
+                group.night_timeout = max(10, int(value))
+                await session.commit()
+                return True, f"✅ Tun vaqti: {group.night_timeout} soniya"
+            elif field == "day_discussion_timeout":
+                group.day_discussion_timeout = max(10, int(value))
+                await session.commit()
+                return True, f"✅ Kun muhokamasi: {group.day_discussion_timeout} soniya"
+            elif field == "day_voting_timeout":
+                group.day_voting_timeout = max(10, int(value))
+                await session.commit()
+                return True, f"✅ Ovoz berish vaqti: {group.day_voting_timeout} soniya"
             elif field == "min_players":
                 group.min_players = max(4, min(int(value), 30))
                 await session.commit()

@@ -18,7 +18,6 @@ from app.keyboards import (
     owner_news_channel_keyboard,
     owner_panel_keyboard,
     owner_premium_groups_keyboard,
-    owner_welcome_keyboard,
     owner_wait_keyboard,
 )
 
@@ -92,7 +91,6 @@ OWNER_COMMANDS_TEXT = (
     "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
     "🎲 Premium guruhlar - premium guruhlarni boshqarish\n"
     "🚷 Blacklist - bloklangan foydalanuvchilar bo'limi\n"
-    "👋 Salomlashuv - yangi user kirganda avtomatik xabar/media sozlash\n"
     "Xarid admini - almaz xaridi uchun admin username sozlash\n"
     "Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqarish\n"
     "Geroy savdo kanali - geroy marketplace kanalini ulash\n"
@@ -440,82 +438,6 @@ async def owner_hero_market_clear_callback(callback: CallbackQuery, engine: Game
     await callback.answer("O'chirildi.")
 
 
-@router.callback_query(F.data == "owner:welcome")
-async def owner_welcome_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    data = await engine.welcome_settings()
-    await _safe_edit(
-        callback,
-        await engine.welcome_settings_text(),
-        reply_markup=owner_welcome_keyboard(data["enabled"] == "1", bool(data["media_file_id"])),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner:welcome_toggle")
-async def owner_welcome_toggle_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    enabled, text = await engine.toggle_welcome_enabled()
-    data = await engine.welcome_settings()
-    await _safe_edit(
-        callback,
-        await engine.welcome_settings_text(),
-        reply_markup=owner_welcome_keyboard(enabled, bool(data["media_file_id"])),
-    )
-    await callback.answer(text)
-
-
-@router.callback_query(F.data == "owner:welcome_text")
-async def owner_welcome_text_callback(callback: CallbackQuery, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS[callback.from_user.id] = "welcome_text"
-    await _safe_edit(
-        callback,
-        "👋 <b>Salomlashuv matni</b>\n\n"
-        "User metkasi bot tomonidan avtomatik birinchi qo'yiladi.\n"
-        "Siz metkadan keyin chiqadigan matnni yuboring.\n\n"
-        "Masalan:\n<code>guruhimizga xush kelibsiz!</code>",
-        reply_markup=owner_wait_keyboard(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner:welcome_media")
-async def owner_welcome_media_callback(callback: CallbackQuery, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS[callback.from_user.id] = "welcome_media"
-    await _safe_edit(
-        callback,
-        "🖼 <b>Salomlashuv mediasi</b>\n\n"
-        "Photo, video, gif yoki document yuboring. Keyingi yangi user kirganda shu media ustiga caption bo'lib salomlashuv chiqadi.",
-        reply_markup=owner_wait_keyboard(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner:welcome_media_clear")
-async def owner_welcome_media_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    text = await engine.clear_welcome_media()
-    data = await engine.welcome_settings()
-    await _safe_edit(
-        callback,
-        f"{text}\n\n{await engine.welcome_settings_text()}",
-        reply_markup=owner_welcome_keyboard(data["enabled"] == "1", False),
-    )
-    await callback.answer("O'chirildi.")
-
-
 @router.callback_query(F.data == "owner:broadcast_users")
 async def owner_broadcast_users_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -580,8 +502,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
             "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
-            "👋 Salomlashuv - guruhga yangi user kirganda avtomatik xabar/media yuborishni boshqaradi.\n"
-            "👤 Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
+            " Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
             "🥷 Geroy savdo kanali - geroy marketplace kanalini boshqaradi.\n"
             "📣 Userlarga reklama - keyingi oddiy xabarni userlarga tarqatadi.\n"
@@ -705,47 +626,6 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_hero_market_keyboard(True))
-        return True
-
-    if action == "welcome_text":
-        ok, text = await engine.set_welcome_text(message.text or "")
-        if not ok:
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "welcome_text"
-            await message.answer(text, reply_markup=owner_wait_keyboard())
-            return True
-        data = await engine.welcome_settings()
-        await message.answer(
-            f"{text}\n\n{await engine.welcome_settings_text()}",
-            reply_markup=owner_welcome_keyboard(data["enabled"] == "1", bool(data["media_file_id"])),
-        )
-        return True
-
-    if action == "welcome_media":
-        media_type = ""
-        file_id = ""
-        if message.photo:
-            media_type = "photo"
-            file_id = message.photo[-1].file_id
-        elif message.video:
-            media_type = "video"
-            file_id = message.video.file_id
-        elif message.animation:
-            media_type = "animation"
-            file_id = message.animation.file_id
-        elif message.document:
-            media_type = "document"
-            file_id = message.document.file_id
-
-        ok, text = await engine.set_welcome_media(media_type, file_id)
-        if not ok:
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "welcome_media"
-            await message.answer(text, reply_markup=owner_wait_keyboard())
-            return True
-        data = await engine.welcome_settings()
-        await message.answer(
-            f"{text}\n\n{await engine.welcome_settings_text()}",
-            reply_markup=owner_welcome_keyboard(data["enabled"] == "1", bool(data["media_file_id"])),
-        )
         return True
 
     if action == "premium_timer":

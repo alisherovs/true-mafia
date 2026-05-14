@@ -818,6 +818,9 @@ async def diamond_buy(callback: CallbackQuery) -> None:
     if callback.from_user is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    if callback.message is None:
+        await callback.answer("Xabar topilmadi. Qaytadan urinib ko'ring.", show_alert=True)
+        return
     
     package_key = callback.data.split(":", maxsplit=2)[2]
     if package_key not in DIAMOND_PACKAGES:
@@ -827,24 +830,24 @@ async def diamond_buy(callback: CallbackQuery) -> None:
     diamonds, stars = DIAMOND_PACKAGES[package_key]
     
     try:
-        await callback.message.bot.send_invoice(
+        await callback.bot.send_invoice(
             chat_id=callback.from_user.id,
             title=f"💎 {diamonds} almaz",
             description=f"{diamonds} ta almaz sotib olish",
-            payload=f"diamonds_{diamonds}",
-            currency="XTR",  # Telegram Stars
+            payload=f"diamonds:{diamonds}:{callback.from_user.id}",
+            currency="XTR",
             prices=[LabeledPrice(label=f"💎 {diamonds} almaz", amount=stars)],
-            provider_token="",  # Empty for Telegram Stars
+            provider_token="",
         )
         await callback.answer("Invoice jo'natildi!")
     except Exception as e:
-        await callback.answer(f"Xato: {str(e)}", show_alert=True)
+        await callback.answer(f"Invoice yaratilmadi: {str(e)}", show_alert=True)
 
 
 @router.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
     """Confirm pre-checkout query for star payments."""
-    if "diamonds_" in pre_checkout_query.invoice_payload:
+    if pre_checkout_query.invoice_payload.startswith("diamonds:"):
         await pre_checkout_query.answer(ok=True)
     else:
         await pre_checkout_query.answer(ok=False, error_message="Noto'g'ri to'lov so'rovi")
@@ -857,19 +860,23 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
         return
     
     payload = message.successful_payment.invoice_payload
-    if "diamonds_" not in payload:
+    if not payload.startswith("diamonds:"):
         return
     
     try:
-        diamonds = int(payload.split("_")[1])
+        _, raw_diamonds, raw_user_id = payload.split(":", maxsplit=2)
+        diamonds = int(raw_diamonds)
+        buyer_id = int(raw_user_id)
     except (IndexError, ValueError):
         await message.answer("❌ To'lov xatosi: Noto'g'ri qiymat")
         return
+    if message.from_user is None or message.from_user.id != buyer_id:
+        await message.answer("❌ To'lov xatosi: foydalanuvchi mos kelmadi.")
+        return
     
-    # Add diamonds to user
     async with SessionLocal() as session:
         user = (await session.execute(
-            select(User).where(User.telegram_id == message.from_user.id)
+            select(User).where(User.telegram_id == buyer_id)
         )).scalar_one_or_none()
         
         if user is None:

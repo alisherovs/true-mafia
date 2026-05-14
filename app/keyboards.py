@@ -343,6 +343,7 @@ def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboar
         (callback("timeout"), "⏳ Registration timeout"),
         (callback("minplayers"), "👥 Minimum players"),
         (callback("roles"), "🎭 Role settings"),
+        (callback("welcome"), "👋 Salomlashuv"),
         (callback("premium"), "🎲 Premium status"),
         (callback("logs"), "🧾 Game logs"),
         (callback("media"), "🖼 Day/Night media"),
@@ -351,6 +352,26 @@ def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboar
     return InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=cb)] for cb, label in items]
     )
+
+
+def group_welcome_keyboard(chat_id: int, enabled: bool, has_media: bool) -> InlineKeyboardMarkup:
+    def callback(action: str) -> str:
+        return f"settings:{chat_id}:{action}"
+
+    rows = [
+        [
+            InlineKeyboardButton(
+                text="🔴 O'chirish" if enabled else "🟢 Yoqish",
+                callback_data=callback("welcome_toggle"),
+            )
+        ],
+        [InlineKeyboardButton(text="✏️ Matnni o'zgartirish", callback_data=callback("welcome_text"))],
+        [InlineKeyboardButton(text="🖼 Media qo'shish / o'zgartirish", callback_data=callback("welcome_media"))],
+    ]
+    if has_media:
+        rows.append([InlineKeyboardButton(text="🗑 Mediani o'chirish", callback_data=callback("welcome_media_clear"))])
+    rows.append([InlineKeyboardButton(text="◀️ Settings", callback_data=callback("back"))])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def role_preset_keyboard(current_preset: str = "black23", chat_id: Optional[int] = None) -> InlineKeyboardMarkup:
@@ -638,8 +659,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
             [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
-            [InlineKeyboardButton(text="👋 Salomlashuv", callback_data="owner:welcome")],
-            [InlineKeyboardButton(text="👤 Xarid admini", callback_data="owner:purchase_admin")],
+            [InlineKeyboardButton(text=" Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
             [InlineKeyboardButton(text="🥷 Geroy savdo kanali", callback_data="owner:hero_market_channel")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
@@ -670,23 +690,6 @@ def owner_admin_group_keyboard(has_group: bool, can_use_current_chat: bool = Fal
     rows.append([InlineKeyboardButton(text="✏️ ID bilan ulash", callback_data="owner:admin_group:set")])
     if has_group:
         rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:admin_group:clear")])
-    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def owner_welcome_keyboard(enabled: bool, has_media: bool) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            InlineKeyboardButton(
-                text="🔴 O'chirish" if enabled else "🟢 Yoqish",
-                callback_data="owner:welcome_toggle",
-            )
-        ],
-        [InlineKeyboardButton(text="✏️ Matnni o'zgartirish", callback_data="owner:welcome_text")],
-        [InlineKeyboardButton(text="🖼 Media qo'shish / o'zgartirish", callback_data="owner:welcome_media")],
-    ]
-    if has_media:
-        rows.append([InlineKeyboardButton(text="🗑 Mediani o'chirish", callback_data="owner:welcome_media_clear")])
     rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
