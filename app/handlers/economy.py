@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import random
 from datetime import datetime, timedelta, timezone
 from html import escape
@@ -986,9 +987,10 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
             if user is None:
                 await message.answer("❌ Foydalanuvchi topilmadi.")
                 return
-            now = datetime.now(timezone.utc)
-            if user.vip_until and user.vip_until > now:
-                user.vip_until = user.vip_until + timedelta(days=30)
+            now = _utc_now()
+            current_vip_until = _as_aware_utc(user.vip_until)
+            if current_vip_until and current_vip_until > now:
+                user.vip_until = current_vip_until + timedelta(days=30)
             else:
                 user.vip_until = now + timedelta(days=30)
             await session.commit()
@@ -1045,6 +1047,8 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
 STARS_PER_DIAMOND = 5
 # Cap how many gifts to display in the menu to keep the keyboard readable.
 GIFT_LIST_LIMIT = 30
+# Keep callback handlers responsive even when Telegram's gifts endpoint is slow.
+GIFT_FETCH_TIMEOUT_SECONDS = 8
 
 # Telegram Premium subscription plans. Star prices are FIXED by Telegram Bot API
 # (see giftPremiumSubscription): 3mo=1000, 6mo=1500, 12mo=2500.
@@ -1076,9 +1080,29 @@ def _diamonds_for_stars(stars: int) -> int:
     return max(1, math.ceil(int(stars) / STARS_PER_DIAMOND))
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_aware_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _vip_expires_after(value: datetime | None, now: datetime) -> bool:
+    expires_at = _as_aware_utc(value)
+    return expires_at is not None and expires_at > now
+
+
 async def _fetch_sorted_gifts(bot) -> list:
     try:
-        gifts_obj = await bot.get_available_gifts()
+        gifts_obj = await asyncio.wait_for(
+            bot.get_available_gifts(),
+            timeout=GIFT_FETCH_TIMEOUT_SECONDS,
+        )
     except Exception:
         return []
     gifts = list(getattr(gifts_obj, "gifts", []) or [])
@@ -1107,6 +1131,7 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
         if user is None or not _user_is_vip(user):
             await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
             return
+    await callback.answer("Sovg'alar yuklanmoqda...")
     gifts = await _fetch_sorted_gifts(callback.bot)
     if not gifts:
         await callback.message.edit_text(
@@ -1114,7 +1139,6 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
             "Hozircha mavjud sovg'alar topilmadi yoki Telegram javob bermadi. Birozdan keyin urinib ko'ring.",
             reply_markup=gift_shop_keyboard([], STARS_PER_DIAMOND),
         )
-        await callback.answer()
         return
     text = (
         "🎁 <b>Telegram sovg'alari</b>\n\n"
@@ -1126,7 +1150,6 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
         await callback.message.edit_text(text, reply_markup=gift_shop_keyboard(gifts, STARS_PER_DIAMOND))
     except TelegramBadRequest:
         pass
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("gift:buy:"))
@@ -1409,9 +1432,7 @@ async def premium_confirm_buy(callback: CallbackQuery) -> None:
 
 # ===== VIP User =====
 def _user_is_vip(user: User) -> bool:
-    if user.vip_until is None:
-        return False
-    return user.vip_until > datetime.now(timezone.utc)
+    return _vip_expires_after(user.vip_until, _utc_now())
 
 
 @router.callback_query(F.data == "vip:open")
@@ -1451,9 +1472,10 @@ async def vip_buy_diamonds(callback: CallbackQuery) -> None:
             await callback.answer("Balans yetarli emas. Kerak: 💎 30", show_alert=True)
             return
         user.diamonds -= 30
-        now = datetime.now(timezone.utc)
-        if user.vip_until and user.vip_until > now:
-            user.vip_until = user.vip_until + timedelta(days=30)
+        now = _utc_now()
+        current_vip_until = _as_aware_utc(user.vip_until)
+        if current_vip_until and current_vip_until > now:
+            user.vip_until = current_vip_until + timedelta(days=30)
         else:
             user.vip_until = now + timedelta(days=30)
         _record_diamond_transaction(

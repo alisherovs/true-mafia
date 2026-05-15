@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
@@ -163,7 +164,10 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
             news_url=news_url,
             has_hero=has_hero,
         )
-    await callback.message.edit_text(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
+    try:
+        await callback.message.edit_text(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 
@@ -203,14 +207,17 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
         engine.user_has_hero(callback.from_user.id),
         engine.get_news_channel_url(),
     )
-    await callback.message.edit_text(
-        **engine.format_user_dashboard_entities(user),
-        reply_markup=profile_dashboard_keyboard(
-            settings,
-            user=user,
-            is_admin=callback.from_user.id in settings.admin_ids,
-            news_url=news_url,
-            has_hero=has_hero,
-        ),
-    )
+    try:
+        await callback.message.edit_text(
+            **engine.format_user_dashboard_entities(user),
+            reply_markup=profile_dashboard_keyboard(
+                settings,
+                user=user,
+                is_admin=callback.from_user.id in settings.admin_ids,
+                news_url=news_url,
+                has_hero=has_hero,
+            ),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer("Sozlama yangilandi.")

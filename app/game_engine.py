@@ -4022,8 +4022,13 @@ class GameEngine:
         vip_status = ""
         if user.vip_until:
             now = datetime.now(timezone.utc)
-            if user.vip_until > now:
-                remaining = user.vip_until - now
+            vip_until = user.vip_until
+            if vip_until.tzinfo is None:
+                vip_until = vip_until.replace(tzinfo=timezone.utc)
+            else:
+                vip_until = vip_until.astimezone(timezone.utc)
+            if vip_until > now:
+                remaining = vip_until - now
                 days = remaining.days
                 vip_status = f"\n👑 VIP: ✅ ({days} kun qoldi)"
             else:
