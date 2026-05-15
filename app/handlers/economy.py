@@ -814,12 +814,9 @@ DIAMOND_PACKAGES = {
 
 
 @router.callback_query(F.data.startswith("diamond:buy:"))
-async def diamond_buy(callback: CallbackQuery) -> None:
+async def diamond_buy(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    if callback.message is None:
-        await callback.answer("Xabar topilmadi. Qaytadan urinib ko'ring.", show_alert=True)
         return
     
     package_key = callback.data.split(":", maxsplit=2)[2]
@@ -830,6 +827,7 @@ async def diamond_buy(callback: CallbackQuery) -> None:
     diamonds, stars = DIAMOND_PACKAGES[package_key]
     
     try:
+        await engine.ensure_user(callback.from_user)
         await callback.bot.send_invoice(
             chat_id=callback.from_user.id,
             title=f"💎 {diamonds} almaz",
@@ -870,13 +868,18 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
     except (IndexError, ValueError):
         await message.answer("❌ To'lov xatosi: Noto'g'ri qiymat")
         return
-    if message.from_user is None or message.from_user.id != buyer_id:
+    if message.from_user is None:
+        await message.answer("❌ To'lov xatosi: foydalanuvchi topilmadi.")
+        return
+    if buyer_id not in {0, message.from_user.id}:
         await message.answer("❌ To'lov xatosi: foydalanuvchi mos kelmadi.")
         return
+    target_user_id = message.from_user.id if buyer_id == 0 else buyer_id
+    await engine.ensure_user(message.from_user)
     
     async with SessionLocal() as session:
         user = (await session.execute(
-            select(User).where(User.telegram_id == buyer_id)
+            select(User).where(User.telegram_id == target_user_id)
         )).scalar_one_or_none()
         
         if user is None:

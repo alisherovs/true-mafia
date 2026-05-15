@@ -87,14 +87,22 @@ async def _ensure_lightweight_columns(conn) -> None:
             "use_fake_document": "BOOLEAN DEFAULT TRUE",
             "wins": "INTEGER DEFAULT 0",
             "total_games": "INTEGER DEFAULT 0",
+            "play_locked_until": "DATETIME",
         },
     )
     await add_missing_columns(
         "groups",
         {
             "registration_timeout": "INTEGER DEFAULT 90",
+            "night_timeout": "INTEGER DEFAULT 60",
+            "day_discussion_timeout": "INTEGER DEFAULT 45",
+            "day_voting_timeout": "INTEGER DEFAULT 60",
             "min_players": "INTEGER DEFAULT 4",
             "role_preset": "VARCHAR(32) DEFAULT 'black23'",
+            "welcome_enabled": "BOOLEAN DEFAULT TRUE",
+            "welcome_text": "TEXT DEFAULT 'guruhga xush kelibsiz!'",
+            "welcome_media_type": "VARCHAR(16) DEFAULT ''",
+            "welcome_media_file_id": "TEXT DEFAULT ''",
             "premium_until": "DATETIME",
         },
     )
@@ -144,6 +152,8 @@ async def _ensure_lightweight_columns(conn) -> None:
             "hero_defense_active": "BOOLEAN DEFAULT FALSE",
             "hero_defense_amount": "INTEGER DEFAULT 0",
             "killed_by_hero": "BOOLEAN DEFAULT FALSE",
+            "sorcerer_revenge_used": "BOOLEAN DEFAULT FALSE",
+            "left_game": "BOOLEAN DEFAULT FALSE",
         },
     )
 

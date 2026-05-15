@@ -514,6 +514,93 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:invoice")
+async def owner_invoice_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    PENDING_INVOICE_DATA.pop(callback.from_user.id, None)
+    await _safe_edit(
+        callback,
+        "🧾 <b>Almaz invoice</b>\n\n"
+        "Telegram Stars orqali almaz sotish uchun invoice yarating.",
+        reply_markup=owner_invoice_menu_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:invoice:new")
+async def owner_invoice_new_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "invoice_amount"
+    PENDING_INVOICE_DATA.pop(callback.from_user.id, None)
+    await _safe_edit(
+        callback,
+        "🧾 <b>Yangi almaz invoice</b>\n\n"
+        "Almaz miqdori va Telegram Stars narxini yuboring.\n\n"
+        "Format:\n<code>almaz stars</code>\n\n"
+        "Masalan:\n<code>100 500</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:invoice:make_link")
+async def owner_invoice_make_link_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    data = PENDING_INVOICE_DATA.get(callback.from_user.id)
+    if not data:
+        await callback.answer("Invoice ma'lumotlari topilmadi. Qaytadan yarating.", show_alert=True)
+        return
+    diamonds = int(data.get("diamonds", 0))
+    stars = int(data.get("stars", 0))
+    try:
+        link = await callback.bot.create_invoice_link(
+            title=f"💎 {diamonds} almaz",
+            description=f"{diamonds} ta almaz sotib olish",
+            payload=f"diamonds:{diamonds}:0",
+            provider_token="",
+            currency="XTR",
+            prices=[LabeledPrice(label=f"💎 {diamonds} almaz", amount=stars)],
+        )
+    except Exception as exc:
+        await callback.answer(f"Invoice link yaratilmadi: {exc}", show_alert=True)
+        return
+    PENDING_INVOICE_DATA.pop(callback.from_user.id, None)
+    await _safe_edit(
+        callback,
+        "✅ <b>Invoice link yaratildi</b>\n\n"
+        f"{_invoice_summary({'diamonds': diamonds, 'stars': stars})}\n\n"
+        f"🔗 {link}",
+        reply_markup=owner_invoice_after_keyboard(),
+    )
+    await callback.answer("Tayyor.")
+
+
+@router.callback_query(F.data == "owner:invoice:make_send")
+async def owner_invoice_make_send_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    if callback.from_user.id not in PENDING_INVOICE_DATA:
+        await callback.answer("Invoice ma'lumotlari topilmadi. Qaytadan yarating.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "invoice_user"
+    await _safe_edit(
+        callback,
+        "📤 <b>Invoice yuborish</b>\n\n"
+        "Invoice yuboriladigan user Telegram ID sini yuboring.\n\n"
+        "Masalan:\n<code>123456789</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:cancel")
 async def owner_cancel_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -533,6 +620,59 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
     action = PENDING_OWNER_ACTIONS.pop(message.from_user.id, None)
     if action is None:
         return False
+
+    if action == "invoice_amount":
+        parts = (message.text or "").split()
+        if len(parts) != 2 or not all(part.isdigit() for part in parts):
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "invoice_amount"
+            await message.answer(
+                "Format noto'g'ri. Shunday yuboring:\n<code>almaz stars</code>\n\nMasalan: <code>100 500</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        diamonds = int(parts[0])
+        stars = int(parts[1])
+        if diamonds <= 0 or stars <= 0:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "invoice_amount"
+            await message.answer("Almaz va Stars miqdori musbat bo'lishi kerak.", reply_markup=owner_wait_keyboard())
+            return True
+        PENDING_INVOICE_DATA[message.from_user.id] = {"diamonds": diamonds, "stars": stars}
+        await message.answer(_invoice_summary(PENDING_INVOICE_DATA[message.from_user.id]), reply_markup=owner_invoice_delivery_keyboard())
+        return True
+
+    if action == "invoice_user":
+        data = PENDING_INVOICE_DATA.get(message.from_user.id)
+        raw_user_id = (message.text or "").strip()
+        if not data or not raw_user_id.isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "invoice_user"
+            await message.answer("User ID noto'g'ri. Faqat raqam yuboring.", reply_markup=owner_wait_keyboard())
+            return True
+        target_user_id = int(raw_user_id)
+        diamonds = int(data.get("diamonds", 0))
+        stars = int(data.get("stars", 0))
+        try:
+            await message.bot.send_invoice(
+                chat_id=target_user_id,
+                title=f"💎 {diamonds} almaz",
+                description=f"{diamonds} ta almaz sotib olish",
+                payload=f"diamonds:{diamonds}:{target_user_id}",
+                provider_token="",
+                currency="XTR",
+                prices=[LabeledPrice(label=f"💎 {diamonds} almaz", amount=stars)],
+            )
+        except Exception as exc:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "invoice_user"
+            await message.answer(f"Invoice yuborilmadi: {exc}", reply_markup=owner_wait_keyboard())
+            return True
+        PENDING_INVOICE_DATA.pop(message.from_user.id, None)
+        await message.answer(
+            "✅ Invoice yuborildi.\n\n"
+            f"User ID: <code>{target_user_id}</code>\n"
+            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
+            f"⭐ Stars: <b>{stars}</b>",
+            reply_markup=owner_invoice_after_keyboard(),
+        )
+        return True
 
     if action == "premium_title":
         title = (message.text or "").strip()

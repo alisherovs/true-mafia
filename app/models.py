@@ -41,6 +41,7 @@ class User(Base):
 
     wins: Mapped[int] = mapped_column(Integer, default=0)
     total_games: Mapped[int] = mapped_column(Integer, default=0)
+    play_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -55,8 +56,15 @@ class Group(Base):
     language: Mapped[str] = mapped_column(String(8), default="uz")
 
     registration_timeout: Mapped[int] = mapped_column(Integer, default=90)
+    night_timeout: Mapped[int] = mapped_column(Integer, default=60)
+    day_discussion_timeout: Mapped[int] = mapped_column(Integer, default=45)
+    day_voting_timeout: Mapped[int] = mapped_column(Integer, default=60)
     min_players: Mapped[int] = mapped_column(Integer, default=4)
     role_preset: Mapped[str] = mapped_column(String(32), default="black23")
+    welcome_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    welcome_text: Mapped[str] = mapped_column(Text, default="guruhga xush kelibsiz!")
+    welcome_media_type: Mapped[str] = mapped_column(String(16), default="")
+    welcome_media_file_id: Mapped[str] = mapped_column(Text, default="")
     premium_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -128,6 +136,8 @@ class GamePlayer(Base):
     hero_defense_active: Mapped[bool] = mapped_column(Boolean, default=False)
     hero_defense_amount: Mapped[int] = mapped_column(Integer, default=0)
     killed_by_hero: Mapped[bool] = mapped_column(Boolean, default=False)
+    sorcerer_revenge_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    left_game: Mapped[bool] = mapped_column(Boolean, default=False)
 
     game: Mapped[Game] = relationship(back_populates="players")
 

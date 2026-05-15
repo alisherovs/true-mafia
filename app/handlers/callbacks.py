@@ -340,10 +340,16 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         await callback.answer(msg)
     elif action == "back":
         group = await engine.group_settings(target_chat_id)
+        welcome = await engine.welcome_settings(target_chat_id)
+        welcome_status = "🟢 yoqilgan" if welcome["enabled"] == "1" else "🔴 o'chirilgan"
         text = (
             f"{t(lang, 'settings_title')}\n\n"
             f"⏳ Registration timeout: <b>{group.registration_timeout}</b> soniya\n"
-            f"👥 Minimum players: <b>{group.min_players}</b>\n"
+            f"🌙 Night timeout: <b>{group.night_timeout}</b> soniya\n"
+            f"☀️ Day discussion timeout: <b>{group.day_discussion_timeout}</b> soniya\n"
+            f"🗳 Voting timeout: <b>{group.day_voting_timeout}</b> soniya\n"
+            f"👥 Minimum players: <b>{group.min_players}</b>\n\n"
+            f"👋 Salomlashuv: <b>{welcome_status}</b>\n\n"
             f"🎭 Role preset: <b>{role_preset_label(group.role_preset)}</b> "
             f"({role_preset_max_players(group.role_preset)} gacha)"
         )
