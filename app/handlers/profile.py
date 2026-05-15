@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
@@ -56,8 +58,7 @@ GROUP_COMMANDS_TEXT = (
 
 
 async def _send_profile(message: Message, engine: GameEngine, settings: Settings) -> None:
-    await engine.ensure_user(message.from_user)
-    user = await engine.get_user(message.from_user.id)
+    user = await engine.ensure_user(message.from_user)
     if user is None:
         return
 
@@ -65,12 +66,15 @@ async def _send_profile(message: Message, engine: GameEngine, settings: Settings
         in_running_game = await engine.user_in_running_game(message.from_user.id)
         reply_markup = None
         if not in_running_game:
-            has_hero = await engine.user_has_hero(message.from_user.id)
+            has_hero, news_url = await asyncio.gather(
+                engine.user_has_hero(message.from_user.id),
+                engine.get_news_channel_url(),
+            )
             reply_markup = profile_dashboard_keyboard(
                 settings,
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
-                news_url=await engine.get_news_channel_url(),
+                news_url=news_url,
                 has_hero=has_hero,
             )
         await message.answer(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
@@ -148,12 +152,15 @@ async def profile_callback(callback: CallbackQuery, engine: GameEngine, settings
     in_running_game = await engine.user_in_running_game(callback.from_user.id)
     reply_markup = None
     if not in_running_game:
-        has_hero = await engine.user_has_hero(callback.from_user.id)
+        has_hero, news_url = await asyncio.gather(
+            engine.user_has_hero(callback.from_user.id),
+            engine.get_news_channel_url(),
+        )
         reply_markup = profile_dashboard_keyboard(
             settings,
             user=user,
             is_admin=callback.from_user.id in settings.admin_ids,
-            news_url=await engine.get_news_channel_url(),
+            news_url=news_url,
             has_hero=has_hero,
         )
     await callback.message.edit_text(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
@@ -192,14 +199,18 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
         await session.commit()
         await session.refresh(user)
 
+    has_hero, news_url = await asyncio.gather(
+        engine.user_has_hero(callback.from_user.id),
+        engine.get_news_channel_url(),
+    )
     await callback.message.edit_text(
         **engine.format_user_dashboard_entities(user),
         reply_markup=profile_dashboard_keyboard(
             settings,
             user=user,
             is_admin=callback.from_user.id in settings.admin_ids,
-            news_url=await engine.get_news_channel_url(),
-            has_hero=await engine.user_has_hero(callback.from_user.id),
+            news_url=news_url,
+            has_hero=has_hero,
         ),
     )
     await callback.answer("Sozlama yangilandi.")

@@ -366,6 +366,7 @@ async def settings_chat_handler(callback: CallbackQuery, engine: GameEngine) -> 
         phase, permission = parts[2], parts[3]
         if not await _deny_if_not_admin(callback, chat_id, engine): return
         await gsm.set_chat_permission(chat_id, phase, permission)
+        engine.invalidate_chat_permission_cache(chat_id)
         phase_label = "🌙 Tun" if phase == "night" else "☀️ Kun"
         perm_label = CHAT_PERMISSION_LABELS.get(permission, permission)
         await callback.message.edit_text(f"✅ {phase_label}: {perm_label}", reply_markup=settings_chat_phase_keyboard(phase, permission))

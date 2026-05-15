@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandObject, CommandStart
@@ -121,12 +123,16 @@ async def cmd_start(
         in_running_game = await engine.user_in_running_game(message.from_user.id)
         reply_markup = None
         if not in_running_game:
+            news_url, has_hero = await asyncio.gather(
+                engine.get_news_channel_url(),
+                engine.user_has_hero(message.from_user.id),
+            )
             reply_markup = profile_dashboard_keyboard(
                 settings,
                 user=user,
                 is_admin=message.from_user.id in settings.admin_ids,
-                news_url=await engine.get_news_channel_url(),
-                has_hero=await engine.user_has_hero(message.from_user.id),
+                news_url=news_url,
+                has_hero=has_hero,
             )
         await message.answer(**engine.format_user_dashboard_entities(user), reply_markup=reply_markup)
         return
@@ -173,17 +179,20 @@ async def back_to_start(callback: CallbackQuery, engine: GameEngine, settings: S
     if callback.from_user is None or callback.message is None:
         await callback.answer()
         return
-    
-    user = await engine.ensure_user(callback.from_user)
+
+    user, news_url = await asyncio.gather(
+        engine.ensure_user(callback.from_user),
+        engine.get_news_channel_url(),
+    )
     lang = user.language or settings.default_language
-    
+
     await callback.message.edit_text(
         t(lang, "start_menu"),
         reply_markup=start_menu_keyboard(
             lang,
             settings,
             is_admin=callback.from_user.id in settings.admin_ids,
-            news_url=await engine.get_news_channel_url(),
+            news_url=news_url,
         ),
     )
     await callback.answer()

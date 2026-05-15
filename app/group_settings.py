@@ -55,12 +55,15 @@ DEFAULT_EXTRA = {
 class GroupSettingsManager:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self.session_factory = session_factory
+        self._defaults_initialized: set[int] = set()
 
     @staticmethod
     def _now_utc() -> datetime:
         return datetime.now(timezone.utc)
 
     async def ensure_defaults(self, chat_id: int) -> None:
+        if chat_id in self._defaults_initialized:
+            return
         async with self.session_factory() as session:
             gs = await session.get(GroupSettings, chat_id)
             if gs is None:
@@ -132,6 +135,7 @@ class GroupSettingsManager:
                         is_enabled=DEFAULT_EXTRA.get(ek, True),
                     ))
             await session.commit()
+            self._defaults_initialized.add(chat_id)
 
     async def get_settings(self, chat_id: int) -> GroupSettings:
         await self.ensure_defaults(chat_id)

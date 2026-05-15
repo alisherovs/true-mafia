@@ -149,8 +149,10 @@ class GameEngine:
         self._group_language_cache: dict[int, tuple[float, str]] = {}
         self._group_return_url_cache: dict[int, tuple[float, str]] = {}
         self._active_participants_cache: dict[int, tuple[float, Optional[int], frozenset[int]]] = {}
+        self._chat_permission_cache: dict[tuple[int, str], tuple[float, str]] = {}
         self._cache_ttl_seconds = 10.0
         self._return_url_cache_ttl_seconds = 3600.0
+        self._chat_permission_cache_ttl = 5.0
         self._cache_limit = 20000
 
     def _monotonic(self) -> float:
@@ -174,6 +176,10 @@ class GameEngine:
 
     def _invalidate_game_cache(self, chat_id: int) -> None:
         self._active_participants_cache.pop(chat_id, None)
+
+    def invalidate_chat_permission_cache(self, chat_id: int) -> None:
+        for phase in ("night", "day"):
+            self._chat_permission_cache.pop((chat_id, phase), None)
 
     @staticmethod
     def _now_utc() -> datetime:
@@ -4985,13 +4991,33 @@ class GameEngine:
             return False, "❌ Sizda bu buyruqni ishlatish huquqi yo'q."
         return True, ""
 
+    async def _get_cached_chat_permission(self, chat_id: int, phase: str) -> str:
+        cache_key = (chat_id, phase)
+        now = self._monotonic()
+        cached = self._chat_permission_cache.get(cache_key)
+        if cached:
+            expire_time, permission = cached
+            if expire_time > now:
+                return permission
+            del self._chat_permission_cache[cache_key]
+        gsm = GroupSettingsManager(self.session_factory)
+        permission = await gsm.get_chat_permission(chat_id, phase)
+        self._chat_permission_cache[cache_key] = (now + self._chat_permission_cache_ttl, permission)
+        if len(self._chat_permission_cache) > self._cache_limit:
+            expired_keys = [k for k, v in self._chat_permission_cache.items() if v[0] <= now]
+            for k in expired_keys:
+                self._chat_permission_cache.pop(k, None)
+            if len(self._chat_permission_cache) > self._cache_limit:
+                for k in list(self._chat_permission_cache.keys())[: max(1, self._cache_limit // 10)]:
+                    self._chat_permission_cache.pop(k, None)
+        return permission
+
     async def check_chat_write_permission(self, bot: Bot, chat_id: int, user_id: int) -> bool:
         active = await self.active_game_for_chat(chat_id)
         if active is None or active.status != GameStatus.ACTIVE.value:
             return True
         phase = "night" if active.phase == GamePhase.NIGHT.value else "day"
-        gsm = GroupSettingsManager(self.session_factory)
-        permission = await gsm.get_chat_permission(chat_id, phase)
+        permission = await self._get_cached_chat_permission(chat_id, phase)
         if permission == "all":
             return True
         if permission == "owner":
