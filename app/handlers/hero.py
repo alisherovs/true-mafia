@@ -5,12 +5,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import CallbackQuery, Message
 
 from app.game_engine import GameEngine
-from app.keyboards import (
-    hero_defense_keyboard,
-    hero_game_keyboard,
-    hero_panel_keyboard,
-    hero_target_keyboard,
-)
+from app.keyboards import hero_game_keyboard, hero_panel_keyboard, hero_target_keyboard
 
 router = Router()
 PENDING_HERO_ACTIONS: dict[int, dict[str, object]] = {}
@@ -195,8 +190,8 @@ async def hero_game_defend_callback(callback: CallbackQuery, engine: GameEngine)
         return
     if not await _require_private(callback):
         return
-    ok, text, max_amount = await engine.hero_game_defend_options(callback.from_user.id)
-    await callback.message.edit_text(text, reply_markup=hero_defense_keyboard(max_amount) if ok else None)
+    ok, text = await engine.hero_game_defend(callback.from_user.id)
+    await callback.message.edit_text(text)
     await callback.answer(text if not ok else None, show_alert=not ok)
 
 

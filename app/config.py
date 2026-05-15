@@ -21,7 +21,8 @@ class Settings(BaseSettings):
     db_pool_timeout: int = Field(default=30, alias="DB_POOL_TIMEOUT")
 
     default_language: str = Field(default="uz", alias="DEFAULT_LANGUAGE")
-    news_channel_url: str = Field(default="https://t.me", alias="NEWS_CHANNEL_URL")
+    news_channel_url: str = Field(default="https://t.me/WorldMafiaNews", alias="NEWS_CHANNEL_URL")
+    news_bonus_channel: str = Field(default="@WorldMafiaNews", alias="NEWS_BONUS_CHANNEL")
     support_url: str = Field(default="https://t.me", alias="SUPPORT_URL")
     admin_username: str = Field(default="support", alias="ADMIN_USERNAME")
     admin_ids_raw: str = Field(default="", alias="ADMIN_IDS")
@@ -32,9 +33,9 @@ class Settings(BaseSettings):
     day_discussion_timeout: int = Field(default=45, alias="DAY_DISCUSSION_TIMEOUT")
     day_voting_timeout: int = Field(default=60, alias="DAY_VOTING_TIMEOUT")
 
-    winner_reward_dollar: int = Field(default=45, alias="WINNER_REWARD_DOLLAR")
+    winner_reward_dollar: int = Field(default=15, alias="WINNER_REWARD_DOLLAR")
     winner_reward_diamond: int = Field(default=0, alias="WINNER_REWARD_DIAMOND")
-    loser_reward_dollar: int = Field(default=10, alias="LOSER_REWARD_DOLLAR")
+    loser_reward_dollar: int = Field(default=5, alias="LOSER_REWARD_DOLLAR")
     loser_reward_diamond: int = Field(default=0, alias="LOSER_REWARD_DIAMOND")
 
     night_media_file_id: Optional[str] = Field(default=None, alias="NIGHT_MEDIA_FILE_ID")
