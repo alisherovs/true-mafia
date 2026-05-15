@@ -462,6 +462,8 @@ class GameEngine:
             return "👷 Konchi konlardan biriga yo'l oldi..."
         if role == Role.PRANKSTER:
             return "🧑🏻‍🦲 Hazilkash prank qilishga ketdi"
+        if role == Role.SNITCH:
+            return None
         return None
 
     @staticmethod
@@ -1464,6 +1466,8 @@ class GameEngine:
             return "🤹🏻 Kimni chalg'itasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
         if role == Role.PRANKSTER:
             return "😂 Kimga prank qilasiz?", target_keyboard("prank", game_id, player.telegram_id, targets)
+        if role == Role.SNITCH:
+            return "🤓 Kimni tekshirasiz?", target_keyboard("check", game_id, player.telegram_id, targets)
         if role == Role.MINER:
             visited = miner_visits.get(player.telegram_id, set()) if miner_visits else set()
             return "Qaysi konga borasiz?", miner_keyboard(game_id, player.telegram_id, visited)
@@ -1809,6 +1813,7 @@ class GameEngine:
                 Role.SORCERER: {"revenge"},
                 Role.MINER: {"mine", "mine_protect"},
                 Role.PRANKSTER: {"prank"},
+                Role.SNITCH: {"check"},
             }
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
@@ -1830,20 +1835,6 @@ class GameEngine:
                     return False, "Bu konga oldin tashrif buyurgansiz. Boshqa kon tanlang."
             if action_type == ActionType.HEAL and target_id == actor_id and actor.self_heal_used:
                 return False, "Siz o'zingizni yana davolay olmaysiz."
-
-            if action_type == ActionType.HEAL:
-                already_healed_target = (
-                    await session.execute(
-                        select(NightAction.id).where(
-                            NightAction.game_id == game_id,
-                            NightAction.actor_telegram_id == actor_id,
-                            NightAction.target_telegram_id == target_id,
-                            NightAction.action_type == ActionType.HEAL.value,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if already_healed_target is not None:
-                    return False, "Kimni davolaymiz?"
 
             if action_type in {ActionType.BLOCK, ActionType.VISIT}:
                 already_targeted = (
@@ -2311,6 +2302,8 @@ class GameEngine:
                     commissar_shots.append(target_id)
                 elif act.action_type == ActionType.CHECK.value and role == Role.COMMISSAR:
                     checks.append((act.actor_telegram_id, target_id))
+                elif act.action_type == ActionType.CHECK.value and role == Role.SNITCH:
+                    pass  # handled separately below
                 elif act.action_type == ActionType.MINE.value and role == Role.MINER:
                     mine_actions.append((act.actor_telegram_id, target_id))
                 elif act.action_type == ActionType.MINE_PROTECT.value and role == Role.MINER:
@@ -2327,6 +2320,38 @@ class GameEngine:
             miner_group_lines: list[str] = []
             doctor_saved_targets: set[int] = set()
             doctor_saved_from_mafia: set[int] = set()
+
+            # SNITCH resolution
+            snitch_actions = [
+                act for act in actions
+                if act.action_type == ActionType.CHECK.value
+                and act.actor_telegram_id in player_map
+                and Role(player_map[act.actor_telegram_id].role) == Role.SNITCH
+                and act.actor_telegram_id not in blocked
+                and act.actor_telegram_id not in prank_targets
+            ]
+            snitch_group_lines: list[str] = []
+            snitch_notices: list[tuple[int, str]] = []
+            for act in snitch_actions:
+                target = player_map.get(act.target_telegram_id)
+                if target is None:
+                    continue
+                target_role = Role(target.role)
+                if target_role in {Role.DON, Role.MAFIA, Role.KILLER}:
+                    snitch_group_lines.append("🤓 Sotqinning izlanishlari samara berdi!")
+                    snitch_group_lines.append(
+                        f"🤓 Sotqin odamlarga {self._tg_mention(target.telegram_id, target.display_name)}ning {role_label(target_role)} ekanini sotib berdi."
+                    )
+                    snitch_notices.append((
+                        act.actor_telegram_id,
+                        f"🤓 Siz {self._tg_mention(target.telegram_id, target.display_name)}ni tekshirdingiz. U {role_label(target_role)} ekan! Odamlarga bu haqida xabar berildi.",
+                    ))
+                else:
+                    snitch_group_lines.append("🤓 Sotqinning izlanishlari zoya ketdi!")
+                    snitch_notices.append((
+                        act.actor_telegram_id,
+                        f"🤓 Siz {self._tg_mention(target.telegram_id, target.display_name)}ni tekshirdingiz. U oddiy o'yinchi ekan.",
+                    ))
 
             if mine_actions or miner_protectors:
                 miner_users = {
@@ -2780,10 +2805,23 @@ class GameEngine:
             except TelegramForbiddenError:
                 pass
 
+        for telegram_id, text in snitch_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
         for line in miner_group_lines:
             await bot.send_message(chat_id, line)
 
         for line in dict.fromkeys(protected_group_lines):
+            await bot.send_message(chat_id, line)
+
+        for line in snitch_group_lines:
             await bot.send_message(chat_id, line)
 
         for _, telegram_id, new_role in succession_notices:
