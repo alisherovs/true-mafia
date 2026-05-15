@@ -54,10 +54,10 @@ def start_menu_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _toggle_button(icon: str, field: str, user: object | None) -> InlineKeyboardButton:
+def _toggle_button(icon: str, title: str, field: str, user: object | None) -> InlineKeyboardButton:
     enabled = getattr(user, field, True) is not False
     state = "🟢 ON" if enabled else "🔴 OFF"
-    return InlineKeyboardButton(text=f"{icon} - {state}", callback_data=f"invtoggle:{field}")
+    return InlineKeyboardButton(text=f"{icon} {title}: {state}", callback_data=f"invtoggle:{field}")
 
 
 def profile_dashboard_keyboard(
@@ -69,16 +69,19 @@ def profile_dashboard_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [
         [
-            _toggle_button("🛡", "use_protection", user),
-            _toggle_button("📁", "use_fake_document", user),
-            _toggle_button("⚖️", "use_vote_protection", user),
+            _toggle_button("🛡", "Himoya", "use_protection", user),
+            _toggle_button("🧿", "Qotil", "use_killer_protection", user),
         ],
         [
-            _toggle_button("💊", "use_drug_protection", user),
-            _toggle_button("🧿", "use_killer_protection", user),
+            _toggle_button("⚖️", "Ovoz", "use_vote_protection", user),
+            _toggle_button("💊", "Dori", "use_drug_protection", user),
         ],
         [
-            _toggle_button("🎭", "use_mask", user),
+            _toggle_button("📦", "Sirpanish", "use_miner_protection", user),
+            _toggle_button("🎭", "Maska", "use_mask", user),
+        ],
+        [
+            _toggle_button("📁", "Hujjat", "use_fake_document", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
