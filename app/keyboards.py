@@ -79,7 +79,6 @@ def profile_dashboard_keyboard(
         ],
         [
             _toggle_button("🎭", "use_mask", user),
-            _toggle_button("🛡", "use_protection", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
@@ -416,8 +415,19 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🧿 Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
             [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
+            [InlineKeyboardButton(text="👑 VIP User", callback_data="vip:open")],
             [InlineKeyboardButton(text="🎁 Telegram sovg'asiga almashtirish", callback_data="shop:gifts")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
+        ]
+    )
+
+
+def vip_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💎 30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
+            [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
 

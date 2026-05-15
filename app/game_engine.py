@@ -3975,11 +3975,20 @@ class GameEngine:
                 return value
 
         display_name = TextLink(user.display_name or "Unknown", url=f"tg://user?id={user.telegram_id}")
+        vip_status = ""
+        if user.vip_until:
+            now = datetime.now(timezone.utc)
+            if user.vip_until > now:
+                remaining = user.vip_until - now
+                days = remaining.days
+                vip_status = f"\n👑 VIP: ✅ ({days} kun qoldi)"
+            else:
+                vip_status = "\n👑 VIP: ❌ (muddati tugagan)"
         return Text(
             "👤 Nik: ", display_name, "\n",
             "⭐ ID: ", Code(str(user.telegram_id)), "\n\n",
             CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID), " Dollar: ", Bold(str(user.dollar)), "\n",
-            CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), "\n\n",
+            CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), vip_status, "\n\n",
             "🛡 Himoya: ", Bold(str(user.protection)), f" {state(user.use_protection)}\n",
             "🧿 Qotildan himoya: ", Bold(str(user.killer_protection)), f" {state(user.use_killer_protection)}\n",
             "⚖️ Ovoz berishni himoya qilish: ", Bold(str(user.vote_protection)), f" {state(user.use_vote_protection)}\n",

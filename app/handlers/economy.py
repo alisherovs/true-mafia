@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 from aiogram import F, Router
@@ -25,6 +25,7 @@ from app.keyboards import (
     premium_shop_keyboard,
     role_shop_keyboard,
     shop_keyboard,
+    vip_keyboard,
 )
 from app.models import DiamondGiveaway, DiamondTransaction, DollarTransaction, User
 from app.texts import t
@@ -951,7 +952,7 @@ async def diamond_buy(callback: CallbackQuery, engine: GameEngine) -> None:
 @router.pre_checkout_query()
 async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
     """Confirm pre-checkout query for star payments."""
-    if pre_checkout_query.invoice_payload.startswith("diamonds:"):
+    if pre_checkout_query.invoice_payload.startswith("diamonds:") or pre_checkout_query.invoice_payload.startswith("vip:"):
         await pre_checkout_query.answer(ok=True)
     else:
         await pre_checkout_query.answer(ok=False, error_message="Noto'g'ri to'lov so'rovi")
@@ -964,6 +965,36 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
         return
     
     payload = message.successful_payment.invoice_payload
+    if payload.startswith("vip:"):
+        try:
+            _, raw_user_id = payload.split(":", maxsplit=1)
+            buyer_id = int(raw_user_id)
+        except (IndexError, ValueError):
+            await message.answer("❌ To'lov xatosi: Noto'g'ri qiymat")
+            return
+        if message.from_user is None:
+            await message.answer("❌ To'lov xatosi: foydalanuvchi topilmadi.")
+            return
+        if buyer_id != message.from_user.id:
+            await message.answer("❌ To'lov xatosi: foydalanuvchi mos kelmadi.")
+            return
+        await engine.ensure_user(message.from_user)
+        async with SessionLocal() as session:
+            user = (await session.execute(
+                select(User).where(User.telegram_id == buyer_id)
+            )).scalar_one_or_none()
+            if user is None:
+                await message.answer("❌ Foydalanuvchi topilmadi.")
+                return
+            now = datetime.now(timezone.utc)
+            if user.vip_until and user.vip_until > now:
+                user.vip_until = user.vip_until + timedelta(days=30)
+            else:
+                user.vip_until = now + timedelta(days=30)
+            await session.commit()
+        await message.answer("✅ <b>VIP User faollashtirildi!</b>\n\nMuddat: <b>30 kun</b>")
+        return
+
     if not payload.startswith("diamonds:"):
         return
     
@@ -1069,6 +1100,13 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
+            return
     gifts = await _fetch_sorted_gifts(callback.bot)
     if not gifts:
         await callback.message.edit_text(
@@ -1096,6 +1134,13 @@ async def gift_buy_confirm(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
+            return
     gift_id = callback.data.split(":", maxsplit=2)[2]
     gifts = await _fetch_sorted_gifts(callback.bot)
     target = next((g for g in gifts if getattr(g, "id", None) == gift_id), None)
@@ -1125,7 +1170,14 @@ async def gift_confirm(callback: CallbackQuery, engine: GameEngine) -> None:
         return
     gift_id = callback.data.split(":", maxsplit=2)[2]
 
-    # Re-fetch gift to validate price at confirm time.
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
+            return
+
     gifts = await _fetch_sorted_gifts(callback.bot)
     target = next((g for g in gifts if getattr(g, "id", None) == gift_id), None)
     if target is None:
@@ -1212,6 +1264,13 @@ async def premium_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
+            return
     text = (
         "👑 <b>Telegram Premium</b>\n\n"
         "Almazingizni Telegram Premium obunasiga almashtiring.\n"
@@ -1229,6 +1288,13 @@ async def premium_buy_confirm(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
+            return
     raw = callback.data.split(":", maxsplit=3)[3]
     try:
         months = int(raw)
@@ -1270,13 +1336,12 @@ async def premium_confirm_buy(callback: CallbackQuery) -> None:
         return
     stars, diamonds_cost = plan
 
-    # Atomically deduct diamonds.
     async with SessionLocal() as session:
         user = (await session.execute(
             select(User).where(User.telegram_id == callback.from_user.id)
         )).scalar_one_or_none()
-        if user is None:
-            await callback.answer("Avval botga /start bosing.", show_alert=True)
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Bu bo'lim faqat VIP User uchun. Do'kondan VIP User faollashtiring.", show_alert=True)
             return
         if (user.diamonds or 0) < diamonds_cost:
             await callback.answer(
@@ -1340,3 +1405,83 @@ async def premium_confirm_buy(callback: CallbackQuery) -> None:
         )
     except TelegramBadRequest:
         pass
+
+
+# ===== VIP User =====
+def _user_is_vip(user: User) -> bool:
+    if user.vip_until is None:
+        return False
+    return user.vip_until > datetime.now(timezone.utc)
+
+
+@router.callback_query(F.data == "vip:open")
+async def vip_open(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    text = (
+        "👑 <b>VIP User</b>\n\n"
+        "VIP User faollashtirish orqali siz:\n"
+        "• Telegram sovg'alarini sotib olish\n"
+        "• Telegram Premium sotib olish\n"
+        "imkoniyatiga ega bo'lasiz.\n\n"
+        "Muddat: <b>30 kun</b>\n"
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
+    )
+    try:
+        await callback.message.edit_text(text, reply_markup=vip_keyboard())
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data == "vip:buy:diamonds")
+async def vip_buy_diamonds(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        if (user.diamonds or 0) < 30:
+            await callback.answer("Balans yetarli emas. Kerak: 💎 30", show_alert=True)
+            return
+        user.diamonds -= 30
+        now = datetime.now(timezone.utc)
+        if user.vip_until and user.vip_until > now:
+            user.vip_until = user.vip_until + timedelta(days=30)
+        else:
+            user.vip_until = now + timedelta(days=30)
+        _record_diamond_transaction(
+            session,
+            user,
+            -30,
+            "vip_activation",
+            note="VIP User 30 kun",
+        )
+        await session.commit()
+    await callback.answer("✅ VIP User faollashtirildi!", show_alert=True)
+
+
+@router.callback_query(F.data == "vip:buy:stars")
+async def vip_buy_stars(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    try:
+        await callback.bot.send_invoice(
+            chat_id=callback.from_user.id,
+            title="👑 VIP User",
+            description="VIP User 30 kunlik faollashtirish",
+            payload=f"vip:{callback.from_user.id}",
+            currency="XTR",
+            prices=[LabeledPrice(label="👑 VIP User 30 kun", amount=190)],
+            provider_token="",
+        )
+        await callback.answer("Invoice jo'natildi!")
+    except Exception as e:
+        await callback.answer(f"Invoice yaratilmadi: {str(e)}", show_alert=True)
