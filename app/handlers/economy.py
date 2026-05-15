@@ -1029,7 +1029,18 @@ PREMIUM_BY_MONTHS: dict[int, tuple[int, int]] = {
 }
 
 
+GIFT_FIXED_PRICES: dict[int, int] = {
+    15: 8,
+    25: 11,
+    50: 15,
+    100: 28,
+}
+
+
 def _diamonds_for_stars(stars: int) -> int:
+    fixed = GIFT_FIXED_PRICES.get(stars)
+    if fixed is not None:
+        return fixed
     import math
     return max(1, math.ceil(int(stars) / STARS_PER_DIAMOND))
 

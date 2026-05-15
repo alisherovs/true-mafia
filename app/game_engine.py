@@ -363,11 +363,6 @@ class GameEngine:
             f"{self._format_alive_players(alive_players)}\n\n"
             f"{groups_text}"
         )
-        if game is not None:
-            sleeping = [p for p in alive_players if self._is_day_blocked(p, game)]
-            if sleeping:
-                sleep_names = ", ".join(self._tg_mention(p.telegram_id, p.display_name) for p in sleeping)
-                result += f"\n\n😴 <b>Uxlayotganlar:</b> {sleep_names}"
         result += f"\n\n<b>Jami:</b> {len(alive_players)}"
         return result
 
@@ -2246,9 +2241,7 @@ class GameEngine:
                         target.blocked_until_day = game.day_number + 1
                     actor_role_value = Role(actor.role)
                     if actor_role_value == Role.MISTRESS:
-                        protected_group_lines.append(
-                            "💃 Bu tunda Kezuvchi mehmonga bordi va kimnidir uxlatib qo'ydi."
-                        )
+                        pass
                     elif actor_role_value == Role.CROOK:
                         protected_group_lines.append(
                             "🤹🏻 Bu tunda Qaroqchi kimnidir chalg'itib qo'ydi."

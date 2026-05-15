@@ -88,6 +88,7 @@ async def _ensure_lightweight_columns(conn) -> None:
             "wins": "INTEGER DEFAULT 0",
             "total_games": "INTEGER DEFAULT 0",
             "play_locked_until": "DATETIME",
+            "vip_until": "DATETIME",
         },
     )
     await add_missing_columns(

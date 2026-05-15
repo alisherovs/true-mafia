@@ -42,6 +42,7 @@ class User(Base):
     wins: Mapped[int] = mapped_column(Integer, default=0)
     total_games: Mapped[int] = mapped_column(Integer, default=0)
     play_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    vip_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

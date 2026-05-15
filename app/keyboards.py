@@ -236,6 +236,7 @@ def go_group_keyboard(chat_id: int, group_url: Optional[str] = None) -> InlineKe
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Guruhga o'tish", url=url)],
+            [InlineKeyboardButton(text="🛒 Do'kon", callback_data="shop:open")],
         ]
     )
 
@@ -447,6 +448,14 @@ def _pick_gift_emoji(sticker_emoji: str | None, stars: int) -> str:
     return fallback
 
 
+_GIFT_FIXED_PRICES: dict[int, int] = {
+    15: 8,
+    25: 11,
+    50: 15,
+    100: 28,
+}
+
+
 def gift_shop_keyboard(gifts: list[object], stars_per_diamond: int) -> InlineKeyboardMarkup:
     import math
     rows: list[list[InlineKeyboardButton]] = []
@@ -455,7 +464,7 @@ def gift_shop_keyboard(gifts: list[object], stars_per_diamond: int) -> InlineKey
         stars = int(getattr(gift, "star_count", 0) or 0)
         if not gift_id or stars <= 0:
             continue
-        diamonds = max(1, math.ceil(stars / stars_per_diamond))
+        diamonds = _GIFT_FIXED_PRICES.get(stars) or max(1, math.ceil(stars / stars_per_diamond))
         remaining = getattr(gift, "remaining_count", None)
         total = getattr(gift, "total_count", None)
         suffix = ""
