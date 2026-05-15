@@ -272,3 +272,16 @@ async def _ensure_lightweight_columns(conn) -> None:
             "ON night_actions(game_id, night_number, actor_telegram_id)"
         )
     )
+
+    # Migrate old group_settings table if it has 'id' column (old schema)
+    gs_cols = await table_columns("group_settings")
+    if gs_cols and "id" in gs_cols:
+        await conn.execute(text("DROP TABLE IF EXISTS group_settings"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_role_settings"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_weapon_settings"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_command_permissions"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_chat_permissions"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_time_settings"))
+        await conn.execute(text("DROP TABLE IF EXISTS group_extra_settings"))
+        from app.database import Base as _Base
+        await conn.run_sync(_Base.metadata.create_all)

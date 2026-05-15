@@ -26,11 +26,12 @@ from app.keyboards import (
     role_shop_keyboard,
     shop_keyboard,
 )
-from app.models import DiamondGiveaway, DiamondTransaction, User
+from app.models import DiamondGiveaway, DiamondTransaction, DollarTransaction, User
 from app.texts import t
 
 router = Router()
 DIAMOND_EMOJI_ID = "5427168083074628963"
+DOLLAR_EMOJI_ID = "5409048419211682843"
 LARGE_TRANSFER_THRESHOLD = 5000
 
 
@@ -454,6 +455,111 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
         await message.reply(
             _large_transfer_notice(
                 currency_icon="<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>",
+                amount=amount,
+                sender_name=sender_display,
+                sender_id=sender.telegram_id,
+                target_name=target_display,
+                target_id=target.telegram_id,
+                chat_title=message.chat.title or "Guruh",
+                chat_id=message.chat.id,
+            )
+        )
+    try:
+        await message.bot.send_message(target_id, **transfer_kwargs)
+    except Exception:
+        pass
+
+
+def _dollar_transfer_kwargs(
+    sender_id: int,
+    sender_name: str,
+    target_id: int,
+    target_name: str,
+    amount: int,
+    note: str,
+) -> dict:
+    parts = [
+        _user_text_link(sender_id, sender_name),
+        " ➔ ",
+        _user_text_link(target_id, target_name),
+        ": ",
+        CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID),
+        f" {amount} dollar",
+    ]
+    if note and note != "-":
+        parts.append(f"\nIzoh: {note}")
+    return Text(*parts).as_kwargs()
+
+
+@router.message(Command("money"))
+async def cmd_money(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    sender = await engine.ensure_user(message.from_user)
+    lang = sender.language
+
+    target_id: Optional[int] = None
+    amount: Optional[int] = None
+    note = ""
+    raw_args = (command.args or "").strip()
+
+    if message.reply_to_message and message.reply_to_message.from_user and command.args:
+        parts = command.args.split(maxsplit=1)
+        if parts and parts[0].isdigit():
+            target_id = message.reply_to_message.from_user.id
+            amount = int(parts[0])
+            note = parts[1].strip() if len(parts) > 1 else ""
+    elif command.args:
+        parts = command.args.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            amount = int(parts[1])
+            raw_target = parts[0].strip()
+            note = " ".join(parts[2:]).strip()
+            if raw_target.startswith("@"):
+                username = raw_target[1:]
+                async with SessionLocal() as session:
+                    target = (await session.execute(select(User).where(User.username == username))).scalar_one_or_none()
+                    target_id = target.telegram_id if target else None
+            elif raw_target.isdigit():
+                target_id = int(raw_target)
+
+    if target_id is None or amount is None:
+        return
+
+    if target_id == sender.telegram_id:
+        await message.reply("O'zingizga yubora olmaysiz.")
+        return
+
+    async with SessionLocal() as session:
+        target = (await session.execute(select(User).where(User.telegram_id == target_id))).scalar_one_or_none()
+        if target is None:
+            await message.reply("Target foydalanuvchi topilmadi. U /start qilishi kerak.")
+            return
+
+    ok, status = await engine.transfer_dollars(sender.telegram_id, target_id, amount)
+    if not ok:
+        if "Balans" in status:
+            await message.reply(t(lang, "give_not_enough"))
+        else:
+            await message.reply(status)
+        return
+
+    sender_display = sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+    target_display = target.display_name or str(target.telegram_id)
+    note_text = note if note else "-"
+    transfer_kwargs = _dollar_transfer_kwargs(
+        sender.telegram_id,
+        sender_display,
+        target.telegram_id,
+        target_display,
+        amount,
+        note_text,
+    )
+    await message.reply(**transfer_kwargs)
+    if message.chat.type != "private" and amount >= LARGE_TRANSFER_THRESHOLD:
+        await message.reply(
+            _large_transfer_notice(
+                currency_icon=f'<tg-emoji emoji-id="{DOLLAR_EMOJI_ID}">💵</tg-emoji>',
                 amount=amount,
                 sender_name=sender_display,
                 sender_id=sender.telegram_id,

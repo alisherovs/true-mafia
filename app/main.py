@@ -36,6 +36,27 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
         return result
 
 
+class ChatRestrictionMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.chat.type != "private" and event.from_user:
+            engine: GameEngine = data["engine"]
+            allowed = await engine.check_chat_write_permission(
+                event.bot, event.chat.id, event.from_user.id
+            )
+            if not allowed:
+                try:
+                    await event.delete()
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    pass
+                return None
+        return await handler(event, data)
+
+
 async def global_error_handler(event: ErrorEvent) -> bool:
     exc = event.exception
     if isinstance(exc, TelegramForbiddenError):
@@ -119,6 +140,7 @@ async def main() -> None:
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
     dp.message.middleware(DeleteGroupCommandMiddleware())
+    dp.message.middleware(ChatRestrictionMiddleware())
     dp.errors.register(global_error_handler)
 
     engine = GameEngine(settings=settings, session_factory=SessionLocal)

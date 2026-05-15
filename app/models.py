@@ -345,6 +345,23 @@ class DiamondTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DollarTransaction(Base):
+    __tablename__ = "dollar_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger)
+    user_name: Mapped[str] = mapped_column(String(255), default="User")
+    amount: Mapped[int] = mapped_column(Integer)
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    action: Mapped[str] = mapped_column(String(64))
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    counterparty_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    counterparty_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    chat_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class BotSetting(Base):
     __tablename__ = "bot_settings"
 
@@ -374,3 +391,106 @@ class GroupBlacklist(Base):
     blocked_by: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class GroupSettings(Base):
+    __tablename__ = "group_settings"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    giveaway_diamond: Mapped[int] = mapped_column(Integer, default=0)
+    giveaway_protection: Mapped[int] = mapped_column(Integer, default=0)
+    leave_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    game_mode: Mapped[str] = mapped_column(String(32), default="normal")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupRoleSettings(Base):
+    __tablename__ = "group_role_settings"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "role_key", name="uq_group_role"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    role_key: Mapped[str] = mapped_column(String(64))
+    is_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupWeaponSettings(Base):
+    __tablename__ = "group_weapon_settings"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "weapon_key", name="uq_group_weapon"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    weapon_key: Mapped[str] = mapped_column(String(64))
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupCommandPermissions(Base):
+    __tablename__ = "group_command_permissions"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "command_key", name="uq_group_command"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    command_key: Mapped[str] = mapped_column(String(64))
+    permission_level: Mapped[str] = mapped_column(String(32), default="user")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupChatPermissions(Base):
+    __tablename__ = "group_chat_permissions"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "phase", name="uq_group_chat_phase"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    phase: Mapped[str] = mapped_column(String(32))
+    write_permission: Mapped[str] = mapped_column(String(32), default="all")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupTimeSettings(Base):
+    __tablename__ = "group_time_settings"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "time_key", name="uq_group_time"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    time_key: Mapped[str] = mapped_column(String(64))
+    seconds: Mapped[int] = mapped_column(Integer, default=60)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GroupExtraSettings(Base):
+    __tablename__ = "group_extra_settings"
+    __table_args__ = (
+        UniqueConstraint("chat_id", "setting_key", name="uq_group_extra"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    setting_key: Mapped[str] = mapped_column(String(64))
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

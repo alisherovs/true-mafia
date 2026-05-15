@@ -781,3 +781,261 @@ def premium_groups_keyboard(groups: list[object]) -> InlineKeyboardMarkup:
         )
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _btn(text: str, callback_data: str) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback_data)
+
+
+def _back_btn(back_to: str) -> InlineKeyboardButton:
+    return _btn("⬅️ Orqaga", f"settings:back:{back_to}")
+
+
+def _exit_btn() -> InlineKeyboardButton:
+    return _btn("❌ Chiqish", "settings:exit")
+
+
+def _back_exit_row(back_to: str) -> list[InlineKeyboardButton]:
+    return [_back_btn(back_to), _exit_btn()]
+
+
+def settings_main_keyboard() -> InlineKeyboardMarkup:
+    items = [
+        ("🎁 Giveawaylar", "settings:giveaway"),
+        ("⏰ Vaqtlar", "settings:times"),
+        ("🎭 Rollar", "settings:roles"),
+        ("🔫 Qurollar", "settings:weapons"),
+        ("🚪 Leave qilish", "settings:leave"),
+        ("🔐 Buyruqlarga ruxsatlar", "settings:permissions"),
+        ("✍️ Yozishni cheklash", "settings:chat"),
+        ("🎮 O'yin modi", "settings:mode"),
+        ("⚙️ Boshqa sozlamalar", "settings:extra"),
+        ("📊 Boshqaruv paneli", "settings:panel"),
+    ]
+    rows = [[_btn(label, cb)] for label, cb in items]
+    rows.append([_exit_btn()])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_giveaway_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("💎 Olmoslar", "settings:giveaway:diamond")],
+        [_btn("🛡 Himoyalar", "settings:giveaway:protection")],
+        _back_exit_row("main"),
+    ])
+
+
+def settings_giveaway_amount_keyboard(gtype: str, current: int = 0) -> InlineKeyboardMarkup:
+    amounts = [0, 10, 20, 30, 40, 50]
+    rows = []
+    for a in amounts:
+        mark = "✅ " if a == current else ""
+        rows.append([_btn(f"{mark}{a}", f"settings:giveaway:{gtype}:{a}")])
+    rows.append(_back_exit_row("giveaway"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_roles_keyboard(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
+    roles = [
+        ("🤵🏻 Don", "don"),
+        ("🤵🏼 Mafia", "mafia"),
+        ("🕵🏼 Komissar Katani", "commissar_katani"),
+        ("👨🏼‍⚕️ Doktor", "doctor"),
+        ("👮🏼 Serjant", "sergeant"),
+        ("🎖 Janob", "gentleman"),
+        ("👨🏼 Tinch aholi", "citizen"),
+        ("🧙‍♂️ Daydi", "wanderer"),
+        ("💃 Kezuvchi", "traveler"),
+        ("👨🏼‍💼 Advokat", "lawyer"),
+        ("🤦 Suidsid", "suicide"),
+        ("🤞 Omadli", "lucky"),
+        ("🐺 Bo'ri", "wolf"),
+        ("🔪 Qotil", "killer"),
+        ("🥷 Yollanma qotil", "mercenary_killer"),
+        ("💣 Afsungar", "sorcerer"),
+        ("🃏 Aferist", "swindler"),
+        ("🧙 Sehrgar", "magician"),
+        ("🧟 G'azabkor", "angry"),
+        ("📰 Jurnalist", "journalist"),
+        ("😎 Sotqin", "traitor"),
+        ("🧪 Kimyogar", "chemist"),
+        ("🛡 Qo'riqchi", "guard"),
+        ("🃏 Xazilkash", "joker"),
+    ]
+    rows = []
+    for label, key in roles:
+        allowed = (states or {}).get(key, True)
+        mark = "✅" if allowed else "🚫"
+        rows.append([_btn(f"{mark} {label}", f"settings:role:{key}")])
+    rows.append(_back_exit_row("main"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_role_toggle_keyboard(role_key: str, is_allowed: bool = True) -> InlineKeyboardMarkup:
+    ban_mark = "✅ " if not is_allowed else ""
+    allow_mark = "✅ " if is_allowed else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"{ban_mark}🚫 Taqiqlash", f"settings:role:{role_key}:ban")],
+        [_btn(f"{allow_mark}✅ Ruxsat berish", f"settings:role:{role_key}:allow")],
+        _back_exit_row("roles"),
+    ])
+
+
+def settings_weapons_keyboard(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
+    weapons = [
+        ("🛡 Himoya", "protection"),
+        ("📁 Hujjat", "document"),
+        ("🚨 Qotildan himoya", "killer_protection"),
+        ("⚖️ Ovozdan himoya", "vote_protection"),
+        ("🔫 Miltiq", "gun"),
+        ("💊 Doridan himoya", "medicine_protection"),
+        ("📦 Sirpanishdan himoya", "slip_protection"),
+        ("🎭 Maska", "mask"),
+        ("🥷 Geroy", "hero"),
+        ("🃏 Faol rol", "active_role"),
+    ]
+    rows = []
+    for label, key in weapons:
+        enabled = (states or {}).get(key, True)
+        mark = "✅" if enabled else "🚫"
+        rows.append([_btn(f"{mark} {label}", f"settings:weapon:{key}")])
+    rows.append(_back_exit_row("main"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_weapon_toggle_keyboard(weapon_key: str, is_enabled: bool = True) -> InlineKeyboardMarkup:
+    on_mark = "✅ " if is_enabled else ""
+    off_mark = "✅ " if not is_enabled else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"{on_mark}✅ Yoqish", f"settings:weapon:{weapon_key}:on")],
+        [_btn(f"{off_mark}🚫 O'chirish", f"settings:weapon:{weapon_key}:off")],
+        _back_exit_row("weapons"),
+    ])
+
+
+def settings_leave_keyboard(current: bool = True) -> InlineKeyboardMarkup:
+    on_mark = "✅ " if current else ""
+    off_mark = "✅ " if not current else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"{on_mark}Ha - Ruxsat", "settings:leave:on")],
+        [_btn(f"{off_mark}Yo'q - Taqiq", "settings:leave:off")],
+        _back_exit_row("main"),
+    ])
+
+
+PERMISSION_ICONS = {"owner": "👑", "admin": "🛡", "user": "👥"}
+
+
+def settings_permissions_keyboard(states: dict[str, str] | None = None) -> InlineKeyboardMarkup:
+    commands = [
+        ("start", "start"),
+        ("stop", "stop"),
+        ("game", "game"),
+        ("Top 1", "top_1"),
+        ("Top 7", "top_7"),
+        ("Top 30", "top_30"),
+        ("Taqdirlash Top 1", "reward_top_1"),
+        ("Taqdirlash Top 7", "reward_top_7"),
+        ("Taqdirlash Top 30", "reward_top_30"),
+    ]
+    rows = []
+    for label, key in commands:
+        level = (states or {}).get(key, "user")
+        icon = PERMISSION_ICONS.get(level, "👥")
+        rows.append([_btn(f"{icon} {label}", f"settings:permission:{key}")])
+    rows.append(_back_exit_row("main"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_permission_level_keyboard(cmd_key: str, current: str = "user") -> InlineKeyboardMarkup:
+    levels = [("👑 Ega", "owner"), ("🛡 Admin", "admin"), ("👥 Obunachilar", "user")]
+    rows = []
+    for label, val in levels:
+        mark = "✅ " if val == current else ""
+        rows.append([_btn(f"{mark}{label}", f"settings:permission:{cmd_key}:{val}")])
+    rows.append(_back_exit_row("permissions"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_chat_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🌙 Tun", "settings:chat:night")],
+        [_btn("☀️ Kun", "settings:chat:day")],
+        _back_exit_row("main"),
+    ])
+
+
+def settings_chat_phase_keyboard(phase: str, current: str = "") -> InlineKeyboardMarkup:
+    options = [
+        ("👑 Faqat Ega", "owner"),
+        ("🛡 Faqat Adminlar", "admin"),
+        ("💚 Faqat tirik ishtirokchilar", "alive_players"),
+        ("🎮 Faqat ishtirokchilar", "players"),
+        ("👥 Hamma", "all"),
+    ]
+    rows = []
+    for label, val in options:
+        mark = "✅ " if val == current else ""
+        rows.append([_btn(f"{mark}{label}", f"settings:chat:{phase}:{val}")])
+    rows.append(_back_exit_row("chat"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_times_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn("🌙 Tun vaqti", "settings:time:night_time")],
+        [_btn("☀️ Kun vaqti", "settings:time:day_time")],
+        [_btn("🗳 Ovoz berish", "settings:time:vote_time")],
+        [_btn("⏳ Ro'yxatdan o'tish", "settings:time:registration_time")],
+        _back_exit_row("main"),
+    ])
+
+
+def settings_time_value_keyboard(time_key: str, current: int = 0) -> InlineKeyboardMarkup:
+    values = [30, 60, 90, 120, 180, 300]
+    rows = []
+    for v in values:
+        mark = "✅ " if v == current else ""
+        rows.append([_btn(f"{mark}{v} soniya", f"settings:time:{time_key}:{v}")])
+    rows.append(_back_exit_row("times"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_mode_keyboard(current: str = "normal") -> InlineKeyboardMarkup:
+    modes = [("🎲 Oddiy", "normal"), ("⚡ Tezkor", "fast"), ("🛡 Himoyali", "protected"), ("🔥 Qiyin", "hard")]
+    rows = []
+    for label, val in modes:
+        mark = "✅ " if val == current else ""
+        rows.append([_btn(f"{mark}{label}", f"settings:mode:{val}")])
+    rows.append(_back_exit_row("main"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_extra_keyboard(states: dict[str, bool] | None = None) -> InlineKeyboardMarkup:
+    extras = [
+        ("🔔 Bildirishnoma", "notifications"),
+        ("🗑 Avto tozalash", "auto_clean"),
+        ("📌 Pin xabar", "pin_message"),
+        ("📢 Natija e'loni", "result_announce"),
+    ]
+    rows = []
+    for label, key in extras:
+        enabled = (states or {}).get(key, True)
+        mark = "✅" if enabled else "🚫"
+        rows.append([_btn(f"{mark} {label}", f"settings:extra:{key}")])
+    rows.append(_back_exit_row("main"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_extra_toggle_keyboard(extra_key: str, is_enabled: bool = True) -> InlineKeyboardMarkup:
+    on_mark = "✅ " if is_enabled else ""
+    off_mark = "✅ " if not is_enabled else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"{on_mark}✅ Yoqish", f"settings:extra:{extra_key}:on")],
+        [_btn(f"{off_mark}🚫 O'chirish", f"settings:extra:{extra_key}:off")],
+        _back_exit_row("extra"),
+    ])
+
+
+def settings_panel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[_back_exit_row("main")])

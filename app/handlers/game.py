@@ -51,6 +51,11 @@ async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str 
 
 @router.message(Command("game"))
 async def cmd_game(message: Message, engine: GameEngine) -> None:
+    if message.from_user and message.chat.type != "private":
+        ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "game")
+        if not ok:
+            await message.reply(err)
+            return
     await _start_game_with_mode(message, engine)
 
 
@@ -127,15 +132,15 @@ async def cmd_stop(message: Message, engine: GameEngine) -> None:
         await message.answer(t(lang, "command_in_group"))
         return
 
+    ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "stop")
+    if not ok:
+        await message.reply(err)
+        return
+
     game = await engine.active_game_for_chat(message.chat.id)
     lang = await engine.get_group_language(message.chat.id)
     if game is None:
         await message.answer(t(lang, "no_active_game"))
-        return
-
-    allowed = await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id, game.creator_telegram_id)
-    if not allowed:
-        await message.answer(t(lang, "no_permission"))
         return
 
     ok, text = await engine.stop_game(message.bot, game.id)

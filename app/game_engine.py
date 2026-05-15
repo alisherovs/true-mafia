@@ -41,6 +41,7 @@ from app.keyboards import (
 from app.models import (
     BotSetting,
     DiamondTransaction,
+    DollarTransaction,
     Game,
     GameLog,
     GamePlayer,
@@ -87,6 +88,7 @@ from app.hero import (
     safe_hero_name,
     sanitize_hero_name,
 )
+from app.group_settings import GroupSettingsManager
 from app.scheduler import scheduler
 from app.texts import t
 
@@ -492,14 +494,6 @@ class GameEngine:
         name = self._tg_mention(player.telegram_id, player.display_name)
         return f"O'limidan oldin {name} qichqirganini eshitdi:\n{safe_words}"
 
-    def _sleep_death_line(self, player: GamePlayer) -> str:
-        name = self._tg_mention(player.telegram_id, player.display_name)
-        role = role_label(player.role)
-        return (
-            f"Aholidan kimdir {role} {name} o'limidan oldin:\n"
-            '"Men o\'yin paytida boshqa uxlamayma-a-a-a-a-a-an!" - deb qichqirganini eshitgan.'
-        )
-
     def _apply_role_successions(self, players: list[GamePlayer], dead_ids: set[int]) -> list[tuple[str, int, Role]]:
         successions: list[tuple[str, int, Role]] = []
         dead_players = [player for player in players if player.telegram_id in dead_ids]
@@ -767,6 +761,12 @@ class GameEngine:
                         seconds=30,
                         registration_ends_at=active.registration_ends_at.isoformat(),
                     )
+                    old_msg_id = active.lobby_message_id
+                    if old_msg_id:
+                        try:
+                            await bot.delete_message(chat_id, old_msg_id)
+                        except (TelegramBadRequest, TelegramForbiddenError):
+                            pass
                     text = await self._build_lobby_text(session, active.id, lang, ended=False)
                     msg = await bot.send_message(
                         chat_id,
@@ -1062,6 +1062,11 @@ class GameEngine:
             lang = await self.get_group_language(game.chat_id)
             chat_id = game.chat_id
 
+            gsm = GroupSettingsManager(self.session_factory)
+            gs = await gsm.get_settings(chat_id)
+            if not gs.leave_allowed:
+                return False, "❌ Bu guruhda /leave buyrug'i o'chirilgan."
+
             player = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -1290,6 +1295,13 @@ class GameEngine:
                     disabled_roles.add(Role(user.next_game_disabled_role))
                 except ValueError:
                     user.next_game_disabled_role = None
+            gsm = GroupSettingsManager(self.session_factory)
+            group_disabled_role_keys = await gsm.get_disabled_roles(game.chat_id)
+            for rk in group_disabled_role_keys:
+                try:
+                    disabled_roles.add(Role(rk))
+                except ValueError:
+                    pass
             roles = build_role_set(len(players), role_preset, disabled_roles=disabled_roles)
             logger.info(
                 "role_generation mode=%s player_count=%s selected_roles=%s disabled_roles=%s",
@@ -2473,6 +2485,8 @@ class GameEngine:
                     if user is None or cause is None:
                         continue
                     if cause == "killer" and user.use_killer_protection is not False and (user.killer_protection or 0) > 0:
+                        if not await self.check_weapon_enabled(game.chat_id, "killer_protection"):
+                            continue
                         user.killer_protection -= 1
                         dead.discard(victim_id)
                         death_causes.pop(victim_id, None)
@@ -2487,6 +2501,8 @@ class GameEngine:
                             remaining_killer_protection=user.killer_protection,
                         )
                     elif cause in {"mafia", "commissar"} and user.use_protection is not False and (user.protection or 0) > 0:
+                        if not await self.check_weapon_enabled(game.chat_id, "protection"):
+                            continue
                         user.protection -= 1
                         dead.discard(victim_id)
                         mafia_dead.discard(victim_id)
@@ -3260,7 +3276,6 @@ class GameEngine:
         votes: list[Vote],
     ) -> None:
         game_id = game.id
-        chat_id = game.chat_id
 
         active_ids = {action.actor_telegram_id for action in (
                 await session.execute(
@@ -3300,31 +3315,12 @@ class GameEngine:
             for player in alive_after_vote
             if self._is_day_blocked(player, game)
         )
-        sleep_lines: list[str] = []
-        inactivity_exempt_roles = {Role.DON, Role.KILLER, Role.SORCERER, Role.SERGEANT}
         for player in alive_after_vote:
             if player.telegram_id in active_ids:
                 player.inactive_rounds = 0
-                continue
-            if player.role and Role(player.role) in inactivity_exempt_roles:
-                player.inactive_rounds = 0
-                continue
-            player.inactive_rounds = (player.inactive_rounds or 0) + 1
-            if player.inactive_rounds >= 2:
-                player.alive = False
-                player.death_day = game.day_number
-                self._add_game_log(
-                    session,
-                    game,
-                    "player_removed_for_inactivity",
-                    actor=player,
-                    inactive_rounds=player.inactive_rounds,
-                )
-                sleep_lines.append(self._sleep_death_line(player))
+            else:
+                player.inactive_rounds = (player.inactive_rounds or 0) + 1
         await session.commit()
-
-        for line in sleep_lines:
-            await bot.send_message(chat_id, line)
 
     async def confirm_hang(
         self,
@@ -4934,6 +4930,63 @@ class GameEngine:
         except TelegramBadRequest:
             return False
 
+    async def check_command_permission(self, bot: Bot, chat_id: int, user_id: int, command_key: str) -> tuple[bool, str]:
+        gsm = GroupSettingsManager(self.session_factory)
+        level = await gsm.get_command_permission(chat_id, command_key)
+        if level == "user":
+            return True, ""
+        if level == "admin":
+            if await self.is_admin_or_creator(bot, chat_id, user_id):
+                return True, ""
+            return False, "❌ Sizda bu buyruqni ishlatish huquqi yo'q."
+        if level == "owner":
+            if user_id == self.settings.owner_id:
+                return True, ""
+            return False, "❌ Sizda bu buyruqni ishlatish huquqi yo'q."
+        return True, ""
+
+    async def check_chat_write_permission(self, bot: Bot, chat_id: int, user_id: int) -> bool:
+        active = await self.active_game_for_chat(chat_id)
+        if active is None or active.status != GameStatus.ACTIVE.value:
+            return True
+        phase = "night" if active.phase == GamePhase.NIGHT.value else "day"
+        gsm = GroupSettingsManager(self.session_factory)
+        permission = await gsm.get_chat_permission(chat_id, phase)
+        if permission == "all":
+            return True
+        if permission == "owner":
+            return user_id == self.settings.owner_id
+        if permission == "admin":
+            return await self.is_admin_or_creator(bot, chat_id, user_id)
+        if permission in ("alive_players", "players"):
+            async with self.session_factory() as session:
+                player = (
+                    await session.execute(
+                        select(GamePlayer).where(
+                            GamePlayer.game_id == active.id,
+                            GamePlayer.telegram_id == user_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if player is None:
+                    return False
+                if permission == "alive_players":
+                    return bool(player.alive)
+                return True
+        return True
+
+    async def check_weapon_enabled(self, chat_id: int, weapon_key: str) -> bool:
+        gsm = GroupSettingsManager(self.session_factory)
+        return await gsm.get_weapon_enabled(chat_id, weapon_key)
+
+    async def get_giveaway_settings(self, chat_id: int) -> dict:
+        gsm = GroupSettingsManager(self.session_factory)
+        gs = await gsm.get_settings(chat_id)
+        return {
+            "giveaway_diamond": gs.giveaway_diamond,
+            "giveaway_protection": gs.giveaway_protection,
+        }
+
     async def transfer_diamonds(self, from_user_id: int, to_user_id: int, amount: int) -> tuple[bool, str]:
         if amount <= 0:
             return False, "Miqdor musbat bo'lishi kerak."
@@ -4960,6 +5013,64 @@ class GameEngine:
                 amount,
                 "transfer_in",
                 note="Userdan almaz qabul qilindi",
+                counterparty=sender,
+            )
+            await session.commit()
+            return True, "ok"
+
+    @staticmethod
+    def _record_dollar_transaction(
+        session: AsyncSession,
+        user: User,
+        amount: int,
+        action: str,
+        *,
+        note: str = "",
+        counterparty: Optional[User] = None,
+        chat_id: Optional[int] = None,
+    ) -> None:
+        if amount == 0:
+            return
+        session.add(
+            DollarTransaction(
+                user_telegram_id=user.telegram_id,
+                user_name=(user.display_name or "User")[:255],
+                amount=int(amount),
+                balance_after=int(user.dollar or 0),
+                action=action[:64],
+                note=(note or None),
+                counterparty_telegram_id=counterparty.telegram_id if counterparty else None,
+                counterparty_name=(counterparty.display_name or "User")[:255] if counterparty else None,
+                chat_id=chat_id,
+            )
+        )
+
+    async def transfer_dollars(self, from_user_id: int, to_user_id: int, amount: int) -> tuple[bool, str]:
+        if amount <= 0:
+            return False, "Miqdor musbat bo'lishi kerak."
+        async with self.session_factory() as session:
+            sender = (await session.execute(select(User).where(User.telegram_id == from_user_id))).scalar_one_or_none()
+            receiver = (await session.execute(select(User).where(User.telegram_id == to_user_id))).scalar_one_or_none()
+            if sender is None or receiver is None:
+                return False, "Foydalanuvchi topilmadi."
+            if (sender.dollar or 0) < amount:
+                return False, "Balans yetarli emas."
+            sender.dollar -= amount
+            receiver.dollar += amount
+            self._record_dollar_transaction(
+                session,
+                sender,
+                -amount,
+                "transfer_out",
+                note="Userga dollar o'tkazma",
+                counterparty=receiver,
+            )
+            self._record_dollar_transaction(
+                session,
+                receiver,
+                amount,
+                "transfer_in",
+                note="Userdan dollar qabul qilindi",
                 counterparty=sender,
             )
             await session.commit()
@@ -6131,6 +6242,18 @@ class GameEngine:
         return group
 
     async def group_timeout(self, chat_id: int, field: str) -> int:
+        time_key_map = {
+            "registration_timeout": "registration_time",
+            "night_timeout": "night_time",
+            "day_discussion_timeout": "day_time",
+            "day_voting_timeout": "vote_time",
+        }
+        time_key = time_key_map.get(field)
+        if time_key:
+            gsm = GroupSettingsManager(self.session_factory)
+            seconds = await gsm.get_time_setting(chat_id, time_key)
+            if seconds > 0:
+                return seconds
         defaults = {
             "registration_timeout": self.settings.registration_timeout,
             "night_timeout": self.settings.night_timeout,
