@@ -213,6 +213,20 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Hazilkash",
         "Siz tunda bir kishini tanlaysiz va unga hazil qilasiz. U o'sha tunda hazilomus harakatlar qiladi.",
     ),
+    Role.HOJIAKA: RoleMeta(
+        Role.HOJIAKA,
+        Team.CITY,
+        "🕌",
+        "Hojiaka",
+        "Har tunda bir o'yinchiga ehson qilasiz: himoya buyumi, dollar yoki kamdan-kam olmos.",
+    ),
+    Role.MASHKA: RoleMeta(
+        Role.MASHKA,
+        Team.CITY,
+        "🧤",
+        "Mashka",
+        "Har tunda bitta o'yinchidan pul o'g'irlaysiz: ko'proq dollar, kamdan-kam 1 ta olmos.",
+    ),
 }
 
 
@@ -238,6 +252,8 @@ SHOP_ROLE_CATALOG: tuple[RoleShopItem, ...] = (
     RoleShopItem(Role.JOURNALIST, 500, "dollar"),
     RoleShopItem(Role.LAWYER, 500, "dollar"),
     RoleShopItem(Role.SORCERER, 500, "dollar"),
+    RoleShopItem(Role.HOJIAKA, 500, "dollar"),
+    RoleShopItem(Role.MASHKA, 500, "dollar"),
     RoleShopItem(Role.WOLF, 500, "dollar"),
     RoleShopItem(Role.BUM, 400, "dollar"),
     RoleShopItem(Role.JESTER, 300, "dollar"),
@@ -335,8 +351,40 @@ def _with_prankster(player_count: int, roles: list[Role]) -> list[Role]:
     return updated
 
 
+def _with_hojiaka(player_count: int, roles: list[Role]) -> list[Role]:
+    if player_count <= 14 or Role.HOJIAKA in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.HOJIAKA
+            return updated
+    updated[-1] = Role.HOJIAKA
+    return updated
+
+
+def _with_mashka(player_count: int, roles: list[Role]) -> list[Role]:
+    if player_count <= 14 or Role.MASHKA in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.MASHKA
+            return updated
+    updated[-1] = Role.MASHKA
+    return updated
+
+
 EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
-    count: _with_prankster(count, _with_miner(count, roles))
+    count: _with_mashka(
+        count,
+        _with_hojiaka(
+            count,
+            _with_prankster(count, _with_miner(count, roles)),
+        ),
+    )
     for count, roles in BASE_ROLE_TABLE.items()
 }
 
@@ -403,6 +451,8 @@ SUPER_ROLE_ORDER: tuple[Role, ...] = (
     Role.LAWYER,
     Role.PRANKSTER,
     Role.MAYOR,
+    Role.HOJIAKA,
+    Role.MASHKA,
     Role.ARSONIST,
     Role.SPY,
     Role.WATCHER,
@@ -441,6 +491,8 @@ MEGA_ROLE_ORDER: tuple[Role, ...] = (
     Role.MAFIA,
     Role.GUARD,
     Role.ARSONIST,
+    Role.HOJIAKA,
+    Role.MASHKA,
     Role.LAWYER,
     Role.PRANKSTER,
     Role.JUDGE,
@@ -512,12 +564,16 @@ NON_MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.KILLER,
     Role.WOLF,
     Role.PRANKSTER,
+    Role.HOJIAKA,
+    Role.MASHKA,
 )
 
 REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.COMMISSAR,
     Role.DOCTOR,
     Role.KILLER,
+    Role.HOJIAKA,
+    Role.MASHKA,
 )
 
 

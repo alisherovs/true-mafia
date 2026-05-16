@@ -67,6 +67,8 @@ class Role(str, Enum):
     MAQ = "maq"
     MINER = "miner"
     PRANKSTER = "prankster"
+    HOJIAKA = "hojiaka"
+    MASHKA = "mashka"
 
 
 class ActionType(str, Enum):
@@ -83,6 +85,8 @@ class ActionType(str, Enum):
     MINE = "mine"
     MINE_PROTECT = "mine_protect"
     PRANK = "prank"
+    GRANT = "grant"
+    STEAL = "steal"
     SKIP = "skip"
 
 

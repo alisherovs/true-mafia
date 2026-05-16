@@ -453,19 +453,6 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
         note_text,
     )
     await message.reply(**transfer_kwargs)
-    if message.chat.type != "private" and amount >= LARGE_TRANSFER_THRESHOLD:
-        await message.reply(
-            _large_transfer_notice(
-                currency_icon="<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji>",
-                amount=amount,
-                sender_name=sender_display,
-                sender_id=sender.telegram_id,
-                target_name=target_display,
-                target_id=target.telegram_id,
-                chat_title=message.chat.title or "Guruh",
-                chat_id=message.chat.id,
-            )
-        )
     try:
         await message.bot.send_message(target_id, **transfer_kwargs)
     except Exception:
@@ -558,19 +545,6 @@ async def cmd_money(message: Message, command: CommandObject, engine: GameEngine
         note_text,
     )
     await message.reply(**transfer_kwargs)
-    if message.chat.type != "private" and amount >= LARGE_TRANSFER_THRESHOLD:
-        await message.reply(
-            _large_transfer_notice(
-                currency_icon=f'<tg-emoji emoji-id="{DOLLAR_EMOJI_ID}">💵</tg-emoji>',
-                amount=amount,
-                sender_name=sender_display,
-                sender_id=sender.telegram_id,
-                target_name=target_display,
-                target_id=target.telegram_id,
-                chat_title=message.chat.title or "Guruh",
-                chat_id=message.chat.id,
-            )
-        )
     try:
         await message.bot.send_message(target_id, **transfer_kwargs)
     except Exception:

@@ -29,6 +29,10 @@ class DeleteGroupCommandMiddleware(BaseMiddleware):
     ) -> Any:
         result = await handler(event, data)
         if event.chat.type != "private" and event.text and event.text.startswith("/"):
+            if event.from_user:
+                engine: GameEngine = data["engine"]
+                if await engine.is_vip_user_active(event.from_user.id):
+                    return result
             try:
                 await event.delete()
             except (TelegramBadRequest, TelegramForbiddenError):

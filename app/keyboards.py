@@ -134,6 +134,8 @@ ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.HIRED_KILLER,
     Role.CROOK,
     Role.GUARD,
+    Role.HOJIAKA,
+    Role.MASHKA,
 )
 
 
@@ -238,7 +240,6 @@ def go_group_keyboard(chat_id: int, group_url: Optional[str] = None) -> InlineKe
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Guruhga o'tish", url=url)],
-            [InlineKeyboardButton(text="🛒 Do'kon", callback_data="shop:open")],
         ]
     )
 
@@ -255,6 +256,44 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
     ]
     rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sorcerer_hang_revenge_keyboard(
+    game_id: int,
+    sorcerer_id: int,
+    choices: list[tuple[int, str]],
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=name,
+                callback_data=f"sorhang:{game_id}:{sorcerer_id}:{target_id}",
+            )
+        ]
+        for target_id, name in choices
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def sorcerer_judgement_keyboard(
+    game_id: int,
+    sorcerer_id: int,
+    attacker_id: int,
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Kechirish",
+                    callback_data=f"sorjudge:{game_id}:{sorcerer_id}:{attacker_id}:forgive",
+                ),
+                InlineKeyboardButton(
+                    text="💀 Oldirish",
+                    callback_data=f"sorjudge:{game_id}:{sorcerer_id}:{attacker_id}:kill",
+                ),
+            ]
+        ]
+    )
 
 
 def miner_keyboard(game_id: int, actor_id: int, visited_mines: set[int] | None = None) -> InlineKeyboardMarkup:
@@ -301,6 +340,17 @@ def commissar_action_keyboard(game_id: int, actor_id: int, can_shoot: bool) -> I
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def commissar_target_keyboard(
+    action_key: str,
+    game_id: int,
+    actor_id: int,
+    choices: list[tuple[int, str]],
+) -> InlineKeyboardMarkup:
+    kb = target_keyboard(action_key, game_id, actor_id, choices)
+    kb.inline_keyboard.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"commissar:menu:{game_id}:{actor_id}")])
+    return kb
 
 
 def vote_keyboard(game_id: int, choices: list[tuple[int, str]]) -> InlineKeyboardMarkup:

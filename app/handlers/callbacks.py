@@ -141,6 +141,77 @@ async def action_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     await callback.answer(text, show_alert=not ok)
 
 
+@router.callback_query(F.data.startswith("sorhang:"))
+async def sorcerer_hang_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 4:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    _, game_id_raw, sorcerer_id_raw, target_id_raw = parts
+    try:
+        game_id = int(game_id_raw)
+        sorcerer_id = int(sorcerer_id_raw)
+        target_id = int(target_id_raw)
+    except ValueError:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    if callback.from_user.id != sorcerer_id:
+        await callback.answer("Bu tanlov faqat afsungar uchun.", show_alert=True)
+        return
+
+    ok, text = await engine.resolve_sorcerer_hang_revenge(
+        bot=callback.bot,
+        game_id=game_id,
+        sorcerer_id=sorcerer_id,
+        target_id=target_id,
+    )
+    if ok and callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+    await callback.answer(text, show_alert=not ok)
+
+
+@router.callback_query(F.data.startswith("sorjudge:"))
+async def sorcerer_judgement_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 6:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    _, game_id_raw, sorcerer_id_raw, attacker_id_raw, action = parts
+    try:
+        game_id = int(game_id_raw)
+        sorcerer_id = int(sorcerer_id_raw)
+        attacker_id = int(attacker_id_raw)
+    except ValueError:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    if callback.from_user.id != sorcerer_id:
+        await callback.answer("Bu tanlov faqat Sehrgar uchun.", show_alert=True)
+        return
+
+    ok, text = await engine.resolve_sorcerer_judgement(
+        bot=callback.bot,
+        game_id=game_id,
+        sorcerer_id=sorcerer_id,
+        attacker_id=attacker_id,
+        action=action,
+    )
+    if ok and callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+    await callback.answer(text, show_alert=not ok)
+
+
 @router.callback_query(F.data.startswith("commissar:"))
 async def commissar_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None:
@@ -161,7 +232,10 @@ async def commissar_callback(callback: CallbackQuery, engine: GameEngine) -> Non
         await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
         return
 
-    ok, text, keyboard = await engine.commissar_targets_keyboard(game_id, actor_id, action_key)
+    if action_key == "menu":
+        ok, text, keyboard = await engine.commissar_action_menu_keyboard(game_id, actor_id)
+    else:
+        ok, text, keyboard = await engine.commissar_targets_keyboard(game_id, actor_id, action_key)
     if not ok:
         await callback.answer(text, show_alert=True)
         return

@@ -25,6 +25,7 @@ from app.enums import ActionType, GamePhase, GameStatus, LogType, Role, Team
 from app.keyboards import (
     confirm_hang_keyboard,
     commissar_action_keyboard,
+    commissar_target_keyboard,
     go_private_keyboard,
     go_role_private_keyboard,
     go_vote_private_keyboard,
@@ -36,6 +37,8 @@ from app.keyboards import (
     lobby_keyboard,
     miner_keyboard,
     profile_dashboard_keyboard,
+    sorcerer_judgement_keyboard,
+    sorcerer_hang_revenge_keyboard,
     target_keyboard,
     vote_keyboard,
 )
@@ -156,6 +159,7 @@ class GameEngine:
         self._return_url_cache_ttl_seconds = 3600.0
         self._chat_permission_cache_ttl = 5.0
         self._cache_limit = 20000
+        self._pending_sorcerer_judgements: dict[tuple[int, int, int], tuple[float, str]] = {}
 
     def _monotonic(self) -> float:
         return asyncio.get_running_loop().time()
@@ -370,6 +374,8 @@ class GameEngine:
             return f"{base} Komissar Katani o'qidan halok bo'ldi..."
         if cause == "sorcerer":
             return f"{base} Afsungar qasosi bilan o'ldirildi..."
+        if cause == "mashka":
+            return f"{base} Mashka hujumi oqibatida halok bo'ldi..."
         if cause == "miner":
             return f"{base} o'lim koniga qulab tushdi..."
         return f"{base} vaxshiylarcha o'ldirildi..."
@@ -392,6 +398,8 @@ class GameEngine:
             visitor = "🕵🏼 Komissar Katani"
         elif cause == "sorcerer":
             visitor = "🧙‍ Sehrgar qasosi"
+        elif cause == "mashka":
+            visitor = "🧤 Mashka"
         elif cause == "miner":
             visitor = "👷 o'lim koni"
         else:
@@ -410,6 +418,8 @@ class GameEngine:
             return "🕵🏼 Komissar Katani"
         if cause == "sorcerer":
             return "🧙‍ Sehrgar qasosi"
+        if cause == "mashka":
+            return "🧤 Mashka"
         if cause == "miner":
             return "👷 o'lim koni"
         return "noma'lum mehmon"
@@ -467,13 +477,23 @@ class GameEngine:
         for line in night_activity_lines:
             add_once(line)
         if dead_players:
+            # Afsungar tunda o'ldirilgan va qasos olgan holatda:
+            # avval afsungarning o'limi, keyin qasos qurboni ko'rsatiladi.
+            ordered_dead_players = sorted(
+                dead_players,
+                key=lambda p: (
+                    0 if Role(p.role) == Role.SORCERER and death_causes.get(p.telegram_id) != "sorcerer"
+                    else 1 if death_causes.get(p.telegram_id) == "sorcerer"
+                    else 2
+                ),
+            )
             death_lines = [
                 self._death_story_line(
                     player,
                     death_causes.get(player.telegram_id),
                     death_visitors.get(player.telegram_id),
                 )
-                for player in dead_players
+                for player in ordered_dead_players
             ]
             add_once("\n\n".join(death_lines))
         else:
@@ -533,6 +553,10 @@ class GameEngine:
             return "👷 Konchi konlardan biriga yo'l oldi..."
         if role == Role.PRANKSTER:
             return "🧑🏻‍🦲 Hazilkash prank qilishga ketdi"
+        if role == Role.HOJIAKA:
+            return "🕌 Hojiaka ehson ulashish uchun yo'lga tushdi..."
+        if role == Role.MASHKA:
+            return "🧤 Mashka kimnidir hamyonini nishonga oldi..."
         if role == Role.SNITCH:
             return None
         return None
@@ -1283,6 +1307,7 @@ class GameEngine:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.REGISTRATION.value:
                 return
+            lobby_message_id = game.lobby_message_id
 
             group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
             min_players = max(4, group.min_players if group else self.settings.min_players)
@@ -1327,6 +1352,11 @@ class GameEngine:
 
         await self.update_lobby(bot, game_id, ended=True)
         chat_id = await self._game_chat_id(game_id)
+        if lobby_message_id is not None:
+            try:
+                await bot.unpin_chat_message(chat_id=chat_id, message_id=lobby_message_id)
+            except (TelegramBadRequest, TelegramForbiddenError):
+                pass
         await self._safe_send_message(bot, chat_id, t(lang, "registration_ended"))
         await self.assign_roles_and_notify(bot, game_id)
         await self._safe_send_message(
@@ -1534,6 +1564,10 @@ class GameEngine:
             return "😂 Kimga prank qilasiz?", target_keyboard("prank", game_id, player.telegram_id, targets)
         if role == Role.SNITCH:
             return "🤓 Kimni tekshirasiz?", target_keyboard("check", game_id, player.telegram_id, targets)
+        if role == Role.HOJIAKA:
+            return "🕌 Kimga ehson qilamiz?", target_keyboard("grant", game_id, player.telegram_id, targets)
+        if role == Role.MASHKA:
+            return "🧤 Kimdan o'g'irlaymiz?", target_keyboard("steal", game_id, player.telegram_id, targets)
         if role == Role.MINER:
             visited = miner_visits.get(player.telegram_id, set()) if miner_visits else set()
             return "Qaysi konga borasiz?", miner_keyboard(game_id, player.telegram_id, visited)
@@ -1824,6 +1858,8 @@ class GameEngine:
             "mine": ActionType.MINE,
             "mine_protect": ActionType.MINE_PROTECT,
             "prank": ActionType.PRANK,
+            "grant": ActionType.GRANT,
+            "steal": ActionType.STEAL,
         }
         action_type = action_map.get(action_key)
         if action_type is None:
@@ -1885,6 +1921,8 @@ class GameEngine:
                 Role.MINER: {"mine", "mine_protect"},
                 Role.PRANKSTER: {"prank"},
                 Role.SNITCH: {"check"},
+                Role.HOJIAKA: {"grant"},
+                Role.MASHKA: {"steal"},
             }
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
@@ -1948,6 +1986,10 @@ class GameEngine:
                 success_text = f"Siz {target_id:02d}-konni tanladingiz."
             elif action_type == ActionType.MINE_PROTECT:
                 success_text = "Siz himoyalanishni tanladingiz."
+            elif action_type == ActionType.GRANT:
+                success_text = f"Siz {target.display_name}ga ehson qilishni tanladingiz."
+            elif action_type == ActionType.STEAL:
+                success_text = f"Siz {target.display_name}dan o'g'irlashni tanladingiz."
             else:
                 success_text = f"Siz - {target.display_name} ni tanladingiz."
             group_activity_line = self._night_activity_line(actor_role, action_key)
@@ -2069,7 +2111,41 @@ class GameEngine:
 
         choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != actor_id]
         title = "Tekshirish" if action_key == "check" else "Otish"
-        return True, title, target_keyboard(action_key, game_id, actor_id, choices)
+        return True, title, commissar_target_keyboard(action_key, game_id, actor_id, choices)
+
+    async def commissar_action_menu_keyboard(
+        self,
+        game_id: int,
+        actor_id: int,
+    ) -> tuple[bool, str, Optional[object]]:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status != GameStatus.ACTIVE.value or game.phase != GamePhase.NIGHT.value:
+                return False, t(self.settings.default_language, "callback_expired"), None
+            actor = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == actor_id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if actor is None or Role(actor.role) != Role.COMMISSAR:
+                return False, "Bu amal faqat Komissar Katani uchun.", None
+            existing = (
+                await session.execute(
+                    select(NightAction.id).where(
+                        NightAction.game_id == game_id,
+                        NightAction.night_number == game.night_number,
+                        NightAction.actor_telegram_id == actor_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return False, t(self.settings.default_language, "action_already"), None
+            can_shoot = game.night_number >= 2
+        return True, "🕵🏼 Komissar katani", commissar_action_keyboard(game_id, actor_id, can_shoot=can_shoot)
 
     async def skip_choice(
         self,
@@ -2348,6 +2424,8 @@ class GameEngine:
             killer_kills = []
             commissar_shots = []
             checks = []
+            hojiaka_grants: list[tuple[int, int]] = []
+            mashka_steals: list[tuple[int, int]] = []
             mine_actions: list[tuple[int, int]] = []
             miner_protectors: set[int] = set()
             night_activity_lines: list[str] = []
@@ -2375,6 +2453,10 @@ class GameEngine:
                     checks.append((act.actor_telegram_id, target_id))
                 elif act.action_type == ActionType.CHECK.value and role == Role.SNITCH:
                     pass  # handled separately below
+                elif act.action_type == ActionType.GRANT.value and role == Role.HOJIAKA:
+                    hojiaka_grants.append((act.actor_telegram_id, target_id))
+                elif act.action_type == ActionType.STEAL.value and role == Role.MASHKA:
+                    mashka_steals.append((act.actor_telegram_id, target_id))
                 elif act.action_type == ActionType.MINE.value and role == Role.MINER:
                     mine_actions.append((act.actor_telegram_id, target_id))
                 elif act.action_type == ActionType.MINE_PROTECT.value and role == Role.MINER:
@@ -2389,6 +2471,12 @@ class GameEngine:
             last_words_prompts: list[tuple[int, str]] = []
             miner_result_notices: list[tuple[int, str]] = []
             miner_group_lines: list[str] = []
+            hojiaka_notices: list[tuple[int, str]] = []
+            hojiaka_target_notices: list[tuple[int, str]] = []
+            hojiaka_group_lines: list[str] = []
+            mashka_notices: list[tuple[int, str]] = []
+            mashka_target_notices: list[tuple[int, str]] = []
+            mashka_group_lines: list[str] = []
             doctor_saved_targets: set[int] = set()
             doctor_save_notices: list[tuple[int, int, int, str]] = []
 
@@ -2485,8 +2573,179 @@ class GameEngine:
                         miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-o'lim koniga tushdingiz."))
                         miner_group_lines.append("👷🏻‍♂️ Konchi konda sirpanib ketib halok bo'ldi!")
 
+            if hojiaka_grants:
+                dollar_choices = [50, 70, 90, 100, 130, 150, 170, 200, 250]
+                item_choices: list[tuple[str, str]] = [
+                    ("protection", "🛡 Himoya"),
+                    ("killer_protection", "🧿 Qotildan himoya"),
+                    ("drug_protection", "💊 Doridan himoya"),
+                    ("vote_protection", "⚖️ Ovozdan himoya"),
+                    ("miner_protection", "📦 Sirpanishdan himoya"),
+                    ("mask", "🎭 Maska"),
+                ]
+                for actor_id, target_id in hojiaka_grants:
+                    actor_player = player_map.get(actor_id)
+                    target_player = player_map.get(target_id)
+                    if actor_player is None or target_player is None:
+                        continue
+                    actor_user = users_by_tg.get(actor_id)
+                    target_user = users_by_tg.get(target_id)
+                    if actor_user is None or target_user is None:
+                        continue
+                    rng = random.Random(f"hojiaka:{game.id}:{game.night_number}:{actor_id}:{target_id}")
+                    reward_type = rng.choices(["item", "dollar", "diamond"], weights=[50, 45, 5], k=1)[0]
+                    if reward_type == "diamond":
+                        amount = rng.choice([1, 1, 1, 2, 2, 3])
+                        target_user.diamonds = int(target_user.diamonds or 0) + amount
+                        self._record_diamond_transaction(
+                            session,
+                            target_user,
+                            amount,
+                            "hojiaka_grant",
+                            note=f"O'yin #{game.id}: Hojiaka ehsoni",
+                            counterparty=actor_user,
+                            chat_id=game.chat_id,
+                        )
+                        gift_label = f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos"
+                    elif reward_type == "dollar":
+                        amount = rng.choice(dollar_choices)
+                        target_user.dollar = int(target_user.dollar or 0) + amount
+                        self._record_dollar_transaction(
+                            session,
+                            target_user,
+                            amount,
+                            "hojiaka_grant",
+                            note=f"O'yin #{game.id}: Hojiaka ehsoni",
+                            counterparty=actor_user,
+                            chat_id=game.chat_id,
+                        )
+                        gift_label = f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {amount} dollar"
+                    else:
+                        field, title = rng.choice(item_choices)
+                        current = int(getattr(target_user, field) or 0)
+                        setattr(target_user, field, current + 1)
+                        gift_label = title
+
+                    hojiaka_notices.append(
+                        (actor_id, f"🕌 Siz {self._tg_mention(target_player.telegram_id, target_player.display_name)}ga {gift_label} ehson qildingiz.")
+                    )
+                    hojiaka_target_notices.append(
+                        (target_id, f"🕌 Hojiaka sizga {gift_label} ehson ulashdi!")
+                    )
+                    hojiaka_group_lines.append(
+                        f"🕌 Hojiaka {self._tg_mention(target_player.telegram_id, target_player.display_name)}ga "
+                        f"{gift_label} ehson ulashdi."
+                    )
+
+            if mashka_steals:
+                steal_dollar_choices = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+                for actor_id, target_id in mashka_steals:
+                    actor_player = player_map.get(actor_id)
+                    target_player = player_map.get(target_id)
+                    if actor_player is None or target_player is None:
+                        continue
+                    actor_user = users_by_tg.get(actor_id)
+                    target_user = users_by_tg.get(target_id)
+                    if actor_user is None or target_user is None:
+                        continue
+                    rng = random.Random(f"mashka:{game.id}:{game.night_number}:{actor_id}:{target_id}")
+                    steal_diamond = rng.random() < 0.1 and int(target_user.diamonds or 0) >= 1
+                    if steal_diamond:
+                        target_user.diamonds -= 1
+                        actor_user.diamonds = int(actor_user.diamonds or 0) + 1
+                        self._record_diamond_transaction(
+                            session,
+                            target_user,
+                            -1,
+                            "mashka_steal_out",
+                            note=f"O'yin #{game.id}: Mashka o'g'irligi",
+                            counterparty=actor_user,
+                            chat_id=game.chat_id,
+                        )
+                        self._record_diamond_transaction(
+                            session,
+                            actor_user,
+                            1,
+                            "mashka_steal_in",
+                            note=f"O'yin #{game.id}: Mashka o'g'irligi",
+                            counterparty=target_user,
+                            chat_id=game.chat_id,
+                        )
+                        stolen_label = "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 olmos"
+                    else:
+                        possible = [v for v in steal_dollar_choices if v <= int(target_user.dollar or 0)]
+                        if not possible:
+                            current_hp = int(target_player.hero_hp or HERO_DEFAULT_HP)
+                            hp_loss = max(1, current_hp // 2)
+                            target_player.hero_hp = max(0, current_hp - hp_loss)
+                            target_max_hp = int(target_player.hero_max_hp or HERO_DEFAULT_HP)
+                            if target_player.hero_hp <= 0 and target_player.telegram_id not in dead:
+                                dead.add(target_player.telegram_id)
+                                death_causes[target_player.telegram_id] = "mashka"
+                                death_visitors[target_player.telegram_id] = role_label(Role.MASHKA)
+                            mashka_notices.append(
+                                (
+                                    actor_id,
+                                    f"🧤 Balans yo'qligi sabab {self._tg_mention(target_player.telegram_id, target_player.display_name)}dan "
+                                    f"♥️ {hp_loss} jon oldingiz. Qolgan jon: ♥️ {int(target_player.hero_hp or 0)}/{target_max_hp}",
+                                )
+                            )
+                            mashka_target_notices.append(
+                                (
+                                    target_id,
+                                    f"🧤 Mashka sizning 50% joningizni oldi: -♥️ {hp_loss}. "
+                                    f"Qolgan jon: ♥️ {int(target_player.hero_hp or 0)}/{target_max_hp}",
+                                )
+                            )
+                            mashka_group_lines.append(
+                                f"🧤 Mashka {self._tg_mention(target_player.telegram_id, target_player.display_name)}ning 50% jonini oldi."
+                            )
+                            continue
+                        amount = rng.choice(possible)
+                        target_user.dollar -= amount
+                        actor_user.dollar = int(actor_user.dollar or 0) + amount
+                        self._record_dollar_transaction(
+                            session,
+                            target_user,
+                            -amount,
+                            "mashka_steal_out",
+                            note=f"O'yin #{game.id}: Mashka o'g'irligi",
+                            counterparty=actor_user,
+                            chat_id=game.chat_id,
+                        )
+                        self._record_dollar_transaction(
+                            session,
+                            actor_user,
+                            amount,
+                            "mashka_steal_in",
+                            note=f"O'yin #{game.id}: Mashka o'g'irligi",
+                            counterparty=target_user,
+                            chat_id=game.chat_id,
+                        )
+                        stolen_label = f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {amount} dollar"
+
+                    mashka_notices.append(
+                        (actor_id, f"🧤 Siz {self._tg_mention(target_player.telegram_id, target_player.display_name)}dan {stolen_label} o'g'irladingiz.")
+                    )
+                    mashka_target_notices.append(
+                        (target_id, f"🧤 Mashka sizdan {stolen_label} o'g'irladi.")
+                    )
+                    mashka_group_lines.append(
+                        f"🧤 Mashka kimdandir {stolen_label} o'g'irlab ketdi."
+                    )
+
             mafia_fallback_as_don = False
-            if don_kills:
+            alive_don_ids = {
+                p.telegram_id
+                for p in alive_players
+                if p.alive and Role(p.role) == Role.DON
+            }
+            don_blocked = bool(alive_don_ids & (blocked | prank_targets))
+            if don_blocked:
+                # Kezuvchi Donni to'xtatgan bo'lsa, bu tunda mafiyaning boshqa ovozlari ham ishlamaydi.
+                active_mafia_roles = {Role.DON}
+                active_mafia_kills = []
+            elif don_kills:
                 active_mafia_roles = {Role.DON}
                 active_mafia_kills = don_kills
             else:
@@ -2635,7 +2894,6 @@ class GameEngine:
 
             # Daydi sees what happened at the house he visited.
             witness_lines: list[tuple[int, str]] = []
-            witness_group_lines: list[str] = []
             killed_targets = dead.copy()
             for observer_id, visited_id in visited.items():
                 observer = player_map.get(observer_id)
@@ -2655,11 +2913,6 @@ class GameEngine:
                                 f"{self._tg_mention(victim.telegram_id, victim.display_name)} - {role_label(victim.role)} "
                                 f"yonida {visitor} turganini ko'rdingiz.",
                             )
-                        )
-                        witness_group_lines.append(
-                            "🍾 Daydi kimningdir jonsiz jasadi ustida "
-                            f"{self._tg_mention(victim.telegram_id, victim.display_name)} - {role_label(victim.role)} "
-                            f"turganini ko'rdi."
                         )
                 else:
                     witness_lines.append(
@@ -2701,22 +2954,33 @@ class GameEngine:
                     )
                 watcher_lines.append((watcher_id, text))
 
-            sorcerer_revenge_candidates: list[tuple[int, int]] = []
+            sorcerer_revenge_candidates: list[tuple[int, int, Role | None]] = []
             for victim_id in list(dead):
                 victim = player_map.get(victim_id)
                 if victim and Role(victim.role) == Role.SORCERER:
                     attacker = None
                     all_mafia_kill_targets = set(don_kills) | set(mafia_fallback_kills)
                     if victim_id in all_mafia_kill_targets:
-                        mafia_actors = [
-                            a.actor_telegram_id
-                            for a in actions
-                            if a.action_type == ActionType.KILL.value
-                            and a.target_telegram_id == victim_id
-                            and a.actor_telegram_id in player_map
-                            and Role(player_map[a.actor_telegram_id].role) in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
-                        ]
-                        attacker = mafia_actors[0] if mafia_actors else None
+                        alive_don = next(
+                            (
+                                p.telegram_id
+                                for p in alive_players
+                                if Role(p.role) == Role.DON and p.telegram_id in alive_ids
+                            ),
+                            None,
+                        )
+                        if alive_don is not None:
+                            attacker = alive_don
+                        else:
+                            mafia_actors = [
+                                a.actor_telegram_id
+                                for a in actions
+                                if a.action_type == ActionType.KILL.value
+                                and a.target_telegram_id == victim_id
+                                and a.actor_telegram_id in player_map
+                                and Role(player_map[a.actor_telegram_id].role) in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
+                            ]
+                            attacker = mafia_actors[0] if mafia_actors else None
                     if attacker is None and victim_id in killer_kills:
                         killer_actors = [
                             a.actor_telegram_id
@@ -2727,18 +2991,47 @@ class GameEngine:
                     elif victim_id in commissar_shots:
                         shooter = [a.actor_telegram_id for a in actions if a.action_type == ActionType.SHOOT.value]
                         attacker = shooter[0] if shooter else None
+                    attacker_role = None
+                    if attacker and attacker in player_map and player_map[attacker].role:
+                        attacker_role = Role(player_map[attacker].role)
                     if attacker:
-                        sorcerer_revenge_candidates.append((victim_id, attacker))
+                        sorcerer_revenge_candidates.append((victim_id, attacker, attacker_role))
 
-            for victim_id, attacker in sorcerer_revenge_candidates:
+            sorcerer_judgement_prompts: list[tuple[int, int, int, str, str, int]] = []
+            for victim_id, attacker, attacker_role in sorcerer_revenge_candidates:
                 sorcerer_player = player_map.get(victim_id)
                 if sorcerer_player is not None:
                     sorcerer_player.sorcerer_revenge_used = True
-                    sorcerer_player.won = True
-                if attacker in alive_ids:
+                    sorcerer_player.won = attacker_role in {
+                        Role.DON,
+                        Role.MAFIA,
+                        Role.SPY,
+                        Role.HIRED_KILLER,
+                        Role.KILLER,
+                    }
+                if attacker in alive_ids and attacker_role == Role.HIRED_KILLER:
                     dead.add(attacker)
                     death_causes[attacker] = "sorcerer"
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
+                    attacker_player = player_map.get(attacker)
+                    if attacker_player is not None:
+                        night_event_lines.append(
+                            f"💣 Sehrgar yollanma qotilni avtomatik jahannamga olib ketdi: "
+                            f"{self._tg_mention(attacker_player.telegram_id, attacker_player.display_name)}."
+                        )
+                elif attacker in alive_ids and attacker_role is not None:
+                    attacker_player = player_map.get(attacker)
+                    if attacker_player is not None and sorcerer_player is not None:
+                        sorcerer_judgement_prompts.append(
+                            (
+                                game.id,
+                                sorcerer_player.telegram_id,
+                                attacker_player.telegram_id,
+                                attacker_player.display_name,
+                                role_label(attacker_player.role),
+                                game.chat_id,
+                            )
+                        )
 
             for dead_id in dead:
                 pl = player_map.get(dead_id)
@@ -2798,7 +3091,9 @@ class GameEngine:
             ]
             succession_notices = list(succession_events)
             doctor_save_notices = list(doctor_save_notices)
-            witness_group_lines = list(dict.fromkeys(witness_group_lines))
+            sorcerer_judgement_prompts = list(
+                dict.fromkeys(sorcerer_judgement_prompts)
+            )
 
         await self._clear_night_prompt_buttons(bot, game_id, night)
         try:
@@ -2911,6 +3206,46 @@ class GameEngine:
             except TelegramForbiddenError:
                 pass
 
+        for telegram_id, text in hojiaka_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in hojiaka_target_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in mashka_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in mashka_target_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
         for line in miner_group_lines:
             await self._safe_send_message(bot, chat_id, line)
 
@@ -2918,6 +3253,12 @@ class GameEngine:
             await self._safe_send_message(bot, chat_id, line)
 
         for line in snitch_group_lines:
+            await self._safe_send_message(bot, chat_id, line)
+
+        for line in dict.fromkeys(hojiaka_group_lines):
+            await self._safe_send_message(bot, chat_id, line)
+
+        for line in dict.fromkeys(mashka_group_lines):
             await self._safe_send_message(bot, chat_id, line)
 
         for _, telegram_id, new_role in succession_notices:
@@ -3019,12 +3360,30 @@ class GameEngine:
             except TelegramForbiddenError:
                 pass
 
-        for line in witness_group_lines:
-            await self._safe_send_message(bot, chat_id, line)
-
         for watcher_id, text in watcher_lines:
             try:
                 await bot.send_message(watcher_id, text)
+            except TelegramForbiddenError:
+                pass
+
+        # Sehrgarni o'ldirmoqchi bo'lganlar uchun alohida kechirish/oldirish tanlovi.
+        now_mono = self._monotonic()
+        for game_id_prompt, sorcerer_id, attacker_id, attacker_name, attacker_role_name, _chat_id in sorcerer_judgement_prompts:
+            self._pending_sorcerer_judgements[(game_id_prompt, sorcerer_id, attacker_id)] = (
+                now_mono + 3600.0,
+                attacker_role_name,
+            )
+            try:
+                await bot.send_message(
+                    sorcerer_id,
+                    f"🧙‍♂️ {attacker_role_name} sizni oldirishga harakat qildi.\n"
+                    "Qaroringizni tanlang:",
+                    reply_markup=sorcerer_judgement_keyboard(
+                        game_id=game_id_prompt,
+                        sorcerer_id=sorcerer_id,
+                        attacker_id=attacker_id,
+                    ),
+                )
             except TelegramForbiddenError:
                 pass
 
@@ -3162,14 +3521,6 @@ class GameEngine:
             target_name = self._tg_mention(target.telegram_id, target_display_name)
 
         await bot.send_message(chat_id, f"{voter_name} ovoz berdi {target_name} ga")
-        try:
-            await bot.send_message(
-                voter_id,
-                f"Siz - {escape(target_display_name)} ni tanladingiz.",
-                reply_markup=await self.group_return_keyboard(bot, chat_id),
-            )
-        except TelegramForbiddenError:
-            pass
         return True, f"Siz {target_display_name} ni tanladingiz."
 
     async def send_private_vote_menu(self, bot: Bot, game_id: int, voter_id: int) -> tuple[bool, str]:
@@ -3793,24 +4144,26 @@ class GameEngine:
                                 pass
 
                     if Role(target.role) == Role.SORCERER:
+                        extra_day_dead = set()
                         alive_now = await self._alive_players(session, game_id)
-                        extra_day_dead: set[int] = set()
-                        candidates = [p for p in alive_now if p.telegram_id != target.telegram_id]
+                        candidates = [(p.telegram_id, p.display_name) for p in alive_now if p.telegram_id != target.telegram_id]
                         if candidates:
-                            victim = random.choice(candidates)
-                            victim.alive = False
-                            victim.death_day = game.day_number
-                            target.sorcerer_revenge_used = True
-                            extra_day_dead.add(victim.telegram_id)
-                            self._add_game_log(
-                                session,
-                                game,
-                                "sorcerer_revenge_after_hang",
-                                actor=target,
-                                target=victim,
-                            )
                             await session.commit()
-                            await self._safe_send_message(bot, chat_id, f"🧞‍♂️ Afsungar bilan birga {victim.display_name} ham ketdi.")
+                            await self._safe_send_message(
+                                bot,
+                                target.telegram_id,
+                                "🧞‍♂️ Siz osildingiz. Endi o'zingiz bilan birga kimni olib ketishni tanlang:",
+                                reply_markup=sorcerer_hang_revenge_keyboard(
+                                    game_id=game_id,
+                                    sorcerer_id=target.telegram_id,
+                                    choices=candidates,
+                                ),
+                            )
+                            await self._safe_send_message(
+                                bot,
+                                chat_id,
+                                f"🧞‍♂️ {self._tg_mention(target.telegram_id, target.display_name)} qasos uchun nishon tanlayapti...",
+                            )
                     else:
                         extra_day_dead = set()
 
@@ -3854,6 +4207,191 @@ class GameEngine:
             await session.commit()
 
         await self.start_night(bot, game_id)
+
+    async def resolve_sorcerer_hang_revenge(
+        self,
+        bot: Bot,
+        game_id: int,
+        sorcerer_id: int,
+        target_id: int,
+    ) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status != GameStatus.ACTIVE.value:
+                return False, t(self.settings.default_language, "callback_expired")
+
+            sorcerer = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == sorcerer_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if sorcerer is None or Role(sorcerer.role) != Role.SORCERER or sorcerer.alive:
+                return False, "Bu amal hozir mavjud emas."
+            if sorcerer.sorcerer_revenge_used:
+                return False, "Qasos allaqachon ishlatilgan."
+
+            target = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == target_id,
+                        GamePlayer.alive.is_(True),
+                    )
+                )
+            ).scalar_one_or_none()
+            if target is None or target.telegram_id == sorcerer_id:
+                return False, "Nishon noto'g'ri."
+
+            target.alive = False
+            target.death_day = game.day_number
+            sorcerer.sorcerer_revenge_used = True
+            self._add_game_log(
+                session,
+                game,
+                "sorcerer_revenge_after_hang",
+                actor=sorcerer,
+                target=target,
+            )
+            await session.commit()
+
+            await self._safe_send_message(
+                bot,
+                game.chat_id,
+                f"💣 Afsungar afsun qildi va {self._tg_mention(target.telegram_id, target.display_name)}ni jahannamga olib ketdi!\n\n"
+                f"U edi {role_label(target.role)}",
+            )
+
+            all_players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            extra_successions = self._apply_role_successions(all_players, {target.telegram_id})
+            if extra_successions:
+                await session.commit()
+            for line, heir_id, new_role in extra_successions:
+                await self._safe_send_message(bot, game.chat_id, line)
+                try:
+                    await bot.send_message(
+                        heir_id,
+                        self._private_role_text(new_role),
+                        reply_markup=await self.group_return_keyboard(bot, game.chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+
+            winner = await self.check_winner(game_id)
+            if winner:
+                await self.finish_game(bot, game_id, winner)
+            else:
+                await session.commit()
+        return True, "Qasos bajarildi."
+
+    async def resolve_sorcerer_judgement(
+        self,
+        bot: Bot,
+        game_id: int,
+        sorcerer_id: int,
+        attacker_id: int,
+        action: str,
+    ) -> tuple[bool, str]:
+        if action not in {"forgive", "kill"}:
+            return False, "Noma'lum amal."
+
+        pending_key = (game_id, sorcerer_id, attacker_id)
+        pending = self._pending_sorcerer_judgements.get(pending_key)
+        if pending is None:
+            return False, "Bu tanlov eskirgan yoki allaqachon qabul qilingan."
+        expires_at, attacker_role_name = pending
+        if expires_at <= self._monotonic():
+            self._pending_sorcerer_judgements.pop(pending_key, None)
+            return False, "Bu tanlov muddati tugagan."
+
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status != GameStatus.ACTIVE.value:
+                return False, t(self.settings.default_language, "callback_expired")
+
+            sorcerer = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == sorcerer_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            attacker = (
+                await session.execute(
+                    select(GamePlayer).where(
+                        GamePlayer.game_id == game_id,
+                        GamePlayer.telegram_id == attacker_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if sorcerer is None or Role(sorcerer.role) != Role.SORCERER:
+                self._pending_sorcerer_judgements.pop(pending_key, None)
+                return False, "Bu tanlov bekor bo'lgan."
+            if attacker is None:
+                self._pending_sorcerer_judgements.pop(pending_key, None)
+                return False, "Nishon topilmadi."
+
+            chat_id = game.chat_id
+            self._pending_sorcerer_judgements.pop(pending_key, None)
+
+            if action == "forgive":
+                await self._safe_send_message(
+                    bot,
+                    chat_id,
+                    f"🕊 Sehrgar {role_label(attacker.role)} xatosini kechirdi.",
+                )
+                return True, "Kechirildi."
+
+            if not attacker.alive:
+                await self._safe_send_message(
+                    bot,
+                    chat_id,
+                    f"💀 Sehrgar {self._tg_mention(attacker.telegram_id, attacker.display_name)} "
+                    f"({role_label(attacker.role)}) xatosini kechirmadi, lekin u allaqachon o'lgan edi.",
+                )
+                return True, "Nishon allaqachon o'lgan."
+
+            attacker.alive = False
+            attacker.death_day = game.day_number
+            await session.commit()
+
+            await self._safe_send_message(
+                bot,
+                chat_id,
+                f"💀 Sehrgar {self._tg_mention(attacker.telegram_id, attacker.display_name)} "
+                f"({role_label(attacker.role)}) xatosini kechirmadi va oldirdi!",
+            )
+
+            all_players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            extra_successions = self._apply_role_successions(all_players, {attacker.telegram_id})
+            if extra_successions:
+                await session.commit()
+            for line, heir_id, new_role in extra_successions:
+                await self._safe_send_message(bot, chat_id, line)
+                try:
+                    await bot.send_message(
+                        heir_id,
+                        self._private_role_text(new_role),
+                        reply_markup=await self.group_return_keyboard(bot, chat_id),
+                    )
+                except TelegramForbiddenError:
+                    pass
+
+            winner = await self.check_winner(game_id)
+            if winner:
+                await self.finish_game(bot, game_id, winner)
+            return True, "Oldirish bajarildi."
 
     async def check_winner(self, game_id: int) -> Optional[Team]:
         """
@@ -3952,14 +4490,9 @@ class GameEngine:
                 is_winner = bool(p.won) or (p.team == winner_team.value and p.alive)
                 if p.role == Role.MINER.value and p.alive:
                     is_winner = True
-                # Afsungar otib/o'ldirib yuborilganda alohida g'olib bo'lib qoladi.
+                # Afsungar faqat maxsus qasos yutug'i belgilangan bo'lsa g'olib bo'ladi.
                 if p.role == Role.SORCERER.value:
-                    if p.won:
-                        is_winner = True
-                    elif not p.sorcerer_revenge_used:
-                        is_winner = False
-                    elif winner_team == Team.CITY:
-                        is_winner = True
+                    is_winner = bool(p.won)
                 # O'yindan ixtiyoriy chiqib ketganlar yutmaydi.
                 if p.left_game:
                     is_winner = False
@@ -3983,27 +4516,44 @@ class GameEngine:
                 user = users.get(p.telegram_id)
                 if user:
                     user.total_games += 1
+                    bonus_note = " (kanal 2x bonus)" if bonus_multiplier == 2 else ""
                     if is_winner:
                         user.wins += 1
                         user.dollar += reward_dollar
                         user.diamonds += reward_diamond
+                        self._record_dollar_transaction(
+                            session,
+                            user,
+                            reward_dollar,
+                            "game_winner_reward",
+                            note=f"O'yin #{game.id}: g'olib mukofoti{bonus_note}",
+                            chat_id=game.chat_id,
+                        )
                         self._record_diamond_transaction(
                             session,
                             user,
                             reward_diamond,
                             "game_winner_reward",
-                            note=f"O'yin #{game.id}: g'olib mukofoti" + (" (news 2x bonus)" if bonus_multiplier == 2 else ""),
+                            note=f"O'yin #{game.id}: g'olib mukofoti{bonus_note}",
                             chat_id=game.chat_id,
                         )
                     else:
                         user.dollar += reward_dollar
                         user.diamonds += reward_diamond
+                        self._record_dollar_transaction(
+                            session,
+                            user,
+                            reward_dollar,
+                            "game_participation_reward",
+                            note=f"O'yin #{game.id}: ishtirok mukofoti{bonus_note}",
+                            chat_id=game.chat_id,
+                        )
                         self._record_diamond_transaction(
                             session,
                             user,
                             reward_diamond,
                             "game_participation_reward",
-                            note=f"O'yin #{game.id}: ishtirok mukofoti" + (" (news 2x bonus)" if bonus_multiplier == 2 else ""),
+                            note=f"O'yin #{game.id}: ishtirok mukofoti{bonus_note}",
                             chat_id=game.chat_id,
                         )
                 (winners if is_winner else losers).append(p)
@@ -4042,6 +4592,9 @@ class GameEngine:
         winners_block = "\n".join(winner_lines) if winner_lines else "-"
         losers_block = "\n".join(loser_lines) if loser_lines else "-"
 
+        news_channel = self._news_bonus_channel_id()
+        bonus_hint = f"\n\n📰 <i>{news_channel} kanaliga obuna bo'ling va 2x mukofot oling!</i>"
+
         text = (
             "<b>O'yin tugadi!</b>\n\n"
             "G'oliblar:\n"
@@ -4049,6 +4602,7 @@ class GameEngine:
             "Mag'lublar:\n"
             f"{losers_block}\n\n"
             f"O'yin: {self._format_duration(duration_seconds)} davom etdi"
+            f"{bonus_hint}"
         )
         await bot.send_message(chat_id, text)
 
@@ -4060,7 +4614,14 @@ class GameEngine:
                 ).scalars().all()
             }
 
-        news_url = await self.get_news_channel_url()
+        player_ids = [p.telegram_id for p in players]
+        news_url_task = self.get_news_channel_url()
+        hero_tasks = {pid: self.user_has_hero(pid) for pid in player_ids}
+        news_url, *hero_results = await asyncio.gather(
+            news_url_task, *(hero_tasks[pid] for pid in player_ids)
+        )
+        hero_map = dict(zip(player_ids, hero_results))
+
         for p in players:
             user = users.get(p.telegram_id)
             if user is None:
@@ -4074,7 +4635,7 @@ class GameEngine:
                     False,
                 ),
             )
-            bonus_text = "\n📰 News kanal obunasi: <b>2x mukofot berildi!</b>" if used_news_bonus else ""
+            bonus_text = "\n📰 Kanal obunasi: <b>2x mukofot berildi!</b>" if used_news_bonus else ""
             body = (
                 f"{t(user.language, result_title, dollar=reward_dollar, diamond=reward_diamond)}{bonus_text}\n\n"
                 f"{self.format_user_dashboard(user)}"
@@ -4088,7 +4649,7 @@ class GameEngine:
                         user=user,
                         is_admin=p.telegram_id in self.settings.admin_ids,
                         news_url=news_url,
-                        has_hero=await self.user_has_hero(p.telegram_id),
+                        has_hero=hero_map.get(p.telegram_id, False),
                     ),
                 )
             except TelegramForbiddenError:
@@ -5153,6 +5714,8 @@ class GameEngine:
         return permission
 
     async def check_chat_write_permission(self, bot: Bot, chat_id: int, user_id: int) -> bool:
+        if await self.is_vip_user_active(user_id):
+            return True
         active = await self.active_game_for_chat(chat_id)
         if active is None or active.status != GameStatus.ACTIVE.value:
             return True
@@ -5180,6 +5743,22 @@ class GameEngine:
                     return bool(player.alive)
                 return True
         return True
+
+    async def is_vip_user_active(self, user_id: int) -> bool:
+        async with self.session_factory() as session:
+            user = (
+                await session.execute(
+                    select(User.vip_until).where(User.telegram_id == user_id)
+                )
+            ).scalar_one_or_none()
+        if user is None:
+            return False
+        vip_until = user
+        if vip_until.tzinfo is None:
+            vip_until = vip_until.replace(tzinfo=timezone.utc)
+        else:
+            vip_until = vip_until.astimezone(timezone.utc)
+        return vip_until > self._now_utc()
 
     async def check_weapon_enabled(self, chat_id: int, weapon_key: str) -> bool:
         gsm = GroupSettingsManager(self.session_factory)
@@ -5661,7 +6240,10 @@ class GameEngine:
             "hero_market_buy": "geroy marketplace xarid",
             "hero_market_sale": "geroy marketplace sotuv",
             "hero_sale_cancel": "geroy sotuvdan qaytarish",
+            "hojiaka_grant": "hojiaka ehson",
             "miner_reward": "konchi topilmasi",
+            "mashka_steal_in": "mashka o'g'irlik kirim",
+            "mashka_steal_out": "mashka o'g'irlik chiqim",
             "premium_group_contribution": "premium guruh",
             "shop_item_buy": "do'kon mahsulot",
             "shop_role_buy": "rol xarid",
