@@ -3159,15 +3159,16 @@ class GameEngine:
                             )
                         except TelegramForbiddenError:
                             pass
-                if attacker in alive_ids and attacker_role == Role.HIRED_KILLER:
+                if attacker in alive_ids:
                     dead.add(attacker)
                     death_causes[attacker] = "sorcerer"
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
                     attacker_player = player_map.get(attacker)
                     if attacker_player is not None:
                         night_event_lines.append(
-                            f"💣 Sehrgar yollanma qotilni avtomatik jahannamga olib ketdi: "
-                            f"{self._tg_mention(attacker_player.telegram_id, attacker_player.display_name)}."
+                            f"💣 Afsungar uni o'ldirgan "
+                            f"{self._tg_mention(attacker_player.telegram_id, attacker_player.display_name)}ni "
+                            "avtomatik jahannamga olib ketdi."
                         )
 
             sorcerer_judgement_prompts: list[tuple[int, int, int, str]] = []
