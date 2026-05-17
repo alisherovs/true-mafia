@@ -42,6 +42,7 @@ LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
+TELEGRAM_GIFTS_ENABLED = False
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
@@ -50,6 +51,10 @@ def _box_cd_key(box_type: str, user_id: int) -> str:
 
 def _box_session_key(user_id: int) -> str:
     return f"box_session:{user_id}"
+
+
+def _gifts_disabled_text() -> str:
+    return "🎁 Telegram gift bo'limi hozircha vaqtincha o'chirilgan (test rejim)."
 
 
 def _format_td(delta: timedelta) -> str:
@@ -1201,6 +1206,9 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
+        return
     async with SessionLocal() as session:
         user = (await session.execute(
             select(User).where(User.telegram_id == callback.from_user.id)
@@ -1233,6 +1241,9 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
 async def gift_buy_confirm(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
         return
     async with SessionLocal() as session:
         user = (await session.execute(
@@ -1267,6 +1278,9 @@ async def gift_buy_confirm(callback: CallbackQuery) -> None:
 async def gift_confirm(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
         return
     gift_id = callback.data.split(":", maxsplit=2)[2]
 
@@ -1364,6 +1378,9 @@ async def premium_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
+        return
     async with SessionLocal() as session:
         user = (await session.execute(
             select(User).where(User.telegram_id == callback.from_user.id)
@@ -1387,6 +1404,9 @@ async def premium_open(callback: CallbackQuery) -> None:
 async def premium_buy_confirm(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
         return
     async with SessionLocal() as session:
         user = (await session.execute(
@@ -1423,6 +1443,9 @@ async def premium_buy_confirm(callback: CallbackQuery) -> None:
 async def premium_confirm_buy(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not TELEGRAM_GIFTS_ENABLED:
+        await callback.answer(_gifts_disabled_text(), show_alert=True)
         return
     raw = callback.data.split(":", maxsplit=3)[3]
     try:
