@@ -665,6 +665,8 @@ async def cmd_change(message: Message, command: CommandObject, engine: GameEngin
         return
     if message.chat.type == "private":
         return
+    if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
+        return
     sender = await engine.ensure_user(message.from_user)
     lang = sender.language
     raw_args = (command.args or "").strip()
@@ -719,6 +721,8 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
     if message.from_user is None:
         return
     if message.chat.type == "private":
+        return
+    if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
         return
     sender = await engine.ensure_user(message.from_user)
     lang = sender.language
