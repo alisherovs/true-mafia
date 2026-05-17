@@ -672,6 +672,12 @@ async def cmd_change(message: Message, command: CommandObject, engine: GameEngin
         return
     if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
         return
+    if is_channel_sender and not await engine.is_channel_gifts_enabled(message.chat.id):
+        await message.answer(
+            "⛔ Bu kanal uchun almaz tarqatish hali yoqilmagan.\n"
+            "Admin paneldan: 📺 Kanal sovg'a balansi → ▶️ Almaz tarqatishni boshlash",
+        )
+        return
     if is_channel_sender:
         sender_id = int(message.sender_chat.id)
         sender_name = message.sender_chat.title or message.chat.title or str(sender_id)
@@ -752,6 +758,12 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
     if message.from_user is None and not is_channel_sender:
         return
     if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
+        return
+    if is_channel_sender and not await engine.is_channel_gifts_enabled(message.chat.id):
+        await message.answer(
+            "⛔ Bu kanal uchun almaz tarqatish hali yoqilmagan.\n"
+            "Admin paneldan: 📺 Kanal sovg'a balansi → ▶️ Almaz tarqatishni boshlash",
+        )
         return
     if is_channel_sender:
         sender_id = int(message.sender_chat.id)

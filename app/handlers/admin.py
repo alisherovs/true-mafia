@@ -465,6 +465,22 @@ async def owner_channel_gifts_grant_callback(callback: CallbackQuery, settings: 
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:channel_gifts:start")
+async def owner_channel_gifts_start_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "channel_gifts_start"
+    await _safe_edit(
+        callback,
+        "▶️ <b>Almaz tarqatishni boshlash</b>\n\n"
+        "Kanal ID yuboring. Bot ushbu kanalda admin bo'lishi shart.\n\n"
+        "Masalan: <code>-1001234567890</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:hero_market_set")
 async def owner_hero_market_set_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -866,6 +882,24 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         )
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_grant"
+        return True
+
+    if action == "channel_gifts_start":
+        raw = (message.text or "").strip()
+        if not raw.lstrip("-").isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
+            await message.answer(
+                "Kanal ID noto'g'ri. Masalan: <code>-1001234567890</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        ok, text = await engine.enable_channel_gifts(message.bot, int(raw))
+        await message.answer(
+            text,
+            reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),
+        )
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
         return True
 
     if action == "premium_timer":
