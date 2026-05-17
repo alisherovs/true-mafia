@@ -208,9 +208,12 @@ class GameEngine:
 
     async def _safe_send_message(self, bot: Bot, chat_id: int, text: str, **kwargs: Any) -> Any | None:
         try:
-            return await bot.send_message(chat_id, text, **kwargs)
+            return await asyncio.wait_for(bot.send_message(chat_id, text, **kwargs), timeout=12)
         except (TelegramBadRequest, TelegramForbiddenError) as exc:
             logger.warning("Unable to send message to chat_id=%s: %s", chat_id, exc)
+            return None
+        except asyncio.TimeoutError:
+            logger.warning("Timed out sending message to chat_id=%s", chat_id)
             return None
         except Exception:
             logger.exception("Unexpected error while sending message to chat_id=%s", chat_id)
@@ -6238,11 +6241,12 @@ class GameEngine:
             return False
 
     async def bot_is_admin(self, bot: Bot, chat_id: int) -> bool:
-        me = await bot.get_me()
         try:
-            member = await bot.get_chat_member(chat_id, me.id)
+            me = await asyncio.wait_for(bot.get_me(), timeout=8)
+            member = await asyncio.wait_for(bot.get_chat_member(chat_id, me.id), timeout=8)
             return member.status in {"administrator", "creator"}
-        except TelegramBadRequest:
+        except (TelegramBadRequest, TelegramForbiddenError, asyncio.TimeoutError) as exc:
+            logger.warning("Unable to check bot admin status chat_id=%s: %s", chat_id, exc)
             return False
 
     async def check_command_permission(self, bot: Bot, chat_id: int, user_id: int, command_key: str) -> tuple[bool, str]:
@@ -7420,7 +7424,13 @@ class GameEngine:
                 )
 
             try:
-                sent = await bot.send_message(channel_id, text, reply_markup=reply_markup)
+                sent = await asyncio.wait_for(
+                    bot.send_message(channel_id, text, reply_markup=reply_markup),
+                    timeout=12,
+                )
+            except asyncio.TimeoutError:
+                await session.rollback()
+                return False, "Kanalga xabar yuborish vaqti tugadi. Bot kanalga post yozish huquqiga ega ekanini tekshiring."
             except Exception as exc:
                 await session.rollback()
                 return False, f"Kanalga xabar yuborilmadi: {escape(str(exc))}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from typing import Union
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -975,12 +976,17 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         channel_id = int(data["channel_id"])
         mode = str(data["mode"])
         amount = int(raw_amount)
-        ok, text = await engine.start_channel_diamond_distribution(
-            message.bot,
-            channel_id=channel_id,
-            mode=mode,
-            amount=amount,
-        )
+        await message.answer("⏳ Kanalga almaz tarqatish posti yuborilmoqda...")
+        try:
+            ok, text = await engine.start_channel_diamond_distribution(
+                message.bot,
+                channel_id=channel_id,
+                mode=mode,
+                amount=amount,
+            )
+        except Exception as exc:
+            ok = False
+            text = f"Xatolik yuz berdi: {escape(str(exc))}"
         await message.answer(
             text,
             reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),
