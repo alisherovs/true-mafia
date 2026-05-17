@@ -14,7 +14,7 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import FSInputFile, User as TgUser
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, User as TgUser
 from aiogram.utils.formatting import Bold, Code, CustomEmoji, Text, TextLink
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
@@ -7335,6 +7335,106 @@ class GameEngine:
             "✅ Kanal uchun almaz tarqatish yoqildi.\n"
             f"ID: <code>{channel_id}</code>\n"
             "Kanalga tasdiq xabari yuborildi."
+        )
+
+    async def start_channel_diamond_distribution(
+        self,
+        bot: Bot,
+        *,
+        channel_id: int,
+        mode: str,
+        amount: int,
+    ) -> tuple[bool, str]:
+        if channel_id >= 0:
+            return False, "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        if mode not in {"send", "change"}:
+            return False, "Tarqatish turi noto'g'ri."
+        if amount < (1 if mode == "send" else 2):
+            minimum = 1 if mode == "send" else 2
+            return False, f"Minimal miqdor: {minimum} olmos."
+        if not await self.bot_is_admin(bot, channel_id):
+            return False, "Bot bu kanalda admin emas yoki kanal topilmadi."
+
+        async with self.session_factory() as session:
+            channel_user = (
+                await session.execute(select(User).where(User.telegram_id == channel_id))
+            ).scalar_one_or_none()
+            if channel_user is None:
+                channel_user = User(
+                    telegram_id=channel_id,
+                    display_name=f"Channel {channel_id}",
+                    language=self.settings.default_language,
+                    language_selected=False,
+                )
+                session.add(channel_user)
+                await session.flush()
+            if int(channel_user.diamonds or 0) < amount:
+                return False, (
+                    f"Kanal balansida olmos yetarli emas.\n"
+                    f"Kerak: <b>{amount}</b>, mavjud: <b>{int(channel_user.diamonds or 0)}</b>"
+                )
+
+            channel_user.diamonds = int(channel_user.diamonds or 0) - amount
+            action = "send_gift_create" if mode == "send" else "giveaway_create"
+            self._record_diamond_transaction(
+                session,
+                channel_user,
+                -amount,
+                action,
+                note=f"Kanalda almaz tarqatish: mode={mode}, amount={amount}",
+                chat_id=channel_id,
+            )
+            giveaway = DiamondGiveaway(
+                chat_id=channel_id,
+                creator_telegram_id=channel_id,
+                amount=amount,
+                participants_json="[]",
+                status="send_active" if mode == "send" else "active",
+            )
+            session.add(giveaway)
+            await session.flush()
+
+            channel_name = escape(channel_user.display_name or f"Channel {channel_id}")
+            if mode == "send":
+                text = (
+                    f"{channel_name} kanalga {amount} ta 💎 sovg'a qildi!\n\n"
+                    f"💎 Qoldi: {amount}/{amount} — 1 ta olish uchun bosing."
+                )
+                reply_markup = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway.id}")]
+                    ]
+                )
+            else:
+                text = (
+                    f"{channel_name} kimgadir {amount} ta "
+                    f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> sovg'a qilmoqchi!\n\n"
+                    "Ishtirokchilar:\n-\n\n"
+                    "Ishtirokchilar soni: 0/50"
+                )
+                reply_markup = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="🎁 Qatnashish", callback_data=f"giveaway:join:{giveaway.id}")],
+                        [InlineKeyboardButton(text="✅ Yakunlash", callback_data=f"giveaway:finish:{giveaway.id}")],
+                    ]
+                )
+
+            try:
+                sent = await bot.send_message(channel_id, text, reply_markup=reply_markup)
+            except Exception as exc:
+                await session.rollback()
+                return False, f"Kanalga xabar yuborilmadi: {escape(str(exc))}"
+
+            giveaway.message_id = sent.message_id
+            await self._set_bot_setting_value(session, f"{CHANNEL_GIFTS_ENABLED_PREFIX}{channel_id}", "1")
+            await session.commit()
+
+        label = "tez tarqatish" if mode == "send" else "ro'yxatdan o'tish"
+        return True, (
+            "✅ Almaz tarqatish kanalga yuborildi.\n\n"
+            f"Kanal ID: <code>{channel_id}</code>\n"
+            f"Turi: <b>{label}</b>\n"
+            f"Miqdor: <b>{amount}</b> 💎"
         )
 
     async def add_premium_group(

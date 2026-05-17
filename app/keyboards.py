@@ -830,6 +830,16 @@ def owner_channel_gifts_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def owner_channel_gift_mode_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎁 Tez tarqatish", callback_data="owner:channel_gifts:mode:send")],
+            [InlineKeyboardButton(text="🎲 Ro'yxatdan o'tish", callback_data="owner:channel_gifts:mode:change")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="owner:cancel")],
+        ]
+    )
+
+
 def owner_diamond_audit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

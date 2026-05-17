@@ -230,7 +230,12 @@ def _giveaway_text(creator: User, giveaway: DiamondGiveaway) -> str:
         participants_text = "\n".join(lines)
     else:
         participants_text = "-"
-    creator_name = _user_link(creator.telegram_id, creator.display_name or str(creator.telegram_id))
+    raw_creator_name = creator.display_name or str(creator.telegram_id)
+    creator_name = (
+        escape(raw_creator_name)
+        if creator.telegram_id < 0
+        else _user_link(creator.telegram_id, raw_creator_name)
+    )
     return (
         f"{creator_name} kimgadir {giveaway.amount} ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> sovg'a qilmoqchi!\n\n"
         f"Ishtirokchilar:\n{participants_text}\n\n"
@@ -901,6 +906,8 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
         total = giveaway.amount
         remaining = total - claimed_count
         creator_name = creator.display_name or str(creator.telegram_id)
+        creator_label = escape(creator_name) if creator.telegram_id < 0 else _user_link(creator.telegram_id, creator_name)
+        location_word = "kanalga" if giveaway.chat_id < 0 and creator.telegram_id < 0 else "guruhga"
 
         if remaining <= 0:
             giveaway.status = "finished"
@@ -910,7 +917,7 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
 
             lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
             final_text = (
-                f'{_user_link(creator.telegram_id, creator_name)} ajratgan sovg\'alar tugadi!\n\n'
+                f"{creator_label} ajratgan sovg'alar tugadi!\n\n"
                 f'Olganlar:\n' + "\n".join(lines)
             )
             try:
@@ -923,7 +930,7 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
 
             lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
             progress_text = (
-                f'{_user_link(creator.telegram_id, creator_name)} guruhga {total} ta 💎 sovg\'a qildi!\n\n'
+                f"{creator_label} {location_word} {total} ta 💎 sovg'a qildi!\n\n"
                 f'💎 Qoldi: {remaining}/{total} — 1 ta olish uchun bosing.\n\n'
                 f'Olganlar:\n' + "\n".join(lines)
             )
@@ -1002,7 +1009,9 @@ async def giveaway_callback(callback: CallbackQuery, engine: GameEngine) -> None
             return
 
         if action == "finish":
-            if callback.from_user.id != giveaway.creator_telegram_id:
+            is_channel_giveaway = giveaway.creator_telegram_id < 0
+            is_owner = callback.from_user.id in engine.settings.admin_ids
+            if callback.from_user.id != giveaway.creator_telegram_id and not (is_channel_giveaway and is_owner):
                 await callback.answer("Sovg'ani faqat uni uyushtirgan odam yakunlay oladi.", show_alert=True)
                 return
             participants = _giveaway_participants(giveaway.participants_json)

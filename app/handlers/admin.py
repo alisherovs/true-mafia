@@ -10,6 +10,7 @@ from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
     owner_admin_group_keyboard,
+    owner_channel_gift_mode_keyboard,
     owner_channel_gifts_keyboard,
     owner_diamond_audit_keyboard,
     owner_hero_market_keyboard,
@@ -26,6 +27,7 @@ router = Router()
 PENDING_OWNER_ACTIONS: dict[int, str] = {}
 PENDING_PREMIUM_GROUPS: dict[int, dict[str, Union[str, int]]] = {}
 PENDING_INVOICE_DATA: dict[int, dict[str, Union[str, int]]] = {}
+PENDING_CHANNEL_GIFTS: dict[int, dict[str, Union[str, int]]] = {}
 
 
 def _invoice_summary(data: dict) -> str:
@@ -423,7 +425,9 @@ async def owner_channel_gifts_callback(callback: CallbackQuery, settings: Settin
     await _safe_edit(
         callback,
         "📺 <b>Kanal sovg'a balansi</b>\n\n"
-        "Bu bo'lim orqali kanal nomidan ishlaydigan /send va /change balansini boshqarasiz.\n\n"
+        "Bu bo'lim orqali bot kanalga o'zi almaz tarqatish postini yuboradi.\n"
+        "Kanalda /send yoki /change yozish shart emas.\n\n"
+        "• Almaz tarqatishni boshlash\n"
         "• Balansni ko'rish\n"
         "• Dollar/olmos bilan to'ldirish",
         reply_markup=owner_channel_gifts_keyboard(),
@@ -476,6 +480,42 @@ async def owner_channel_gifts_start_callback(callback: CallbackQuery, settings: 
         "▶️ <b>Almaz tarqatishni boshlash</b>\n\n"
         "Kanal ID yuboring. Bot ushbu kanalda admin bo'lishi shart.\n\n"
         "Masalan: <code>-1001234567890</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:channel_gifts:mode:"))
+async def owner_channel_gifts_mode_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    data = PENDING_CHANNEL_GIFTS.get(callback.from_user.id)
+    if not data or "channel_id" not in data:
+        await callback.answer("Avval kanal ID kiriting.", show_alert=True)
+        PENDING_OWNER_ACTIONS[callback.from_user.id] = "channel_gifts_start"
+        await _safe_edit(
+            callback,
+            "▶️ <b>Almaz tarqatishni boshlash</b>\n\n"
+            "Kanal ID yuboring. Masalan: <code>-1001234567890</code>",
+            reply_markup=owner_wait_keyboard(),
+        )
+        return
+    mode = callback.data.rsplit(":", maxsplit=1)[-1]
+    if mode not in {"send", "change"}:
+        await callback.answer("Tur noto'g'ri.", show_alert=True)
+        return
+    data["mode"] = mode
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "channel_gifts_amount"
+    mode_label = "tez tarqatish" if mode == "send" else "ro'yxatdan o'tish"
+    minimum = 1 if mode == "send" else 2
+    await _safe_edit(
+        callback,
+        "💎 <b>Miqdorni kiriting</b>\n\n"
+        f"Tanlangan tur: <b>{mode_label}</b>\n"
+        f"Minimal miqdor: <b>{minimum}</b>\n\n"
+        "Nechta olmos tarqatilishini yuboring.\n"
+        "Masalan: <code>100</code>",
         reply_markup=owner_wait_keyboard(),
     )
     await callback.answer()
@@ -679,6 +719,7 @@ async def owner_cancel_callback(callback: CallbackQuery, engine: GameEngine, set
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     PENDING_PREMIUM_GROUPS.pop(callback.from_user.id, None)
     PENDING_INVOICE_DATA.pop(callback.from_user.id, None)
+    PENDING_CHANNEL_GIFTS.pop(callback.from_user.id, None)
     if callback.message:
         await callback.message.edit_text(_owner_panel_text(await engine.owner_stats()), reply_markup=owner_panel_keyboard())
     await callback.answer("Bekor qilindi.")
@@ -893,13 +934,61 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
                 reply_markup=owner_wait_keyboard(),
             )
             return True
-        ok, text = await engine.enable_channel_gifts(message.bot, int(raw))
+        channel_id = int(raw)
+        if channel_id >= 0:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
+            await message.answer(
+                "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        if not await engine.bot_is_admin(message.bot, channel_id):
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
+            await message.answer(
+                "Bot bu kanalda admin emas yoki kanal topilmadi.",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        PENDING_CHANNEL_GIFTS[message.from_user.id] = {"channel_id": channel_id}
+        await message.answer(
+            "🎛 <b>Tarqatish turini tanlang</b>\n\n"
+            "🎁 Tez tarqatish - har bir bosgan user 1 💎 oladi, olmos tugaguncha davom etadi.\n"
+            "🎲 Ro'yxatdan o'tish - userlar qatnashadi, admin yakunlaganda bitta g'olib barcha olmosni oladi.",
+            reply_markup=owner_channel_gift_mode_keyboard(),
+        )
+        return True
+
+    if action == "channel_gifts_amount":
+        data = PENDING_CHANNEL_GIFTS.get(message.from_user.id)
+        raw_amount = (message.text or "").strip()
+        if not data or "channel_id" not in data or "mode" not in data:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
+            await message.answer(
+                "Ma'lumotlar topilmadi. Qaytadan kanal ID yuboring.",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        if not raw_amount.isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_amount"
+            await message.answer("Miqdor faqat son bo'lishi kerak. Masalan: <code>100</code>", reply_markup=owner_wait_keyboard())
+            return True
+        channel_id = int(data["channel_id"])
+        mode = str(data["mode"])
+        amount = int(raw_amount)
+        ok, text = await engine.start_channel_diamond_distribution(
+            message.bot,
+            channel_id=channel_id,
+            mode=mode,
+            amount=amount,
+        )
         await message.answer(
             text,
             reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),
         )
-        if not ok:
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_start"
+        if ok:
+            PENDING_CHANNEL_GIFTS.pop(message.from_user.id, None)
+        else:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_amount"
         return True
 
     if action == "premium_timer":
