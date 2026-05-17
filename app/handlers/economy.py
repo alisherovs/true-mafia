@@ -661,14 +661,38 @@ async def cmd_money(message: Message, command: CommandObject, engine: GameEngine
 
 @router.message(Command("change"))
 async def cmd_change(message: Message, command: CommandObject, engine: GameEngine) -> None:
-    if message.from_user is None:
-        return
     if message.chat.type == "private":
+        return
+    is_channel_sender = (
+        message.chat.type == "channel"
+        and message.sender_chat is not None
+        and message.sender_chat.id == message.chat.id
+    )
+    if message.from_user is None and not is_channel_sender:
         return
     if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
         return
-    sender = await engine.ensure_user(message.from_user)
-    lang = sender.language
+    if is_channel_sender:
+        sender_id = int(message.sender_chat.id)
+        sender_name = message.sender_chat.title or message.chat.title or str(sender_id)
+        async with SessionLocal() as session:
+            sender = (await session.execute(select(User).where(User.telegram_id == sender_id))).scalar_one_or_none()
+            if sender is None:
+                sender = User(
+                    telegram_id=sender_id,
+                    display_name=sender_name[:255],
+                    language=engine.settings.default_language,
+                    language_selected=False,
+                )
+                session.add(sender)
+                await session.commit()
+        lang = sender.language or engine.settings.default_language
+    else:
+        assert message.from_user is not None
+        sender = await engine.ensure_user(message.from_user)
+        sender_id = sender.telegram_id
+        sender_name = sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+        lang = sender.language
     raw_args = (command.args or "").strip()
     if not raw_args.isdigit():
         return
@@ -681,7 +705,7 @@ async def cmd_change(message: Message, command: CommandObject, engine: GameEngin
         return
     async with SessionLocal() as session:
         fresh_sender = (
-            await session.execute(select(User).where(User.telegram_id == sender.telegram_id))
+            await session.execute(select(User).where(User.telegram_id == sender_id))
         ).scalar_one_or_none()
         if fresh_sender is None:
             await message.reply("Avval /start bosing.")
@@ -700,7 +724,7 @@ async def cmd_change(message: Message, command: CommandObject, engine: GameEngin
         )
         giveaway = DiamondGiveaway(
             chat_id=message.chat.id,
-            creator_telegram_id=sender.telegram_id,
+            creator_telegram_id=sender_id,
             amount=amount,
             participants_json="[]",
         )
@@ -718,14 +742,38 @@ async def cmd_change(message: Message, command: CommandObject, engine: GameEngin
 
 @router.message(Command("send"))
 async def cmd_send(message: Message, command: CommandObject, engine: GameEngine) -> None:
-    if message.from_user is None:
-        return
     if message.chat.type == "private":
+        return
+    is_channel_sender = (
+        message.chat.type == "channel"
+        and message.sender_chat is not None
+        and message.sender_chat.id == message.chat.id
+    )
+    if message.from_user is None and not is_channel_sender:
         return
     if message.chat.type == "channel" and not await engine.bot_is_admin(message.bot, message.chat.id):
         return
-    sender = await engine.ensure_user(message.from_user)
-    lang = sender.language
+    if is_channel_sender:
+        sender_id = int(message.sender_chat.id)
+        sender_name = message.sender_chat.title or message.chat.title or str(sender_id)
+        async with SessionLocal() as session:
+            sender = (await session.execute(select(User).where(User.telegram_id == sender_id))).scalar_one_or_none()
+            if sender is None:
+                sender = User(
+                    telegram_id=sender_id,
+                    display_name=sender_name[:255],
+                    language=engine.settings.default_language,
+                    language_selected=False,
+                )
+                session.add(sender)
+                await session.commit()
+        lang = sender.language or engine.settings.default_language
+    else:
+        assert message.from_user is not None
+        sender = await engine.ensure_user(message.from_user)
+        sender_id = sender.telegram_id
+        sender_name = sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+        lang = sender.language
     raw_args = (command.args or "").strip()
     if not raw_args.isdigit():
         return
@@ -738,7 +786,7 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
         return
     async with SessionLocal() as session:
         fresh_sender = (
-            await session.execute(select(User).where(User.telegram_id == sender.telegram_id))
+            await session.execute(select(User).where(User.telegram_id == sender_id))
         ).scalar_one_or_none()
         if fresh_sender is None:
             await message.reply("Avval /start bosing.")
@@ -757,7 +805,7 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
         )
         giveaway = DiamondGiveaway(
             chat_id=message.chat.id,
-            creator_telegram_id=sender.telegram_id,
+            creator_telegram_id=sender_id,
             amount=amount,
             participants_json="[]",
             status="send_active",
@@ -765,11 +813,12 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
         session.add(giveaway)
         await session.commit()
         giveaway_id = giveaway.id
-        sender_name = fresh_sender.display_name or message.from_user.full_name or str(sender.telegram_id)
+        sender_name = fresh_sender.display_name or sender_name
 
     remaining = amount
+    giver_label = escape(sender_name) if sender_id < 0 else _user_link(sender_id, sender_name)
     text = (
-        f'{_user_link(sender.telegram_id, sender_name)} guruhga {amount} ta 💎 sovg\'a qildi!\n\n'
+        f"{giver_label} guruhga {amount} ta 💎 sovg'a qildi!\n\n"
         f'💎 Qoldi: {remaining}/{amount} — 1 ta olish uchun bosing.'
     )
     kb = InlineKeyboardMarkup(
