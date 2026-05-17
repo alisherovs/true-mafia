@@ -23,6 +23,7 @@ from app.keyboards import (
     settings_chat_phase_keyboard,
     settings_times_keyboard,
     settings_time_value_keyboard,
+    settings_admin_confirm_keyboard,
     settings_mode_keyboard,
     settings_extra_keyboard,
     settings_extra_toggle_keyboard,
@@ -69,6 +70,7 @@ MODE_LABELS: dict[str, str] = {"normal": "🎲 Oddiy", "fast": "⚡ Tezkor", "pr
 EXTRA_LABELS: dict[str, str] = {
     "notifications": "🔔 Bildirishnoma", "auto_clean": "🗑 Avto tozalash",
     "pin_message": "📌 Pin xabar", "result_announce": "📢 Natija e'loni",
+    "admin_start_confirm": "🛡 Admin tasdiqi",
 }
 
 
@@ -391,9 +393,34 @@ async def settings_time_handler(callback: CallbackQuery, engine: GameEngine) -> 
     gsm = GroupSettingsManager(engine.session_factory)
     if len(parts) == 3:
         time_key = parts[2]
+        if time_key == "admin_start_confirm":
+            enabled = await gsm.get_extra_enabled(chat_id, "admin_start_confirm")
+            status = "✅ Yoqilgan" if enabled else "🚫 O'chirilgan"
+            await callback.message.edit_text(
+                "🛡 <b>Admin tasdiqi</b>\n\n"
+                "Yoqilsa, ro'yxatdan o'tish vaqti tugagandan keyin ham o'yin avtomatik boshlanmaydi.\n"
+                "Faqat admin guruhda /start berganda o'yin boshlanadi.\n\n"
+                f"Joriy holat: {status}",
+                reply_markup=settings_admin_confirm_keyboard(enabled),
+            )
+            await callback.answer()
+            return
         label = time_labels.get(time_key, time_key)
         current = await gsm.get_time_setting(chat_id, time_key)
         await callback.message.edit_text(f"{label}\n\nQancha vaqt bo'lsin?", reply_markup=settings_time_value_keyboard(time_key, current))
+    elif len(parts) == 4 and parts[2] == "admin_start_confirm":
+        action = parts[3]
+        if not await _deny_if_not_admin(callback, chat_id, engine): return
+        enabled = action == "on"
+        await gsm.set_extra_enabled(chat_id, "admin_start_confirm", enabled)
+        status = "✅ Yoqilgan" if enabled else "🚫 O'chirilgan"
+        await callback.message.edit_text(
+            "🛡 <b>Admin tasdiqi</b>\n\n"
+            "Yoqilsa, ro'yxatdan o'tish vaqti tugagandan keyin ham o'yin avtomatik boshlanmaydi.\n"
+            "Faqat admin guruhda /start berganda o'yin boshlanadi.\n\n"
+            f"Joriy holat: {status}",
+            reply_markup=settings_admin_confirm_keyboard(enabled),
+        )
     elif len(parts) == 4:
         time_key, seconds = parts[2], int(parts[3])
         if not await _deny_if_not_admin(callback, chat_id, engine): return

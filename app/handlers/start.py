@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, Message
 from app.config import Settings
 from app.enums import GameStatus
 from app.game_engine import GameEngine
+from app.group_settings import GroupSettingsManager
 from app.keyboards import language_keyboard, premium_groups_keyboard, profile_dashboard_keyboard, start_menu_keyboard
 from app.texts import t
 
@@ -56,7 +57,14 @@ async def cmd_start(
             if not await engine.bot_is_admin(message.bot, message.chat.id):
                 await message.reply(t(lang, "bot_not_admin"))
                 return
-            await engine.close_registration(message.bot, game.id)
+            gsm = GroupSettingsManager(engine.session_factory)
+            admin_confirm = await gsm.get_extra_enabled(message.chat.id, "admin_start_confirm")
+            if admin_confirm:
+                allowed = await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id)
+                if not allowed:
+                    await message.reply("❌ Admin tasdiqi yoqilgan: o'yinni faqat admin /start bilan boshlay oladi.")
+                    return
+            await engine.close_registration(message.bot, game.id, force=True)
             return
         if game.status == GameStatus.ACTIVE.value:
             await message.reply(t(lang, "group_start_game_active"))

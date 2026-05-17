@@ -1248,6 +1248,85 @@ class GameEngine:
 
         return True, "🚪 Siz o'yindan chiqdingiz. 30 daqiqa davomida boshqa o'yinga qo'shila olmaysiz."
 
+    async def admin_remove_player_by_number(
+        self,
+        bot: Bot,
+        chat_id: int,
+        admin_id: int,
+        player_number: int,
+    ) -> tuple[bool, str]:
+        if player_number < 1:
+            return False, "Raqam 1 dan katta bo'lishi kerak."
+
+        async with self.session_factory() as session:
+            game = await self.find_active_game(session, chat_id)
+            if game is None:
+                lang = await self.get_group_language(chat_id)
+                return False, t(lang, "no_active_game")
+            if game.status != GameStatus.ACTIVE.value:
+                return False, "Bu buyruq faqat davom etayotgan o'yinda ishlaydi."
+
+            allowed = await self.is_admin_or_creator(bot, chat_id, admin_id, game.creator_telegram_id)
+            if not allowed:
+                lang = await self.get_group_language(chat_id)
+                return False, t(lang, "no_permission")
+
+            alive_players = await self._alive_players(session, game.id)
+            if not alive_players:
+                return False, "Tirik o'yinchilar topilmadi."
+            if player_number > len(alive_players):
+                return False, f"Noto'g'ri raqam. Hozir {len(alive_players)} ta tirik o'yinchi bor."
+
+            target = alive_players[player_number - 1]
+            target.alive = False
+            target.left_game = True
+            target.death_day = game.day_number
+            target.awaiting_last_words = False
+            target.last_words = None
+
+            self._add_game_log(
+                session,
+                game,
+                "player_removed_by_admin",
+                actor=target,
+                admin_id=admin_id,
+                player_number=player_number,
+            )
+
+            all_players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game.id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            succession_events = self._apply_role_successions(all_players, {target.telegram_id})
+            await session.commit()
+            game_id = game.id
+            target_mention = self._tg_mention(target.telegram_id, target.display_name)
+
+        self._invalidate_game_cache(chat_id)
+        await self._safe_send_message(
+            bot,
+            chat_id,
+            f"⛔️ Admin qarori bilan {player_number}-raqamli o'yinchi {target_mention} o'yindan chetlatildi.\n"
+            f"U edi {role_label(target.role)}.",
+        )
+
+        for line, heir_id, new_role in succession_events:
+            await self._safe_send_message(bot, chat_id, line)
+            try:
+                await bot.send_message(
+                    heir_id,
+                    self._private_role_text(new_role),
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        winner = await self.check_winner(game_id)
+        if winner:
+            await self.finish_game(bot, game_id, winner)
+        return True, "O'yinchi chetlatildi."
+
     async def extend_registration(self, bot: Bot, game_id: int, seconds: int) -> tuple[bool, str]:
         seconds = 60 if seconds >= 60 else 30
         async with self.session_factory() as session:
@@ -1310,7 +1389,7 @@ class GameEngine:
             if job:
                 job.remove()
 
-    async def close_registration(self, bot: Bot, game_id: int) -> None:
+    async def close_registration(self, bot: Bot, game_id: int, force: bool = False) -> None:
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.REGISTRATION.value:
@@ -1323,6 +1402,28 @@ class GameEngine:
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc()))
             ).scalars().all()
             lang = await self.get_group_language(game.chat_id)
+            gsm = GroupSettingsManager(self.session_factory)
+            admin_start_confirm = await gsm.get_extra_enabled(game.chat_id, "admin_start_confirm")
+
+            if admin_start_confirm and not force:
+                if game.registration_ends_at is not None:
+                    game.registration_ends_at = None
+                    self._add_game_log(
+                        session,
+                        game,
+                        "registration_waiting_admin_confirmation",
+                        players_count=len(players),
+                        min_players=min_players,
+                    )
+                    await session.commit()
+                self._invalidate_game_cache(game.chat_id)
+                self._cleanup_jobs(game_id)
+                await self._safe_send_message(
+                    bot,
+                    game.chat_id,
+                    "🛡 Admin tasdiqi yoqilgan.\nRo'yxatdan o'tish davom etadi. O'yin admin /start berganda boshlanadi.",
+                )
+                return
 
             if len(players) < min_players:
                 game.status = GameStatus.CANCELLED.value

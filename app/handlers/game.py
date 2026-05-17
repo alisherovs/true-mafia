@@ -5,6 +5,7 @@ from aiogram.types import Message
 from aiogram import Router
 
 from app.game_engine import GameEngine
+from app.enums import GameStatus
 from app.texts import t
 
 router = Router()
@@ -166,3 +167,41 @@ async def cmd_lastwords(message: Message, command: CommandObject, engine: GameEn
     ok, response = await engine.set_last_words(message.from_user.id, text)
     await message.answer(response)
 
+
+@router.message(Command("tep"))
+async def cmd_tep(message: Message, command: CommandObject, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        lang = await engine.get_user_language(message.from_user.id)
+        await message.answer(t(lang, "command_in_group"))
+        return
+
+    game = await engine.active_game_for_chat(message.chat.id)
+    lang = await engine.get_group_language(message.chat.id)
+    if game is None:
+        await message.answer(t(lang, "no_active_game"))
+        return
+    if game.status != GameStatus.ACTIVE.value:
+        await message.answer("Bu buyruq faqat davom etayotgan o'yinda ishlaydi.")
+        return
+
+    allowed = await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id, game.creator_telegram_id)
+    if not allowed:
+        await message.answer(t(lang, "no_permission"))
+        return
+
+    raw = (command.args or "").strip()
+    if not raw.isdigit():
+        await message.answer("Foydalanish: /tep <o'yinchi raqami>\nMasalan: /tep 1")
+        return
+
+    number = int(raw)
+    ok, text = await engine.admin_remove_player_by_number(
+        bot=message.bot,
+        chat_id=message.chat.id,
+        admin_id=message.from_user.id,
+        player_number=number,
+    )
+    if not ok:
+        await message.answer(text)

@@ -1059,6 +1059,7 @@ def settings_times_keyboard() -> InlineKeyboardMarkup:
         [_btn("☀️ Kun vaqti", "settings:time:day_time")],
         [_btn("🗳 Ovoz berish", "settings:time:vote_time")],
         [_btn("⏳ Ro'yxatdan o'tish", "settings:time:registration_time")],
+        [_btn("🛡 Admin tasdiqi", "settings:time:admin_start_confirm")],
         _back_exit_row("main"),
     ])
 
@@ -1071,6 +1072,16 @@ def settings_time_value_keyboard(time_key: str, current: int = 0) -> InlineKeybo
         rows.append([_btn(f"{mark}{v} soniya", f"settings:time:{time_key}:{v}")])
     rows.append(_back_exit_row("times"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_admin_confirm_keyboard(enabled: bool = False) -> InlineKeyboardMarkup:
+    on_mark = "✅ " if enabled else ""
+    off_mark = "✅ " if not enabled else ""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [_btn(f"{on_mark}✅ Yoqish", "settings:time:admin_start_confirm:on")],
+        [_btn(f"{off_mark}🚫 O'chirish", "settings:time:admin_start_confirm:off")],
+        _back_exit_row("times"),
+    ])
 
 
 def settings_mode_keyboard(current: str = "normal") -> InlineKeyboardMarkup:

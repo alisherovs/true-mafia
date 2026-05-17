@@ -35,7 +35,7 @@ COMMAND_KEYS = [
 
 TIME_KEYS = ["night_time", "day_time", "vote_time", "registration_time"]
 
-EXTRA_KEYS = ["notifications", "auto_clean", "pin_message", "result_announce"]
+EXTRA_KEYS = ["notifications", "auto_clean", "pin_message", "result_announce", "admin_start_confirm"]
 
 DEFAULT_COMMAND_PERMISSIONS = {
     "start": "user", "stop": "admin", "game": "user",
@@ -49,6 +49,7 @@ DEFAULT_TIME_SECONDS = {
 
 DEFAULT_EXTRA = {
     "notifications": True, "auto_clean": False, "pin_message": False, "result_announce": True,
+    "admin_start_confirm": False,
 }
 
 
