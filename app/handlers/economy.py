@@ -42,7 +42,7 @@ LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
-TELEGRAM_GIFTS_ENABLED = False
+TELEGRAM_GIFTS_ENABLED = True
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
