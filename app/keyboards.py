@@ -514,10 +514,14 @@ def vip_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def box_info_keyboard(box_type: str, can_paid_open: bool = False) -> InlineKeyboardMarkup:
+def box_info_keyboard(
+    box_type: str,
+    can_paid_open: bool = False,
+    paid_open_cost: int = 5000,
+) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="🎁 Ochish", callback_data=f"box:open:{box_type}")]]
     if can_paid_open:
-        rows.append([InlineKeyboardButton(text="💵 5000 evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
+        rows.append([InlineKeyboardButton(text=f"💵 {paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="vip:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

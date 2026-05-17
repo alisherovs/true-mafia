@@ -41,6 +41,7 @@ DOLLAR_EMOJI_ID = "5409048419211682843"
 LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
+BOX_MEGA_COOLDOWN = timedelta(days=14)
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
@@ -130,6 +131,33 @@ def _record_diamond_transaction(
             user_name=(user.display_name or "User")[:255],
             amount=int(amount),
             balance_after=int(user.diamonds or 0),
+            action=action[:64],
+            note=note or None,
+            counterparty_telegram_id=counterparty.telegram_id if counterparty else None,
+            counterparty_name=(counterparty.display_name or "User")[:255] if counterparty else None,
+            chat_id=chat_id,
+        )
+    )
+
+
+def _record_dollar_transaction(
+    session,
+    user: User,
+    amount: int,
+    action: str,
+    *,
+    note: str = "",
+    counterparty: Optional[User] = None,
+    chat_id: Optional[int] = None,
+) -> None:
+    if amount == 0:
+        return
+    session.add(
+        DollarTransaction(
+            user_telegram_id=user.telegram_id,
+            user_name=(user.display_name or "User")[:255],
+            amount=int(amount),
+            balance_after=int(user.dollar or 0),
             action=action[:64],
             note=note or None,
             counterparty_telegram_id=counterparty.telegram_id if counterparty else None,
@@ -1522,8 +1550,7 @@ async def box_info(callback: CallbackQuery) -> None:
         text = (
             "🎁 <b>Oddiy Keys</b>\n\n"
             "• Haftasiga 1 marta bepul\n"
-            "• Mukofot: 💵 100-200 yoki 💎 1-3\n"
-            "• 💎 tushish ehtimoli: 10%"
+            "• Mukofot: 💵 100-200 yoki 💎 1-3"
         )
         kb = box_info_keyboard(box_type)
     elif box_type == "super":
@@ -1532,18 +1559,20 @@ async def box_info(callback: CallbackQuery) -> None:
             "• Faqat VIP user uchun\n"
             "• Har 3 kunda 1 marta bepul\n"
             "• Yoki 💵 5000 evaziga ochish\n"
-            "• Mukofot: 💵 1000-3000 yoki 💎 1-4\n"
-            "• 💎 tushish ehtimoli: 30%"
+            "• Mukofot: 💵 1000-3000 yoki 💎 1-4"
         )
         kb = box_info_keyboard(box_type, can_paid_open=is_vip)
     else:
         text = (
             "👑 <b>Mega Quti</b>\n\n"
+            "• Faqat VIP user uchun bepul ochiladi\n"
+            "• Har 14 kunda 1 marta bepul\n"
+            "• Yoki 💵 8000 evaziga ochish\n"
             "• Faqat 💎 beradi\n"
             "• Mukofot: 💎 1-8\n"
             "• Yuqori olmoslar ehtimoli pasaytirilgan"
         )
-        kb = box_info_keyboard(box_type)
+        kb = box_info_keyboard(box_type, can_paid_open=True, paid_open_cost=8000)
     try:
         await callback.message.edit_text(text, reply_markup=kb)
     except TelegramBadRequest:
@@ -1569,6 +1598,9 @@ async def box_open(callback: CallbackQuery) -> None:
         if box_type == "super" and not _user_is_vip(user):
             await callback.answer("Super keys faqat VIP user uchun.", show_alert=True)
             return
+        if box_type == "mega" and not _user_is_vip(user):
+            await callback.answer("Mega quti bepul ochilishi faqat VIP user uchun.", show_alert=True)
+            return
         cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id)))).scalar_one_or_none()
         if cd_row and cd_row.value:
             try:
@@ -1577,7 +1609,12 @@ async def box_open(callback: CallbackQuery) -> None:
                 cd_until = None
         else:
             cd_until = None
-        cooldown = BOX_NORMAL_COOLDOWN if box_type == "normal" else BOX_SUPER_COOLDOWN if box_type == "super" else timedelta(0)
+        cooldown = (
+            BOX_NORMAL_COOLDOWN if box_type == "normal"
+            else BOX_SUPER_COOLDOWN if box_type == "super"
+            else BOX_MEGA_COOLDOWN if box_type == "mega"
+            else timedelta(0)
+        )
         if cooldown.total_seconds() > 0 and cd_until and cd_until > now:
             await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(cd_until - now)}", show_alert=True)
             return
@@ -1646,6 +1683,49 @@ async def box_open_paid_super(callback: CallbackQuery) -> None:
     except TelegramBadRequest:
         pass
     await callback.answer("✅ 5000 dollar yechildi, quti ochildi.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("box:open_paid:mega"))
+async def box_open_paid_mega(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    now = _utc_now()
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        if (user.dollar or 0) < 8000:
+            await callback.answer("Balans yetarli emas. Kerak: 💵 8000", show_alert=True)
+            return
+        user.dollar -= 8000
+        _record_dollar_transaction(
+            session,
+            user,
+            -8000,
+            "mega_box_open_paid",
+            note="Mega quti pullik ochildi",
+        )
+        rewards = _generate_box_rewards("mega")
+        session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
+        payload = {"box_type": "mega", "session_id": session_id, "rewards": rewards, "claimed": False}
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await session.commit()
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Mega quti</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard("mega", session_id),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer("✅ 8000 dollar yechildi, quti ochildi.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("box:pick:"))
@@ -1723,11 +1803,21 @@ async def box_pick(callback: CallbackQuery) -> None:
                 session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
             else:
                 cd_row.value = cd_until.isoformat()
+        elif box_type == "mega":
+            cd_until = now + BOX_MEGA_COOLDOWN
+            cd_key = _box_cd_key("mega", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
         await session.commit()
+    can_paid_open = box_type in {"super", "mega"}
+    paid_open_cost = 8000 if box_type == "mega" else 5000
     try:
         await callback.message.edit_text(
             f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
-            reply_markup=box_info_keyboard(box_type, can_paid_open=(box_type == "super")),
+            reply_markup=box_info_keyboard(box_type, can_paid_open=can_paid_open, paid_open_cost=paid_open_cost),
         )
     except TelegramBadRequest:
         pass
