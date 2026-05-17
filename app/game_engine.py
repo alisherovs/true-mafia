@@ -243,6 +243,31 @@ class GameEngine:
                 return f"@{path}"
         return raw
 
+    @staticmethod
+    def _owned_roles_key(telegram_id: int) -> str:
+        return f"owned_roles:{telegram_id}"
+
+    @staticmethod
+    def _owned_roles_cursor_key(telegram_id: int) -> str:
+        return f"owned_roles_cursor:{telegram_id}"
+
+    @staticmethod
+    def _role_player_count_ok(role: Role, mode: str, player_count: int) -> bool:
+        normalized = normalize_game_mode(mode)
+        if role == Role.MINER:
+            if normalized == "classic":
+                return player_count > 15
+            if normalized == "mega":
+                return player_count >= 10
+            return player_count >= 15
+        if role == Role.HOJIAKA:
+            if normalized == "classic":
+                return player_count > 14
+            if normalized == "mega":
+                return player_count >= 10
+            return player_count >= 15
+        return True
+
     async def user_has_news_bonus(self, bot: Bot, user_id: int) -> bool:
         try:
             member = await bot.get_chat_member(self._news_bonus_channel_id(), user_id)
@@ -1519,24 +1544,70 @@ class GameEngine:
                 [role.value for role in sorted(disabled_roles, key=lambda r: r.value)],
             )
             assigned = dict(zip([p.telegram_id for p in players], roles))
+            owned_role_keys = [self._owned_roles_key(p.telegram_id) for p in players]
+            cursor_keys = [self._owned_roles_cursor_key(p.telegram_id) for p in players]
+            owned_settings = (
+                await session.execute(
+                    select(BotSetting).where(BotSetting.key.in_(owned_role_keys + cursor_keys))
+                )
+            ).scalars().all()
+            owned_by_key = {row.key: row for row in owned_settings}
 
             for player in players:
                 user = users.get(player.telegram_id)
-                if user is None or not user.next_game_role:
+                if user is None:
                     continue
-                try:
-                    desired = Role(user.next_game_role)
-                except ValueError:
-                    user.next_game_role = None
+                desired: Optional[Role] = None
+                selected_manually = bool(user.next_game_role)
+                if user.next_game_role:
+                    try:
+                        desired = Role(user.next_game_role)
+                    except ValueError:
+                        user.next_game_role = None
+                        desired = None
+                else:
+                    owned_row = owned_by_key.get(self._owned_roles_key(player.telegram_id))
+                    cursor_row = owned_by_key.get(self._owned_roles_cursor_key(player.telegram_id))
+                    try:
+                        raw_roles = json.loads(owned_row.value) if owned_row and owned_row.value else []
+                    except (TypeError, ValueError):
+                        raw_roles = []
+                    owned_roles: list[Role] = []
+                    for value in raw_roles if isinstance(raw_roles, list) else []:
+                        try:
+                            owned_roles.append(Role(str(value)))
+                        except ValueError:
+                            continue
+                    if owned_roles:
+                        cursor = 0
+                        if cursor_row and cursor_row.value and cursor_row.value.lstrip("-").isdigit():
+                            cursor = max(0, int(cursor_row.value))
+                        desired = owned_roles[cursor % len(owned_roles)]
+                        next_cursor = (cursor + 1) % len(owned_roles)
+                        if cursor_row is None:
+                            cursor_row = BotSetting(key=self._owned_roles_cursor_key(player.telegram_id), value=str(next_cursor))
+                            session.add(cursor_row)
+                            owned_by_key[cursor_row.key] = cursor_row
+                        else:
+                            cursor_row.value = str(next_cursor)
+                if desired is None:
                     continue
-                if desired in disabled_roles:
-                    user.next_game_role = None
+                if desired in disabled_roles or not self._role_player_count_ok(desired, role_preset, len(players)):
+                    if selected_manually:
+                        # Qo'lda tanlangan rol o'yinchilar soni yetmagani uchun ishlamasa, keyingi o'yinlar uchun saqlanadi.
+                        pass
+                    else:
+                        # Avto rejimda bu tur rol mos bo'lmasa oddiy taqsimot qo'llanadi.
+                        pass
+                    continue
+                if desired not in roles and desired not in {Role.MINER, Role.HOJIAKA}:
                     continue
                 holder = next((p for p in players if assigned[p.telegram_id] == desired), None)
                 if holder is not None and holder.telegram_id != player.telegram_id:
                     assigned[holder.telegram_id] = assigned[player.telegram_id]
                 assigned[player.telegram_id] = desired
-                user.next_game_role = None
+                if selected_manually:
+                    user.next_game_role = None
 
             for player, role in zip(players, roles):
                 user = users.get(player.telegram_id)
@@ -6419,6 +6490,48 @@ class GameEngine:
 
         return True, f"✅ 💎 {amount} almaz → 💵 {dollars} dollar almashtirildi."
 
+    async def get_owned_roles(self, telegram_id: int) -> list[str]:
+        key = self._owned_roles_key(telegram_id)
+        async with self.session_factory() as session:
+            raw = (await session.execute(select(BotSetting.value).where(BotSetting.key == key))).scalar_one_or_none()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return []
+        roles: list[str] = []
+        for value in parsed if isinstance(parsed, list) else []:
+            try:
+                role = Role(str(value))
+            except ValueError:
+                continue
+            roles.append(role.value)
+        return roles
+
+    async def get_user_selected_next_role(self, telegram_id: int) -> Optional[str]:
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None or not user.next_game_role:
+                return None
+            return user.next_game_role
+
+    async def select_owned_role_for_next_game(self, telegram_id: int, role_value: str) -> tuple[bool, str]:
+        try:
+            selected_role = Role(role_value)
+        except ValueError:
+            return False, "Noto'g'ri rol."
+        owned = await self.get_owned_roles(telegram_id)
+        if selected_role.value not in owned:
+            return False, "Bu rol sizning ro'yxatingizda yo'q."
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None:
+                return False, "Avval /start bosing."
+            user.next_game_role = selected_role.value
+            await session.commit()
+        return True, f"✅ Keyingi o'yin uchun tanlandi: {role_label(selected_role)}"
+
     async def buy_shop_item(self, telegram_id: int, item_key: str) -> tuple[bool, str]:
         prices: dict[str, tuple[int, str, str, Union[int, str]]] = {
             "protection": (100, "dollar", "protection", 1),
@@ -6437,8 +6550,6 @@ class GameEngine:
                 user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
                 if user is None:
                     return False, "Avval /start bosing."
-                if user.next_game_role:
-                    return False, f"Keyingi o'yin uchun rol allaqachon tanlangan: {role_label(user.next_game_role)}"
                 balance = user.diamonds if shop_role.currency == "diamonds" else user.dollar
                 icon = "💎" if shop_role.currency == "diamonds" else "💵"
                 if balance < shop_role.price:
@@ -6454,9 +6565,33 @@ class GameEngine:
                     )
                 else:
                     user.dollar -= shop_role.price
-                user.next_game_role = shop_role.role.value
+                roles_key = self._owned_roles_key(telegram_id)
+                raw_owned = (await session.execute(select(BotSetting).where(BotSetting.key == roles_key))).scalar_one_or_none()
+                if raw_owned is None:
+                    owned_roles: list[str] = []
+                    raw_owned = BotSetting(key=roles_key, value="[]")
+                    session.add(raw_owned)
+                else:
+                    try:
+                        owned_roles = json.loads(raw_owned.value or "[]")
+                    except (TypeError, ValueError):
+                        owned_roles = []
+                normalized_owned: list[str] = []
+                for rv in owned_roles if isinstance(owned_roles, list) else []:
+                    try:
+                        normalized_owned.append(Role(str(rv)).value)
+                    except ValueError:
+                        continue
+                if shop_role.role.value not in normalized_owned:
+                    normalized_owned.append(shop_role.role.value)
+                raw_owned.value = json.dumps(normalized_owned, ensure_ascii=True)
+                if not user.next_game_role:
+                    user.next_game_role = shop_role.role.value
                 await session.commit()
-            return True, f"✅ Keyingi o'yinda sizga {role_label(shop_role.role)} roli beriladi."
+            return True, (
+                f"✅ {role_label(shop_role.role)} roli sotib olindi va ro'yxatingizga qo'shildi.\n"
+                "Keyingi o'yinlarda rollaringiz avtomatik tartibda ishlatiladi."
+            )
 
         if item_key.startswith("disable_role:"):
             role_value = item_key.split(":", maxsplit=1)[1]

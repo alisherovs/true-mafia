@@ -667,8 +667,23 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
                 callback_data=f"shop:role:{item.role.value}",
             )
         ])
+    rows.append([InlineKeyboardButton(text="🎒 Mening rollarim", callback_data="shop:my_roles")])
     rows.append([InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")])
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def my_roles_keyboard(roles: list[str], selected_role: str | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for role_value in roles:
+        mark = "✅ " if selected_role == role_value else ""
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{mark}{role_label(role_value)}",
+                callback_data=f"shop:my_role:{role_value}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:roles")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

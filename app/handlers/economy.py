@@ -25,6 +25,7 @@ from app.keyboards import (
     premium_confirm_keyboard,
     premium_shop_keyboard,
     role_shop_keyboard,
+    my_roles_keyboard,
     shop_keyboard,
     vip_keyboard,
 )
@@ -235,10 +236,39 @@ async def shop_roles_callback(callback: CallbackQuery) -> None:
         return
     await callback.message.edit_text(
         "🃏 <b>Keyingi o'yindagi rol</b>\n\n"
-        "Tanlangan rol keyingi o'yinda sizga beriladi. Agar balans yetarli bo'lsa, xarid faqat bir marta saqlanadi.",
+        "Sotib olgan rollaringiz saqlanadi.\n"
+        "Agar siz qo'lda tanlamasangiz, ular avtomatik navbat bilan keyingi o'yinlarda ishlatiladi.",
         reply_markup=role_shop_keyboard(),
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "shop:my_roles")
+async def shop_my_roles_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    owned_roles = await engine.get_owned_roles(callback.from_user.id)
+    selected_role = await engine.get_user_selected_next_role(callback.from_user.id)
+    if not owned_roles:
+        await callback.answer("Sizda hali sotib olingan rollar yo'q.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "🎒 <b>Mening rollarim</b>\n\n"
+        "Quyidan rol tanlasangiz, keyingi o'yinda shu rol birinchi navbatda qo'llanadi.",
+        reply_markup=my_roles_keyboard(owned_roles, selected_role),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:my_role:"))
+async def shop_my_role_select_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    role_key = callback.data.split(":", maxsplit=2)[2]
+    ok, text = await engine.select_owned_role_for_next_game(callback.from_user.id, role_key)
+    await callback.answer(text, show_alert=not ok)
 
 
 @router.callback_query(F.data == "shop:disable_roles")
