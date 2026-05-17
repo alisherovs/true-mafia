@@ -7399,11 +7399,23 @@ class GameEngine:
             session.add(giveaway)
             await session.flush()
 
-            channel_name = escape(channel_user.display_name or f"Channel {channel_id}")
+            try:
+                chat = await asyncio.wait_for(bot.get_chat(channel_id), timeout=8)
+                channel_title = getattr(chat, "title", None) or channel_user.display_name or f"Channel {channel_id}"
+                channel_user.display_name = str(channel_title)[:255]
+            except Exception:
+                channel_title = channel_user.display_name or f"Channel {channel_id}"
+            channel_name = escape(str(channel_title))
+            diamond = f'<tg-emoji emoji-id="{DIAMOND_EMOJI_ID}">💎</tg-emoji>'
             if mode == "send":
                 text = (
-                    f"{channel_name} kanalga {amount} ta 💎 sovg'a qildi!\n\n"
-                    f"💎 Qoldi: {amount}/{amount} — 1 ta olish uchun bosing."
+                    "🎁 <b>Almaz tarqatish boshlandi</b>\n\n"
+                    f"📣 <b>{channel_name}</b>\n"
+                    f"{diamond} Jami: <b>{amount}</b> ta\n"
+                    f"📦 Qoldi: <b>{amount}</b> ta\n\n"
+                    "👥 <b>Olganlar</b>\n"
+                    "Hali hech kim olmadi.\n\n"
+                    "👇 Pastdagi tugma orqali 1 ta olmos oling."
                 )
                 reply_markup = InlineKeyboardMarkup(
                     inline_keyboard=[

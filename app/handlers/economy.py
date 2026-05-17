@@ -93,6 +93,40 @@ def _user_link(user_id: int, name: str) -> str:
     return f'<a href="tg://user?id={user_id}">{escape(name)}</a>'
 
 
+def _diamond_emoji() -> str:
+    return f'<tg-emoji emoji-id="{DIAMOND_EMOJI_ID}">💎</tg-emoji>'
+
+
+def _channel_sendgift_text(
+    channel_name: str,
+    total: int,
+    remaining: int,
+    participants: list[dict[str, object]],
+    *,
+    finished: bool = False,
+) -> str:
+    diamond = _diamond_emoji()
+    safe_channel = escape(channel_name or "Kanal")
+    if participants:
+        users_text = "\n".join(
+            f"{idx}. {_user_link(int(item['id']), str(item['name']))} — {diamond} <b>1</b>"
+            for idx, item in enumerate(participants, 1)
+        )
+    else:
+        users_text = "Hali hech kim olmadi."
+
+    status = "✅ <b>Tarqatish yakunlandi</b>" if finished else "🎁 <b>Almaz tarqatish boshlandi</b>"
+    footer = "Barcha olmoslar tarqatildi." if finished else "Pastdagi tugma orqali 1 ta olmos oling."
+    return (
+        f"{status}\n\n"
+        f"📣 <b>{safe_channel}</b>\n"
+        f"{diamond} Jami: <b>{total}</b> ta\n"
+        f"📦 Qoldi: <b>{remaining}</b> ta\n\n"
+        f"👥 <b>Olganlar</b>\n{users_text}\n\n"
+        f"👇 {footer}"
+    )
+
+
 def _user_text_link(user_id: int, name: str) -> TextLink:
     return TextLink(name or str(user_id), url=f"tg://user?id={user_id}")
 
@@ -915,11 +949,20 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
             giveaway.winner_telegram_id = callback.from_user.id
             await session.commit()
 
-            lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
-            final_text = (
-                f"{creator_label} ajratgan sovg'alar tugadi!\n\n"
-                f'Olganlar:\n' + "\n".join(lines)
-            )
+            if giveaway.creator_telegram_id < 0 and giveaway.chat_id < 0:
+                final_text = _channel_sendgift_text(
+                    creator_name,
+                    total,
+                    0,
+                    participants,
+                    finished=True,
+                )
+            else:
+                lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
+                final_text = (
+                    f"{creator_label} ajratgan sovg'alar tugadi!\n\n"
+                    f'Olganlar:\n' + "\n".join(lines)
+                )
             try:
                 await callback.message.edit_text(final_text, reply_markup=None)
             except TelegramBadRequest:
@@ -928,12 +971,20 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
         else:
             await session.commit()
 
-            lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
-            progress_text = (
-                f"{creator_label} {location_word} {total} ta 💎 sovg'a qildi!\n\n"
-                f'💎 Qoldi: {remaining}/{total} — 1 ta olish uchun bosing.\n\n'
-                f'Olganlar:\n' + "\n".join(lines)
-            )
+            if giveaway.creator_telegram_id < 0 and giveaway.chat_id < 0:
+                progress_text = _channel_sendgift_text(
+                    creator_name,
+                    total,
+                    remaining,
+                    participants,
+                )
+            else:
+                lines = [f"{i+1}) {_user_link(int(p['id']), p['name'])} 1💎" for i, p in enumerate(participants)]
+                progress_text = (
+                    f"{creator_label} {location_word} {total} ta 💎 sovg'a qildi!\n\n"
+                    f'💎 Qoldi: {remaining}/{total} — 1 ta olish uchun bosing.\n\n'
+                    f'Olganlar:\n' + "\n".join(lines)
+                )
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway_id}")]
