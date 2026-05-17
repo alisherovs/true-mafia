@@ -165,6 +165,14 @@ class GroupSettingsManager:
             gs.leave_allowed = allowed
             await session.commit()
 
+    async def set_leave_lock_minutes(self, chat_id: int, minutes: int) -> None:
+        await self.ensure_defaults(chat_id)
+        minutes = max(0, min(1440, int(minutes)))
+        async with self.session_factory() as session:
+            gs = await session.get(GroupSettings, chat_id)
+            gs.leave_lock_minutes = minutes
+            await session.commit()
+
     async def set_game_mode(self, chat_id: int, mode: str) -> None:
         await self.ensure_defaults(chat_id)
         async with self.session_factory() as session:
@@ -432,6 +440,7 @@ class GroupSettingsManager:
             "giveaway_diamond": gs.giveaway_diamond,
             "giveaway_protection": gs.giveaway_protection,
             "leave_allowed": gs.leave_allowed,
+            "leave_lock_minutes": int(getattr(gs, "leave_lock_minutes", 30) or 0),
             "game_mode": gs.game_mode,
             "roles_enabled": roles_enabled_count,
             "roles_disabled": roles_disabled_count,

@@ -401,6 +401,7 @@ class GroupSettings(Base):
     giveaway_diamond: Mapped[int] = mapped_column(Integer, default=0)
     giveaway_protection: Mapped[int] = mapped_column(Integer, default=0)
     leave_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    leave_lock_minutes: Mapped[int] = mapped_column(Integer, default=30)
     game_mode: Mapped[str] = mapped_column(String(32), default="normal")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

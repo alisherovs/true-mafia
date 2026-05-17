@@ -132,6 +132,16 @@ async def _ensure_lightweight_columns(conn) -> None:
         },
     )
     await add_missing_columns(
+        "group_settings",
+        {
+            "giveaway_diamond": "INTEGER DEFAULT 0",
+            "giveaway_protection": "INTEGER DEFAULT 0",
+            "leave_allowed": "BOOLEAN DEFAULT TRUE",
+            "leave_lock_minutes": "INTEGER DEFAULT 30",
+            "game_mode": "VARCHAR(32) DEFAULT 'normal'",
+        },
+    )
+    await add_missing_columns(
         "game_players",
         {
             "user_id": "INTEGER",

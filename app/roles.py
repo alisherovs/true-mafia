@@ -209,9 +209,9 @@ ROLE_META: dict[Role, RoleMeta] = {
     Role.PRANKSTER: RoleMeta(
         Role.PRANKSTER,
         Team.NEUTRAL,
-        "🧑🏻‍🦲",
-        "Hazilkash",
-        "Siz tunda bir kishini tanlaysiz va unga hazil qilasiz. U o'sha tunda hazilomus harakatlar qiladi.",
+        "🃏",
+        "Joker",
+        "Har tunda 4 kartadan birini o'lim kartasi qilib belgilaysiz va nishonga yuborasiz. Agar nishon o'lim kartasini tanlasa, u o'ladi.",
     ),
     Role.HOJIAKA: RoleMeta(
         Role.HOJIAKA,
@@ -339,7 +339,7 @@ def _with_miner(player_count: int, roles: list[Role]) -> list[Role]:
 
 
 def _with_prankster(player_count: int, roles: list[Role]) -> list[Role]:
-    if player_count < 15 or Role.PRANKSTER in roles:
+    if player_count < 17 or Role.PRANKSTER in roles:
         return roles
     updated = list(roles)
     replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
@@ -639,6 +639,8 @@ def _split_active_roles(player_count: int, disabled_roles: set[Role]) -> tuple[l
 def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
     roles = [role for role in SUPER_ROLE_ORDER[:player_count] if role not in disabled_roles]
     filler = [role for role in SUPER_FILLER_ORDER if role not in disabled_roles] or [Role.CITIZEN]
+    if player_count < 12:
+        roles = [role for role in roles if role != Role.PRANKSTER]
     idx = 0
     while len(roles) < player_count:
         roles.append(filler[idx % len(filler)])
@@ -649,6 +651,8 @@ def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Rol
 def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role]:
     roles = [role for role in MEGA_ROLE_ORDER[:player_count] if role not in disabled_roles]
     filler = [role for role in MEGA_FILLER_ORDER if role not in disabled_roles] or [Role.COMMISSAR]
+    if player_count < 10:
+        roles = [role for role in roles if role != Role.PRANKSTER]
     idx = 0
     while len(roles) < player_count:
         roles.append(filler[idx % len(filler)])

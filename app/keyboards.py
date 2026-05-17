@@ -258,6 +258,32 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def joker_death_card_keyboard(game_id: int, actor_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"act:prank:{game_id}:{actor_id}:{idx}")]
+        for idx in (1, 2, 3, 4)
+    ]
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def joker_target_keyboard(game_id: int, actor_id: int, choices: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=name, callback_data=f"act:joker_target:{game_id}:{actor_id}:{target_id}")]
+        for target_id, name in choices
+    ]
+    rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def joker_victim_card_keyboard(game_id: int, target_id: int, actor_id: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"jokerpick:{game_id}:{target_id}:{actor_id}:{idx}")]
+        for idx in (1, 2, 3, 4)
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def sorcerer_hang_revenge_keyboard(
     game_id: int,
     sorcerer_id: int,
@@ -1000,14 +1026,26 @@ def settings_weapon_toggle_keyboard(weapon_key: str, is_enabled: bool = True) ->
     ])
 
 
-def settings_leave_keyboard(current: bool = True) -> InlineKeyboardMarkup:
+def settings_leave_keyboard(current: bool = True, lock_minutes: int = 30) -> InlineKeyboardMarkup:
     on_mark = "✅ " if current else ""
     off_mark = "✅ " if not current else ""
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn(f"{on_mark}Ha - Ruxsat", "settings:leave:on")],
         [_btn(f"{off_mark}Yo'q - Taqiq", "settings:leave:off")],
+        [_btn(f"⏱ Blok vaqti: {lock_minutes} daqiqa", "settings:leave:lock")],
         _back_exit_row("main"),
     ])
+
+
+def settings_leave_lock_keyboard(current_minutes: int = 30) -> InlineKeyboardMarkup:
+    options = [0, 5, 10, 15, 30, 60, 120]
+    rows = []
+    for value in options:
+        mark = "✅ " if value == current_minutes else ""
+        label = "O'chirish (0)" if value == 0 else f"{value} daqiqa"
+        rows.append([_btn(f"{mark}{label}", f"settings:leave:lock:{value}")])
+    rows.append(_back_exit_row("leave"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 PERMISSION_ICONS = {"owner": "👑", "admin": "🛡", "user": "👥"}

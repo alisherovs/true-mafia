@@ -17,6 +17,7 @@ from app.keyboards import (
     settings_weapons_keyboard,
     settings_weapon_toggle_keyboard,
     settings_leave_keyboard,
+    settings_leave_lock_keyboard,
     settings_permissions_keyboard,
     settings_permission_level_keyboard,
     settings_chat_keyboard,
@@ -43,7 +44,7 @@ ROLE_LABELS: dict[str, str] = {
     "wolf": "🐺 Bo'ri", "killer": "🔪 Qotil", "mercenary_killer": "🥷 Yollanma qotil",
     "sorcerer": "💣 Afsungar", "swindler": "🃏 Aferist", "magician": "🧙 Sehrgar",
     "angry": "🧟 G'azabkor", "journalist": "📰 Jurnalist", "traitor": "😎 Sotqin",
-    "chemist": "🧪 Kimyogar", "guard": "🛡 Qo'riqchi", "joker": "🃏 Xazilkash",
+    "chemist": "🧪 Kimyogar", "guard": "🛡 Qo'riqchi", "joker": "🃏 Joker",
 }
 
 WEAPON_LABELS: dict[str, str] = {
@@ -290,23 +291,55 @@ async def settings_leave_menu(callback: CallbackQuery, engine: GameEngine) -> No
     chat_id = _get_chat_id(callback)
     gsm = GroupSettingsManager(engine.session_factory)
     gs = await gsm.get_settings(chat_id)
-    await callback.message.edit_text("🚪 <b>/leave buyrug'iga ruxsat beramizmi?</b>", reply_markup=settings_leave_keyboard(gs.leave_allowed))
+    lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+    await callback.message.edit_text(
+        "🚪 <b>/leave buyrug'iga ruxsat beramizmi?</b>\n\n"
+        f"⏱ Chiqib ketgandan keyingi blok: <b>{lock_minutes} daqiqa</b>",
+        reply_markup=settings_leave_keyboard(gs.leave_allowed, lock_minutes),
+    )
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("settings:leave:"))
 async def settings_leave_handler(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.message is None: await callback.answer(); return
-    action = callback.data.split(":")[2]
+    parts = callback.data.split(":")
+    action = parts[2] if len(parts) > 2 else ""
     chat_id = _get_chat_id(callback)
     if not await _deny_if_not_admin(callback, chat_id, engine): return
     gsm = GroupSettingsManager(engine.session_factory)
     if action == "on":
         await gsm.set_leave_allowed(chat_id, True)
-        await callback.message.edit_text("✅ /leave buyrug'i yoqildi.", reply_markup=settings_leave_keyboard(True))
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        await callback.message.edit_text(
+            "✅ /leave buyrug'i yoqildi.",
+            reply_markup=settings_leave_keyboard(True, lock_minutes),
+        )
     elif action == "off":
         await gsm.set_leave_allowed(chat_id, False)
-        await callback.message.edit_text("🚫 /leave buyrug'i o'chirildi.", reply_markup=settings_leave_keyboard(False))
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        await callback.message.edit_text(
+            "🚫 /leave buyrug'i o'chirildi.",
+            reply_markup=settings_leave_keyboard(False, lock_minutes),
+        )
+    elif action == "lock":
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        await callback.message.edit_text(
+            "⏱ <b>/leave bloklash vaqti</b>\n\n"
+            "O'yinchi /leave qilgandan keyin qayta o'yinga qo'shila olmaslik vaqtini tanlang.",
+            reply_markup=settings_leave_lock_keyboard(lock_minutes),
+        )
+    elif action == "lock" and len(parts) > 3 and parts[3].isdigit():
+        await gsm.set_leave_lock_minutes(chat_id, int(parts[3]))
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        await callback.message.edit_text(
+            f"✅ /leave bloklash vaqti: <b>{lock_minutes} daqiqa</b>",
+            reply_markup=settings_leave_lock_keyboard(lock_minutes),
+        )
     await callback.answer()
 
 
@@ -502,6 +535,7 @@ async def settings_panel(callback: CallbackQuery, engine: GameEngine) -> None:
     gsm = GroupSettingsManager(engine.session_factory)
     data = await gsm.get_panel_data(chat_id)
     leave_status = "✅ Ruxsat" if data["leave_allowed"] else "🚫 Taqiqlangan"
+    leave_lock_minutes = int(data.get("leave_lock_minutes", 30) or 0)
     mode_label = MODE_LABELS.get(data["game_mode"], data["game_mode"])
     cmd_lines = []
     for ck in ["start", "stop", "game"]:
@@ -514,7 +548,7 @@ async def settings_panel(callback: CallbackQuery, engine: GameEngine) -> None:
         f"🎁 <b>Giveaway:</b>\n💎 Olmos: {data['giveaway_diamond']}\n🛡 Himoya: {data['giveaway_protection']}\n\n"
         f"🎭 <b>Rollar:</b>\n✅ Yoqilgan: {data['roles_enabled']} ta\n🚫 O'chirilgan: {data['roles_disabled']} ta\n\n"
         f"🔫 <b>Qurollar:</b>\n✅ Yoqilgan: {data['weapons_enabled']} ta\n🚫 O'chirilgan: {data['weapons_disabled']} ta\n\n"
-        f"🚪 <b>Leave:</b> {leave_status}\n\n"
+        f"🚪 <b>Leave:</b> {leave_status}\n⏱ Blok: {leave_lock_minutes} daqiqa\n\n"
         "🔐 <b>Buyruqlar:</b>\n" + "\n".join(cmd_lines) + "\n\n"
         f"✍️ <b>Chat:</b>\n🌙 Tun: {night_label}\n☀️ Kun: {day_label}\n\n"
         f"🎮 <b>O'yin modi:</b> {mode_label}"

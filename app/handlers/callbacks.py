@@ -212,6 +212,42 @@ async def sorcerer_judgement_callback(callback: CallbackQuery, engine: GameEngin
     await callback.answer(text, show_alert=not ok)
 
 
+@router.callback_query(F.data.startswith("jokerpick:"))
+async def joker_pick_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 5:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    _, game_id_raw, target_id_raw, actor_id_raw, card_raw = parts
+    try:
+        game_id = int(game_id_raw)
+        target_id = int(target_id_raw)
+        actor_id = int(actor_id_raw)
+        card = int(card_raw)
+    except ValueError:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    if callback.from_user.id != target_id:
+        await callback.answer("Bu tugma siz uchun emas.", show_alert=True)
+        return
+    ok, text = await engine.resolve_joker_card_pick(
+        bot=callback.bot,
+        game_id=game_id,
+        target_id=target_id,
+        actor_id=actor_id,
+        picked_card=card,
+    )
+    if ok and callback.message:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
+    await callback.answer(text, show_alert=not ok)
+
+
 @router.callback_query(F.data.startswith("commissar:"))
 async def commissar_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None:
