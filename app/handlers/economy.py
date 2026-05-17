@@ -17,6 +17,8 @@ from app.config import Settings
 from app.database import SessionLocal
 from app.game_engine import GameEngine
 from app.keyboards import (
+    box_info_keyboard,
+    box_pick_keyboard,
     diamond_shop_keyboard,
     disable_role_shop_keyboard,
     dollar_exchange_keyboard,
@@ -30,12 +32,55 @@ from app.keyboards import (
     vip_keyboard,
 )
 from app.models import DiamondGiveaway, DiamondTransaction, DollarTransaction, User
+from app.models import BotSetting
 from app.texts import t
 
 router = Router()
 DIAMOND_EMOJI_ID = "5427168083074628963"
 DOLLAR_EMOJI_ID = "5409048419211682843"
 LARGE_TRANSFER_THRESHOLD = 5000
+BOX_NORMAL_COOLDOWN = timedelta(days=7)
+BOX_SUPER_COOLDOWN = timedelta(days=3)
+
+
+def _box_cd_key(box_type: str, user_id: int) -> str:
+    return f"box_cd:{box_type}:{user_id}"
+
+
+def _box_session_key(user_id: int) -> str:
+    return f"box_session:{user_id}"
+
+
+def _format_td(delta: timedelta) -> str:
+    total = max(0, int(delta.total_seconds()))
+    h = total // 3600
+    m = (total % 3600) // 60
+    return f"{h} soat {m} daqiqa"
+
+
+def _generate_box_rewards(box_type: str) -> list[dict[str, int | str]]:
+    rewards: list[dict[str, int | str]] = []
+    for _ in range(16):
+        if box_type == "normal":
+            if random.random() < 0.10:
+                amount = random.choices([1, 2, 3], weights=[75, 20, 5], k=1)[0]
+                rewards.append({"type": "diamond", "amount": amount})
+            else:
+                rewards.append({"type": "dollar", "amount": random.randint(100, 200)})
+        elif box_type == "super":
+            if random.random() < 0.30:
+                amount = random.choices([1, 2, 3, 4], weights=[55, 30, 12, 3], k=1)[0]
+                rewards.append({"type": "diamond", "amount": amount})
+            else:
+                rewards.append({"type": "dollar", "amount": random.randint(1000, 3000)})
+        else:  # mega
+            high = random.random() < 0.40
+            if high:
+                amount = random.choices([5, 6, 7, 8], weights=[45, 30, 18, 7], k=1)[0]
+            else:
+                amount = random.choices([1, 2, 3, 4], weights=[40, 30, 20, 10], k=1)[0]
+            rewards.append({"type": "diamond", "amount": amount})
+    return rewards
 
 
 def _user_link(user_id: int, name: str) -> str:
@@ -1451,13 +1496,242 @@ async def vip_open(callback: CallbackQuery) -> None:
         "• Telegram Premium sotib olish\n"
         "imkoniyatiga ega bo'lasiz.\n\n"
         "Muddat: <b>30 kun</b>\n"
-        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>\n\n"
+        "Pastda qutilarni ham ochishingiz mumkin."
     )
     try:
         await callback.message.edit_text(text, reply_markup=vip_keyboard())
     except TelegramBadRequest:
         pass
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("box:info:"))
+async def box_info(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    box_type = callback.data.split(":")[2]
+    if box_type not in {"normal", "super", "mega"}:
+        await callback.answer("Noto'g'ri quti.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        is_vip = _user_is_vip(user) if user else False
+    if box_type == "normal":
+        text = (
+            "🎁 <b>Oddiy Keys</b>\n\n"
+            "• Haftasiga 1 marta bepul\n"
+            "• Mukofot: 💵 100-200 yoki 💎 1-3\n"
+            "• 💎 tushish ehtimoli: 10%"
+        )
+        kb = box_info_keyboard(box_type)
+    elif box_type == "super":
+        text = (
+            "🧰 <b>Super Keys</b>\n\n"
+            "• Faqat VIP user uchun\n"
+            "• Har 3 kunda 1 marta bepul\n"
+            "• Yoki 💵 5000 evaziga ochish\n"
+            "• Mukofot: 💵 1000-3000 yoki 💎 1-4\n"
+            "• 💎 tushish ehtimoli: 30%"
+        )
+        kb = box_info_keyboard(box_type, can_paid_open=is_vip)
+    else:
+        text = (
+            "👑 <b>Mega Quti</b>\n\n"
+            "• Faqat 💎 beradi\n"
+            "• Mukofot: 💎 1-8\n"
+            "• Yuqori olmoslar ehtimoli pasaytirilgan"
+        )
+        kb = box_info_keyboard(box_type)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("box:open:"))
+async def box_open(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    box_type = callback.data.split(":")[2]
+    if box_type not in {"normal", "super", "mega"}:
+        await callback.answer("Noto'g'ri quti.", show_alert=True)
+        return
+    now = _utc_now()
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        if box_type == "super" and not _user_is_vip(user):
+            await callback.answer("Super keys faqat VIP user uchun.", show_alert=True)
+            return
+        cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id)))).scalar_one_or_none()
+        if cd_row and cd_row.value:
+            try:
+                cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
+            except ValueError:
+                cd_until = None
+        else:
+            cd_until = None
+        cooldown = BOX_NORMAL_COOLDOWN if box_type == "normal" else BOX_SUPER_COOLDOWN if box_type == "super" else timedelta(0)
+        if cooldown.total_seconds() > 0 and cd_until and cd_until > now:
+            await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(cd_until - now)}", show_alert=True)
+            return
+        rewards = _generate_box_rewards(box_type)
+        session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
+        payload = {"box_type": box_type, "session_id": session_id, "rewards": rewards, "claimed": False}
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await session.commit()
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Qutini ochish</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard(box_type, session_id),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("box:open_paid:super"))
+async def box_open_paid_super(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    now = _utc_now()
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        if not _user_is_vip(user):
+            await callback.answer("Super keys faqat VIP user uchun.", show_alert=True)
+            return
+        if (user.dollar or 0) < 5000:
+            await callback.answer("Balans yetarli emas. Kerak: 💵 5000", show_alert=True)
+            return
+        user.dollar -= 5000
+        _record_dollar_transaction(
+            session,
+            user,
+            -5000,
+            "super_box_open_paid",
+            note="Super keys pullik ochildi",
+        )
+        rewards = _generate_box_rewards("super")
+        session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
+        payload = {"box_type": "super", "session_id": session_id, "rewards": rewards, "claimed": False}
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await session.commit()
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Super keys</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard("super", session_id),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer("✅ 5000 dollar yechildi, quti ochildi.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("box:pick:"))
+async def box_pick(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 5:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    _, _, box_type, session_id, index_raw = parts
+    try:
+        pick_index = int(index_raw) - 1
+    except ValueError:
+        await callback.answer("Noto'g'ri tanlov.", show_alert=True)
+        return
+    if pick_index < 0 or pick_index >= 16:
+        await callback.answer("Noto'g'ri tanlov.", show_alert=True)
+        return
+    now = _utc_now()
+    async with SessionLocal() as session:
+        user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_session_key(user.telegram_id)))).scalar_one_or_none()
+        if sess_row is None or not sess_row.value:
+            await callback.answer("Quti sessiyasi topilmadi.", show_alert=True)
+            return
+        try:
+            payload = json.loads(sess_row.value)
+        except (TypeError, ValueError):
+            await callback.answer("Quti sessiyasi buzilgan.", show_alert=True)
+            return
+        if payload.get("claimed"):
+            await callback.answer("Bu quti allaqachon ochilgan.", show_alert=True)
+            return
+        if payload.get("box_type") != box_type or payload.get("session_id") != session_id:
+            await callback.answer("Bu tugma eskirgan.", show_alert=True)
+            return
+        rewards = payload.get("rewards") or []
+        if not isinstance(rewards, list) or len(rewards) < 16:
+            await callback.answer("Mukofotlar topilmadi.", show_alert=True)
+            return
+        reward = rewards[pick_index]
+        rtype = str(reward.get("type"))
+        amount = int(reward.get("amount") or 0)
+        if amount <= 0:
+            await callback.answer("Mukofot xatosi.", show_alert=True)
+            return
+        if rtype == "diamond":
+            user.diamonds = int(user.diamonds or 0) + amount
+            _record_diamond_transaction(session, user, amount, f"{box_type}_box_reward", note=f"{box_type} qutidan mukofot")
+            reward_text = f"💎 {amount} olmos"
+        else:
+            user.dollar = int(user.dollar or 0) + amount
+            _record_dollar_transaction(session, user, amount, f"{box_type}_box_reward", note=f"{box_type} qutidan mukofot")
+            reward_text = f"💵 {amount} dollar"
+        payload["claimed"] = True
+        sess_row.value = json.dumps(payload, ensure_ascii=True)
+        if box_type == "normal":
+            cd_until = now + BOX_NORMAL_COOLDOWN
+            cd_key = _box_cd_key("normal", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
+        elif box_type == "super":
+            cd_until = now + BOX_SUPER_COOLDOWN
+            cd_key = _box_cd_key("super", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
+        await session.commit()
+    try:
+        await callback.message.edit_text(
+            f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
+            reply_markup=box_info_keyboard(box_type, can_paid_open=(box_type == "super")),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer("Mukofot berildi!", show_alert=True)
 
 
 @router.callback_query(F.data == "vip:buy:diamonds")

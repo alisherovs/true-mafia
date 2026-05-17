@@ -506,9 +506,38 @@ def vip_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="💎 30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
             [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
+            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
+            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
+            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
+
+
+def box_info_keyboard(box_type: str, can_paid_open: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="🎁 Ochish", callback_data=f"box:open:{box_type}")]]
+    if can_paid_open:
+        rows.append([InlineKeyboardButton(text="💵 5000 evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="vip:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def box_pick_keyboard(box_type: str, session_id: str) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    idx = 1
+    for _ in range(4):
+        row: list[InlineKeyboardButton] = []
+        for _ in range(4):
+            row.append(
+                InlineKeyboardButton(
+                    text=f"🎁 {idx}",
+                    callback_data=f"box:pick:{box_type}:{session_id}:{idx}",
+                )
+            )
+            idx += 1
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data=f"box:info:{box_type}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 _GIFT_TIER_EMOJI = [

@@ -2946,7 +2946,7 @@ class GameEngine:
                     if actor_user is None or target_user is None:
                         continue
                     rng = random.Random(f"hojiaka:{game.id}:{game.night_number}:{actor_id}:{target_id}")
-                    reward_type = rng.choices(["item", "dollar", "diamond"], weights=[50, 45, 5], k=1)[0]
+                    reward_type = rng.choices(["item", "dollar", "diamond"], weights=[75, 20, 5], k=1)[0]
                     if reward_type == "diamond":
                         amount = rng.choice([1, 1, 1, 2, 2, 3])
                         target_user.diamonds = int(target_user.diamonds or 0) + amount
@@ -2961,7 +2961,13 @@ class GameEngine:
                         )
                         gift_label = f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos"
                     elif reward_type == "dollar":
-                        amount = rng.choice(dollar_choices)
+                        low_dollar_choices = [v for v in dollar_choices if v <= 150]
+                        high_dollar_choices = [v for v in dollar_choices if v > 150]
+                        # Dollar berilganda 150+ faqat 20% holatda chiqadi.
+                        if high_dollar_choices and rng.random() < 0.2:
+                            amount = rng.choice(high_dollar_choices)
+                        else:
+                            amount = rng.choice(low_dollar_choices or dollar_choices)
                         target_user.dollar = int(target_user.dollar or 0) + amount
                         self._record_dollar_transaction(
                             session,
