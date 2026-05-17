@@ -47,6 +47,7 @@ from app.keyboards import (
 )
 from app.models import (
     BotSetting,
+    DiamondGiveaway,
     DiamondTransaction,
     DollarTransaction,
     Game,
