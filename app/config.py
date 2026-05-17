@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     winner_reward_dollar: int = Field(default=15, alias="WINNER_REWARD_DOLLAR")
     winner_reward_diamond: int = Field(default=0, alias="WINNER_REWARD_DIAMOND")
-    loser_reward_dollar: int = Field(default=5, alias="LOSER_REWARD_DOLLAR")
+    loser_reward_dollar: int = Field(default=10, alias="LOSER_REWARD_DOLLAR")
     loser_reward_diamond: int = Field(default=0, alias="LOSER_REWARD_DIAMOND")
 
     night_media_file_id: Optional[str] = Field(default=None, alias="NIGHT_MEDIA_FILE_ID")

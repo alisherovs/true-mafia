@@ -2194,7 +2194,7 @@ class GameEngine:
             if action_type == ActionType.HEAL and target_id == actor_id and actor.self_heal_used:
                 return False, "Siz o'zingizni yana davolay olmaysiz."
 
-            if action_type in {ActionType.BLOCK, ActionType.VISIT}:
+            if action_type in {ActionType.BLOCK, ActionType.VISIT, ActionType.HEAL}:
                 already_targeted = (
                     await session.execute(
                         select(NightAction.id).where(
@@ -2208,6 +2208,8 @@ class GameEngine:
                 if already_targeted is not None:
                     if action_type == ActionType.BLOCK:
                         return False, "Bu o'yinchini avval tanlagansiz. Boshqasini tanlang."
+                    if action_type == ActionType.HEAL:
+                        return False, "Bu o'yinchini avval davolagansiz. Boshqasini tanlang."
                     return False, "Bu o'yinchiga avval tashrif buyurgansiz. Boshqasini tanlang."
             if actor_role == Role.ARSONIST:
                 if target_id != actor_id:
@@ -3035,9 +3037,11 @@ class GameEngine:
                         possible = [v for v in steal_dollar_choices if v <= int(target_user.dollar or 0)]
                         if not possible:
                             current_hp = int(target_player.hero_hp or HERO_DEFAULT_HP)
-                            hp_loss = max(1, current_hp // 2)
-                            target_player.hero_hp = max(0, current_hp - hp_loss)
                             target_max_hp = int(target_player.hero_max_hp or HERO_DEFAULT_HP)
+                            # 50% damage must always be based on max HP (not current HP),
+                            # so the second low-balance visit removes the player from the game.
+                            hp_loss = max(1, target_max_hp // 2)
+                            target_player.hero_hp = max(0, current_hp - hp_loss)
                             if target_player.hero_hp <= 0 and target_player.telegram_id not in dead:
                                 dead.add(target_player.telegram_id)
                                 death_causes[target_player.telegram_id] = "mashka"
