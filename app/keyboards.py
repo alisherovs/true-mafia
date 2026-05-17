@@ -822,6 +822,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
 def owner_channel_gifts_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="▶️ Almaz tarqatishni boshlash", callback_data="owner:channel_gifts:start")],
             [InlineKeyboardButton(text="📊 Kanal balansini ko'rish", callback_data="owner:channel_gifts:view")],
             [InlineKeyboardButton(text="➕ Kanal balansini to'ldirish", callback_data="owner:channel_gifts:grant")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],

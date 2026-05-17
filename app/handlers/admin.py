@@ -831,7 +831,7 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
                 reply_markup=owner_wait_keyboard(),
             )
             return True
-        ok, text = await engine.channel_gift_balance_text(int(raw))
+        ok, text = await engine.channel_gift_balance_text(int(raw), auto_create=True)
         await message.answer(
             text,
             reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),

@@ -114,6 +114,7 @@ logger = logging.getLogger(__name__)
 
 PREMIUM_RESET_INTERVAL_MINUTES_KEY = "premium_reset_interval_minutes"
 DIAMOND_LOG_LAST_SENT_ID_KEY = "diamond_log_last_sent_id"
+CHANNEL_GIFTS_ENABLED_PREFIX = "channel_gifts_enabled:"
 ADMIN_GROUP_ID_KEY = "admin_group_id"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
@@ -7230,16 +7231,25 @@ class GameEngine:
             await session.commit()
         return True, f"✅ Berildi: <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
 
-    async def channel_gift_balance_text(self, channel_id: int) -> tuple[bool, str]:
+    async def channel_gift_balance_text(self, channel_id: int, *, auto_create: bool = False) -> tuple[bool, str]:
         if channel_id >= 0:
             return False, "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
         async with self.session_factory() as session:
             user = (await session.execute(select(User).where(User.telegram_id == channel_id))).scalar_one_or_none()
             if user is None:
-                return False, (
-                    "Bu kanal uchun balans topilmadi.\n"
-                    "Avval kanal nomidan /send yoki /change yuboring, yoki paneldan to'ldirish qiling."
+                if not auto_create:
+                    return False, (
+                        "Bu kanal uchun balans topilmadi.\n"
+                        "Paneldan to'ldirish qiling yoki auto-create yoqilgan ko'rishdan foydalaning."
+                    )
+                user = User(
+                    telegram_id=channel_id,
+                    display_name=f"Channel {channel_id}",
+                    language=self.settings.default_language,
+                    language_selected=False,
                 )
+                session.add(user)
+                await session.commit()
             return True, (
                 "📺 <b>Kanal sovg'a balansi</b>\n\n"
                 f"ID: <code>{channel_id}</code>\n"
@@ -7289,6 +7299,42 @@ class GameEngine:
             f"ID: <code>{channel_id}</code>\n"
             f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> +{int(dollar)}\n"
             f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> +{int(diamonds)}"
+        )
+
+    async def is_channel_gifts_enabled(self, channel_id: int) -> bool:
+        async with self.session_factory() as session:
+            value = await self._get_bot_setting_value(session, f"{CHANNEL_GIFTS_ENABLED_PREFIX}{channel_id}", "0")
+        return value == "1"
+
+    async def enable_channel_gifts(self, bot: Bot, channel_id: int) -> tuple[bool, str]:
+        if channel_id >= 0:
+            return False, "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        if not await self.bot_is_admin(bot, channel_id):
+            return False, "Bot bu kanalda admin emas yoki kanal topilmadi."
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == channel_id))).scalar_one_or_none()
+            if user is None:
+                user = User(
+                    telegram_id=channel_id,
+                    display_name=f"Channel {channel_id}",
+                    language=self.settings.default_language,
+                    language_selected=False,
+                )
+                session.add(user)
+            await self._set_bot_setting_value(session, f"{CHANNEL_GIFTS_ENABLED_PREFIX}{channel_id}", "1")
+            await session.commit()
+        try:
+            await bot.send_message(
+                channel_id,
+                "✅ Almaz tarqatish yoqildi.\n\n"
+                "Endi bu kanalda /send va /change komandalaridan foydalanishingiz mumkin.",
+            )
+        except Exception:
+            pass
+        return True, (
+            "✅ Kanal uchun almaz tarqatish yoqildi.\n"
+            f"ID: <code>{channel_id}</code>\n"
+            "Kanalga tasdiq xabari yuborildi."
         )
 
     async def add_premium_group(
