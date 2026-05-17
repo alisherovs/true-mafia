@@ -7207,7 +7207,17 @@ class GameEngine:
         async with self.session_factory() as session:
             user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
             if user is None:
-                return False, "User topilmadi. U avval /start qilgan bo'lishi kerak."
+                if telegram_id < 0:
+                    user = User(
+                        telegram_id=telegram_id,
+                        display_name=f"Channel {telegram_id}",
+                        language=self.settings.default_language,
+                        language_selected=False,
+                    )
+                    session.add(user)
+                    await session.flush()
+                else:
+                    return False, "User topilmadi. U avval /start qilgan bo'lishi kerak."
             user.dollar += dollar
             user.diamonds += diamonds
             self._record_diamond_transaction(
@@ -7219,6 +7229,67 @@ class GameEngine:
             )
             await session.commit()
         return True, f"✅ Berildi: <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {dollar}, <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds}"
+
+    async def channel_gift_balance_text(self, channel_id: int) -> tuple[bool, str]:
+        if channel_id >= 0:
+            return False, "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == channel_id))).scalar_one_or_none()
+            if user is None:
+                return False, (
+                    "Bu kanal uchun balans topilmadi.\n"
+                    "Avval kanal nomidan /send yoki /change yuboring, yoki paneldan to'ldirish qiling."
+                )
+            return True, (
+                "📺 <b>Kanal sovg'a balansi</b>\n\n"
+                f"ID: <code>{channel_id}</code>\n"
+                f"Nom: <b>{escape(user.display_name or str(channel_id))}</b>\n\n"
+                f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar: <b>{int(user.dollar or 0)}</b>\n"
+                f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{int(user.diamonds or 0)}</b>"
+            )
+
+    async def grant_channel_balance(
+        self,
+        channel_id: int,
+        *,
+        dollar: int = 0,
+        diamonds: int = 0,
+        channel_title: str = "",
+    ) -> tuple[bool, str]:
+        if channel_id >= 0:
+            return False, "Kanal ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>"
+        if dollar == 0 and diamonds == 0:
+            return False, "Hech bo'lmasa bitta qiymat 0 dan katta bo'lishi kerak."
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == channel_id))).scalar_one_or_none()
+            if user is None:
+                user = User(
+                    telegram_id=channel_id,
+                    display_name=(channel_title or f"Channel {channel_id}")[:255],
+                    language=self.settings.default_language,
+                    language_selected=False,
+                )
+                session.add(user)
+                await session.flush()
+            else:
+                if channel_title:
+                    user.display_name = channel_title[:255]
+            user.dollar = int(user.dollar or 0) + int(dollar)
+            user.diamonds = int(user.diamonds or 0) + int(diamonds)
+            self._record_diamond_transaction(
+                session,
+                user,
+                int(diamonds),
+                "admin_grant",
+                note=f"Kanal kredit: dollar={dollar}, almaz={diamonds}",
+            )
+            await session.commit()
+        return True, (
+            "✅ Kanal balansi to'ldirildi.\n\n"
+            f"ID: <code>{channel_id}</code>\n"
+            f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> +{int(dollar)}\n"
+            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> +{int(diamonds)}"
+        )
 
     async def add_premium_group(
         self,

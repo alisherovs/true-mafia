@@ -10,6 +10,7 @@ from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
     owner_admin_group_keyboard,
+    owner_channel_gifts_keyboard,
     owner_diamond_audit_keyboard,
     owner_hero_market_keyboard,
     owner_invoice_after_keyboard,
@@ -94,6 +95,7 @@ OWNER_COMMANDS_TEXT = (
     "Xarid admini - almaz xaridi uchun admin username sozlash\n"
     "Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqarish\n"
     "Geroy savdo kanali - geroy marketplace kanalini ulash\n"
+    "Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqarish\n"
     "Userlarga reklama - barcha userlarga xabar yuborish\n"
     "Guruhlarga reklama - barcha guruhlarga xabar yuborish\n"
     "Kredit berish - userga balans berish yordam oynasi\n"
@@ -412,6 +414,57 @@ async def owner_hero_market_channel_callback(callback: CallbackQuery, engine: Ga
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:channel_gifts")
+async def owner_channel_gifts_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    await _safe_edit(
+        callback,
+        "📺 <b>Kanal sovg'a balansi</b>\n\n"
+        "Bu bo'lim orqali kanal nomidan ishlaydigan /send va /change balansini boshqarasiz.\n\n"
+        "• Balansni ko'rish\n"
+        "• Dollar/olmos bilan to'ldirish",
+        reply_markup=owner_channel_gifts_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:channel_gifts:view")
+async def owner_channel_gifts_view_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "channel_gifts_view"
+    await _safe_edit(
+        callback,
+        "📊 <b>Kanal balansini ko'rish</b>\n\n"
+        "Kanal ID yuboring.\n"
+        "Masalan: <code>-1001234567890</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:channel_gifts:grant")
+async def owner_channel_gifts_grant_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "channel_gifts_grant"
+    await _safe_edit(
+        callback,
+        "➕ <b>Kanal balansini to'ldirish</b>\n\n"
+        "Quyidagi formatda yuboring:\n"
+        "<code>kanal_id dollar diamond</code>\n\n"
+        "Masalan:\n"
+        "<code>-1001234567890 0 500</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:hero_market_set")
 async def owner_hero_market_set_callback(callback: CallbackQuery, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -504,6 +557,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
             " Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
+            "📺 Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqaradi.\n"
             "🥷 Geroy savdo kanali - geroy marketplace kanalini boshqaradi.\n"
             "📣 Userlarga reklama - keyingi oddiy xabarni userlarga tarqatadi.\n"
             "🏘 Guruhlarga reklama - keyingi oddiy xabarni guruhlarga tarqatadi.\n"
@@ -766,6 +820,52 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_hero_market_keyboard(True))
+        return True
+
+    if action == "channel_gifts_view":
+        raw = (message.text or "").strip()
+        if not raw.lstrip("-").isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_view"
+            await message.answer(
+                "Kanal ID noto'g'ri. Masalan: <code>-1001234567890</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        ok, text = await engine.channel_gift_balance_text(int(raw))
+        await message.answer(
+            text,
+            reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),
+        )
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_view"
+        return True
+
+    if action == "channel_gifts_grant":
+        parts = (message.text or "").split()
+        if len(parts) != 3 or not all(part.lstrip("-").isdigit() for part in parts):
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_grant"
+            await message.answer(
+                "Format noto'g'ri.\n"
+                "<code>kanal_id dollar diamond</code>\n"
+                "Masalan: <code>-1001234567890 0 500</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        channel_id = int(parts[0])
+        dollar = int(parts[1])
+        diamonds = int(parts[2])
+        ok, text = await engine.grant_channel_balance(
+            channel_id,
+            dollar=dollar,
+            diamonds=diamonds,
+            channel_title="",
+        )
+        await message.answer(
+            text,
+            reply_markup=owner_channel_gifts_keyboard() if ok else owner_wait_keyboard(),
+        )
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "channel_gifts_grant"
         return True
 
     if action == "premium_timer":

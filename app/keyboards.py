@@ -807,6 +807,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text=" Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
+            [InlineKeyboardButton(text="📺 Kanal sovg'a balansi", callback_data="owner:channel_gifts")],
             [InlineKeyboardButton(text="🥷 Geroy savdo kanali", callback_data="owner:hero_market_channel")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
@@ -815,6 +816,15 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📋 Barcha buyruqlar", callback_data="owner:commands")],
             [InlineKeyboardButton(text="🧾 Yordam", callback_data="owner:help")],
             [InlineKeyboardButton(text="◀️ User panel", callback_data="start:back")],
+        ]
+    )
+
+def owner_channel_gifts_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Kanal balansini ko'rish", callback_data="owner:channel_gifts:view")],
+            [InlineKeyboardButton(text="➕ Kanal balansini to'ldirish", callback_data="owner:channel_gifts:grant")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
 
