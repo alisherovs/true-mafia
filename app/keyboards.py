@@ -1118,7 +1118,7 @@ def settings_times_keyboard() -> InlineKeyboardMarkup:
 
 
 def settings_time_value_keyboard(time_key: str, current: int = 0) -> InlineKeyboardMarkup:
-    values = [30, 60, 90, 120, 180, 300]
+    values = [30, 45, 60, 90, 120, 180, 300]
     rows = []
     for v in values:
         mark = "✅ " if v == current else ""
