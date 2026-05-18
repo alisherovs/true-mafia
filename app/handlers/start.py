@@ -102,6 +102,33 @@ async def cmd_start(
                         reply_markup=await engine.group_return_keyboard(message.bot, chat_id),
                     )
                 return
+    if payload.startswith("jointeam_"):
+        parts = payload.split("_", maxsplit=3)
+        if len(parts) == 4 and parts[1].isdigit() and parts[3] in {"blue", "red"}:
+            game_id = int(parts[1])
+            try:
+                chat_id = int(parts[2])
+            except ValueError:
+                chat_id = 0
+            if chat_id != 0:
+                ok, text = await engine.join_game_by_deeplink(
+                    bot=message.bot,
+                    game_id=game_id,
+                    chat_id=chat_id,
+                    tg_user=message.from_user,
+                    tournament_team=parts[3],
+                )
+                if ok:
+                    await message.answer(
+                        text,
+                        reply_markup=await engine.group_return_keyboard(message.bot, chat_id),
+                    )
+                else:
+                    await message.answer(
+                        text,
+                        reply_markup=await engine.group_return_keyboard(message.bot, chat_id),
+                    )
+                return
     if payload.startswith("vote_"):
         parts = payload.split("_", maxsplit=1)
         if len(parts) == 2 and parts[1].isdigit():

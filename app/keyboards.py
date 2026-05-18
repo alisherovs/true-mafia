@@ -188,11 +188,13 @@ def lobby_keyboard(
     if not active:
         return None
     if tournament:
+        blue_link = f"https://t.me/{_clean_bot_username(bot_username)}?start=jointeam_{game_id}_{chat_id}_blue"
+        red_link = f"https://t.me/{_clean_bot_username(bot_username)}?start=jointeam_{game_id}_{chat_id}_red"
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="🔵 Qo'shilish", callback_data=f"jointeam:{game_id}:blue"),
-                    InlineKeyboardButton(text="🔴 Qo'shilish", callback_data=f"jointeam:{game_id}:red"),
+                    InlineKeyboardButton(text="🔵 Qo'shilish", url=blue_link),
+                    InlineKeyboardButton(text="🔴 Qo'shilish", url=red_link),
                 ]
             ]
         )

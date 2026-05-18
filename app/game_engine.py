@@ -388,11 +388,13 @@ class GameEngine:
                 return True
         return False
 
-    def _format_alive_players(self, players: list[GamePlayer]) -> str:
+    def _format_alive_players(self, players: list[GamePlayer], tournament: bool = False) -> str:
         if not players:
             return "-"
         return "\n".join(
-            f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)}"
+            f"{idx}. {self._tournament_team_emoji(player.transformed_to_team)} {self._tg_mention(player.telegram_id, player.display_name)}"
+            if tournament and self._tournament_team_emoji(player.transformed_to_team)
+            else f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)}"
             for idx, player in enumerate(players, 1)
         )
 
@@ -480,7 +482,12 @@ class GameEngine:
             return "🃏 Joker"
         return "noma'lum mehmon"
 
-    def _build_alive_status_text(self, alive_players: list[GamePlayer], game: Optional[Game] = None) -> str:
+    def _build_alive_status_text(
+        self,
+        alive_players: list[GamePlayer],
+        game: Optional[Game] = None,
+        tournament: bool = False,
+    ) -> str:
         city_players = [player for player in alive_players if player.team == Team.CITY.value]
         mafia_players = [player for player in alive_players if player.team == Team.MAFIA.value]
         singleton_players = [
@@ -497,7 +504,7 @@ class GameEngine:
         groups_text = "\n\n".join(block for block in group_blocks if block)
         result = (
             "<b>Tirik o'yinchilar:</b>\n"
-            f"{self._format_alive_players(alive_players)}\n\n"
+            f"{self._format_alive_players(alive_players, tournament=tournament)}\n\n"
             f"{groups_text}"
         )
         result += f"\n\n<b>Jami:</b> {len(alive_players)}"
@@ -1091,6 +1098,22 @@ class GameEngine:
             return "🔴"
         return ""
 
+    def _format_tournament_lobby_players(self, players: list[GamePlayer]) -> str:
+        numbered_players = list(enumerate(players, 1))
+
+        def team_block(team_key: str) -> str:
+            emoji = self._tournament_team_emoji(team_key)
+            lines = [
+                f"{idx}. {emoji} {self._tg_mention(player.telegram_id, player.display_name)}"
+                for idx, player in numbered_players
+                if player.transformed_to_team == team_key
+            ]
+            if not lines:
+                lines = ["-"]
+            return f"{emoji} -jamoa\n" + "\n".join(lines)
+
+        return f"{team_block('blue')}\n\n{team_block('red')}"
+
     async def _build_lobby_text(
         self,
         session: AsyncSession,
@@ -1111,11 +1134,11 @@ class GameEngine:
         else:
             return t(lang, "lobby_started_title")
 
-        if players:
+        if players and tournament:
+            names = self._format_tournament_lobby_players(players)
+        elif players:
             names = ", ".join(
-                f"{self._tournament_team_emoji(p.transformed_to_team)} {self._tg_mention(p.telegram_id, p.display_name)}"
-                if tournament and self._tournament_team_emoji(p.transformed_to_team)
-                else self._tg_mention(p.telegram_id, p.display_name)
+                self._tg_mention(p.telegram_id, p.display_name)
                 for p in players
             )
         else:
@@ -1239,6 +1262,8 @@ class GameEngine:
             if game.status != GameStatus.REGISTRATION.value:
                 return False, t(lang, "registration_closed_cb")
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            if tournament_team is not None and not is_tournament:
+                return False, "Bu oddiy ro'yxatdan o'tish. Turnir komandasi tanlanmaydi."
             if is_tournament and tournament_team is None:
                 return False, "Turnirda qo'shilish uchun 🔵 yoki 🔴 komandani tanlang."
             preset = game.role_preset or "black23"
@@ -1308,6 +1333,7 @@ class GameEngine:
         game_id: int,
         chat_id: int,
         tg_user: TgUser,
+        tournament_team: Optional[str] = None,
     ) -> tuple[bool, str]:
         if not self._has_visible_nickname(self._profile_name_from_tg(tg_user)):
             return (
@@ -1327,7 +1353,12 @@ class GameEngine:
             if game.status != GameStatus.REGISTRATION.value:
                 return False, t(lang, "registration_closed_cb")
 
-        return await self.join_game(bot=bot, game_id=game_id, tg_user=tg_user)
+        return await self.join_game(
+            bot=bot,
+            game_id=game_id,
+            tg_user=tg_user,
+            tournament_team=tournament_team,
+        )
 
     async def leave_game(self, bot: Bot, game_id: int, tg_user_id: int) -> tuple[bool, str]:
         check_winner_after = False
@@ -2080,7 +2111,8 @@ class GameEngine:
             chat_id = game.chat_id
             lang = await self.get_group_language(chat_id)
             alive_players = await self._alive_players(session, game_id)
-            alive_status = self._build_alive_status_text(alive_players)
+            is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            alive_status = self._build_alive_status_text(alive_players, game, tournament=is_tournament)
             self._add_game_log(
                 session,
                 game,
@@ -3708,7 +3740,8 @@ class GameEngine:
             alive_after_night = [player for player in alive_players if player.alive]
             dead_players = [player_map[player_id] for player_id in dead if player_id in player_map]
             day_caption = self._build_day_intro_text(game.day_number)
-            alive_status = self._build_alive_status_text(alive_after_night, game)
+            is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            alive_status = self._build_alive_status_text(alive_after_night, game, tournament=is_tournament)
             story_messages = self._build_night_story_messages(
                 dead_players=dead_players,
                 transformed=transformed,
@@ -5330,13 +5363,20 @@ class GameEngine:
         self._cleanup_jobs(game_id)
         self._invalidate_game_cache(chat_id)
 
+        def result_player_line(idx: int, player: GamePlayer) -> str:
+            team_emoji = self._tournament_team_emoji(player.transformed_to_team) if is_tournament else ""
+            name = self._tg_mention(player.telegram_id, player.display_name)
+            if team_emoji:
+                name = f"{team_emoji} {name}"
+            return f"{idx}. {name} - {role_label(player.role)}"
+
         winner_lines = [
-            f"{idx}. {self._tg_mention(p.telegram_id, p.display_name)} - {role_label(p.role)}"
+            result_player_line(idx, p)
             for idx, p in enumerate(winners, 1)
         ]
         loser_start = len(winner_lines) + 1
         loser_lines = [
-            f"{idx}. {self._tg_mention(p.telegram_id, p.display_name)} - {role_label(p.role)}"
+            result_player_line(idx, p)
             for idx, p in enumerate(losers, loser_start)
         ]
         winners_block = "\n".join(winner_lines) if winner_lines else "-"
