@@ -17,6 +17,7 @@ async def _start_game_with_mode(
     mode: str | None = None,
     *,
     tournament: bool = False,
+    regular: bool = False,
 ) -> None:
     if message.from_user is None:
         return
@@ -50,6 +51,7 @@ async def _start_game_with_mode(
         chat_title=message.chat.title or "Group",
         creator_id=message.from_user.id,
         tournament=tournament,
+        regular=regular,
         role_preset=mode,
     )
     if not ok:
@@ -67,7 +69,7 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
         if not ok:
             await message.reply(err)
             return
-    await _start_game_with_mode(message, engine)
+    await _start_game_with_mode(message, engine, regular=True)
 
 
 @router.message(Command("turnir"))

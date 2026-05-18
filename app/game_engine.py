@@ -16,7 +16,7 @@ from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, User as TgUser
 from aiogram.utils.formatting import Bold, Code, CustomEmoji, Text, TextLink
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -388,7 +388,11 @@ class GameEngine:
                 return True
         return False
 
-    def _format_alive_players(self, players: list[GamePlayer], tournament: bool = False) -> str:
+    def _format_alive_players(
+        self,
+        players: list[GamePlayer],
+        tournament: bool = False,
+    ) -> str:
         if not players:
             return "-"
         return "\n".join(
@@ -498,8 +502,8 @@ class GameEngine:
 
         group_blocks = [
             self._format_role_group("🤵🏻 <b>Mafiya</b>", len(mafia_players), mafia_players),
-            self._format_role_group("👨🏼 <b>Singleton</b>", len(singleton_players), singleton_players),
             self._format_role_group("🏘 <b>Tinch aholilar</b>", len(city_players), city_players),
+            self._format_role_group("👨🏼 <b>Singleton</b>", len(singleton_players), singleton_players),
         ]
         groups_text = "\n\n".join(block for block in group_blocks if block)
         result = (
@@ -939,6 +943,18 @@ class GameEngine:
         else:
             row.value = "1"
 
+    async def _clear_tournament_game_in_session(self, session: AsyncSession, game_id: int) -> None:
+        row = (
+            await session.execute(select(BotSetting).where(BotSetting.key == self._tournament_game_key(game_id)))
+        ).scalar_one_or_none()
+        if row is not None:
+            await session.delete(row)
+        await session.execute(
+            update(GamePlayer)
+            .where(GamePlayer.game_id == game_id)
+            .values(transformed_to_team=None)
+        )
+
     async def create_game_registration(
         self,
         bot: Bot,
@@ -947,6 +963,7 @@ class GameEngine:
         creator_id: int,
         *,
         tournament: bool = False,
+        regular: bool = False,
         role_preset: Optional[str] = None,
     ) -> tuple[bool, str]:
         async with self.session_factory() as session:
@@ -964,6 +981,9 @@ class GameEngine:
                         )
                         if players_count:
                             return False, "Avvalgi oddiy ro'yxatda o'yinchilar bor. Turnir boshlash uchun o'yinni /stop qilib, /turnir ni qayta bering."
+                    if regular and existing_is_tournament:
+                        await self._clear_tournament_game_in_session(session, active.id)
+                        existing_is_tournament = False
                     active.registration_ends_at = current_end + timedelta(seconds=30)
                     active.creator_telegram_id = creator_id
                     if role_preset:
