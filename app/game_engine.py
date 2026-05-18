@@ -7114,9 +7114,8 @@ class GameEngine:
         ]
         for idx, user in enumerate(users, 1):
             mention = self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))
-            username = f" @{escape(user.username)}" if user.username else ""
             lines.append(
-                f"{idx}. {mention}{username} — "
+                f"{idx}. {mention} — "
                 f"<b>{int(user.diamonds or 0)}</b> 💎 | ID: <code>{user.telegram_id}</code>"
             )
         return "\n".join(lines)
