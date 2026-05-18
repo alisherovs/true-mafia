@@ -7081,6 +7081,46 @@ class GameEngine:
             f"✅ Tugagan o'yinlar: <b>{completed_games or 0}</b>"
         )
 
+    async def owner_diamond_top_text(self, limit: int = 30) -> str:
+        safe_limit = max(1, min(int(limit or 30), 50))
+        async with self.session_factory() as session:
+            users = (
+                await session.execute(
+                    select(User)
+                    .where(User.telegram_id > 0, User.diamonds > 0)
+                    .order_by(User.diamonds.desc(), User.updated_at.desc(), User.id.asc())
+                    .limit(safe_limit)
+                )
+            ).scalars().all()
+            total_users = await session.scalar(
+                select(func.count(User.id)).where(User.telegram_id > 0, User.diamonds > 0)
+            )
+            total_diamonds = await session.scalar(
+                select(func.coalesce(func.sum(User.diamonds), 0)).where(User.telegram_id > 0)
+            )
+
+        if not users:
+            return (
+                "💎 <b>TOP 30 almaz balansi</b>\n\n"
+                "Hozircha almaz balansi bor user topilmadi."
+            )
+
+        lines = [
+            "💎 <b>TOP 30 almaz balansi</b>",
+            "",
+            f"👥 Almazli userlar: <b>{int(total_users or 0)}</b>",
+            f"💎 Jami user almazlari: <b>{int(total_diamonds or 0)}</b>",
+            "",
+        ]
+        for idx, user in enumerate(users, 1):
+            mention = self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))
+            username = f" @{escape(user.username)}" if user.username else ""
+            lines.append(
+                f"{idx}. {mention}{username} — "
+                f"<b>{int(user.diamonds or 0)}</b> 💎 | ID: <code>{user.telegram_id}</code>"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _diamond_action_label(action: str) -> str:
         labels = {
