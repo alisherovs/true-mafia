@@ -20,7 +20,7 @@ ROLE_KEYS = [
     "don", "mafia", "commissar_katani", "doctor", "sergeant", "gentleman",
     "citizen", "wanderer", "traveler", "lawyer", "suicide", "lucky",
     "wolf", "killer", "mercenary_killer", "sorcerer", "swindler",
-    "magician", "angry", "journalist", "traitor", "chemist", "guard", "joker",
+    "magician", "angry", "journalist", "traitor", "chemist", "guard", "prankster", "joker",
 ]
 
 WEAPON_KEYS = [

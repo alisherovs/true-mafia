@@ -106,7 +106,10 @@ async def skip_callback(callback: CallbackQuery, engine: GameEngine) -> None:
                 await callback.message.edit_reply_markup(reply_markup=None)
             except TelegramBadRequest:
                 pass
-    await callback.answer(text, show_alert=not ok)
+    if ok:
+        await callback.answer()
+    else:
+        await callback.answer(text, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("act:"))

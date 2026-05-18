@@ -122,6 +122,7 @@ ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.MAFIA,
     Role.MINER,
     Role.PRANKSTER,
+    Role.JOKER,
     Role.JUDGE,
     Role.KILLER,
     Role.LUCKY,
@@ -260,7 +261,7 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
 
 def joker_death_card_keyboard(game_id: int, actor_id: int) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"act:prank:{game_id}:{actor_id}:{idx}")]
+        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"act:joker_card:{game_id}:{actor_id}:{idx}")]
         for idx in (1, 2, 3, 4)
     ]
     rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
@@ -1027,7 +1028,8 @@ def settings_roles_keyboard(states: dict[str, bool] | None = None) -> InlineKeyb
         ("😎 Sotqin", "traitor"),
         ("🧪 Kimyogar", "chemist"),
         ("🛡 Qo'riqchi", "guard"),
-        ("🃏 Xazilkash", "joker"),
+        ("😂 Hazilkash", "prankster"),
+        ("🃏 Joker", "joker"),
     ]
     rows = []
     for label, key in roles:

@@ -44,7 +44,7 @@ ROLE_LABELS: dict[str, str] = {
     "wolf": "🐺 Bo'ri", "killer": "🔪 Qotil", "mercenary_killer": "🥷 Yollanma qotil",
     "sorcerer": "💣 Afsungar", "swindler": "🃏 Aferist", "magician": "🧙 Sehrgar",
     "angry": "🧟 G'azabkor", "journalist": "📰 Jurnalist", "traitor": "😎 Sotqin",
-    "chemist": "🧪 Kimyogar", "guard": "🛡 Qo'riqchi", "joker": "🃏 Joker",
+    "chemist": "🧪 Kimyogar", "guard": "🛡 Qo'riqchi", "prankster": "😂 Hazilkash", "joker": "🃏 Joker",
 }
 
 WEAPON_LABELS: dict[str, str] = {

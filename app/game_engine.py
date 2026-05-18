@@ -262,7 +262,7 @@ class GameEngine:
     @staticmethod
     def _role_player_count_ok(role: Role, mode: str, player_count: int) -> bool:
         normalized = normalize_game_mode(mode)
-        if role == Role.PRANKSTER:
+        if role == Role.JOKER:
             if normalized == "classic":
                 return player_count >= 17
             if normalized == "super":
@@ -270,6 +270,8 @@ class GameEngine:
             if normalized == "mega":
                 return player_count >= 10
             return player_count >= 17
+        if role == Role.PRANKSTER:
+            return player_count >= 10
         if role == Role.MINER:
             if normalized == "classic":
                 return player_count > 15
@@ -605,6 +607,8 @@ class GameEngine:
                 return "👷 Konchi o'zini himoyalashga qaror qildi..."
             return "👷 Konchi konlardan biriga yo'l oldi..."
         if role == Role.PRANKSTER:
+            return "😂 Hazilkash kimnidir chalg'itish uchun yo'lga tushdi..."
+        if role == Role.JOKER:
             return "🃏 Joker karta o'yini uchun nishon tanladi..."
         if role == Role.HOJIAKA:
             return "🕌 Hojiaka ehson ulashish uchun yo'lga tushdi..."
@@ -618,23 +622,38 @@ class GameEngine:
 
     @staticmethod
     def _prank_message_for_role(role: Role) -> str:
-        if role == Role.COMMISSAR:
-            return "😂 Siz bugun kimnidur tekshirmoqchi edingiz biroq lupangizni hazilkash banan bilan almashtirib ketibdi"
-        if role in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER, Role.KILLER}:
-            return "😂 Siz bugun pichogingiz bilan kimnidur oldirmoqchi edingiz biroq hazilkash sizga qoshiq ushlatib ketibdi"
-        if role == Role.BUM:
-            return "😂 Siz bugun ichkilik ichgani bormoqchi edingiz biroq hazilkash pivangizni mors bilan almashtirib qoyibdi"
-        if role == Role.MISTRESS:
-            return "😂 Siz bugun kimdur bilan kongil yozmoqchi edingiz biroq hazilkash taksistga sizni boshqa uyga jonatishini sorabdi"
-        if role == Role.DOCTOR:
-            return "😂 Siz bugun kimnidir davolamoqchi edingiz biroq hazilkash dorilarni shakar bilan almashtirib ketibdi"
-        if role == Role.LAWYER:
-            return "😂 Siz bugun kimnidir himoya qilmoqchi edingiz biroq hazilkash papkangizga bo'sh qog'oz solib ketibdi"
-        if role == Role.JOURNALIST:
-            return "😂 Siz bugun intervyu olmoqchi edingiz biroq hazilkash mikrofoningizni sabzi bilan almashtirib ketibdi"
-        if role == Role.MINER:
-            return "😂 Siz bugun konga bormoqchi edingiz biroq hazilkash belkuragingizni o'yinchoq qilib qo'yibdi"
-        return "😂 Hazilkash bugungi rejangizni kulgili prankka aylantirib yubordi"
+        messages = {
+            Role.DON: "😂 Bugun kimnidir yo'q qilishga buyruq bermoqchi edingiz, lekin Hazilkash sizga qurol o'rniga yaltiroq qoshiq ushlatib ketdi. Buyruq bekor bo'ldi.",
+            Role.MAFIA: "😂 Bugun qorong'ida ish bitirmoqchi edingiz, lekin Hazilkash niqobingizni bayram shapkasi bilan almashtirib ketdi. Yurishingiz bekor bo'ldi.",
+            Role.SPY: "😂 Bugun razvedkaga chiqmoqchi edingiz, lekin Hazilkash maxfiy daftaringiz o'rniga bolalar rangli kitobini berib ketdi.",
+            Role.HIRED_KILLER: "😂 Bugun yashirin ovga chiqmoqchi edingiz, lekin Hazilkash qurolingizni o'yinchoq qilichga almashtirib ketdi.",
+            Role.LAWYER: "😂 Bugun Mafiyani himoya qilmoqchi edingiz, lekin Hazilkash papkangizga hujjat o'rniga bo'sh qog'oz solib ketdi.",
+            Role.COMMISSAR: "😂 Bugun kimnidir tekshirmoqchi edingiz, lekin Hazilkash lupangizni banan bilan almashtirib ketdi. Tekshiruv bekor bo'ldi.",
+            Role.SERGEANT: "😂 Bugun Komissarga yordam bermoqchi edingiz, lekin Hazilkash ratsiyangizga faqat kulgi ovozlarini yozib ketdi.",
+            Role.DOCTOR: "😂 Bugun kimnidir davolamoqchi edingiz, lekin Hazilkash dorilarni shakar bilan almashtirib ketdi. Davolash bekor bo'ldi.",
+            Role.GUARD: "😂 Bugun kimnidir qo'riqlamoqchi edingiz, lekin Hazilkash qalqoningizni kartondan yasab qo'yibdi.",
+            Role.MISTRESS: "😂 Bugun kimnidir uxlatmoqchi edingiz, lekin Hazilkash ichimligingizni oddiy mors bilan almashtirib qo'yibdi.",
+            Role.JOURNALIST: "😂 Bugun intervyu olmoqchi edingiz, lekin Hazilkash mikrofoningizni sabzi bilan almashtirib ketdi.",
+            Role.HOJIAKA: "😂 Bugun ehson tarqatmoqchi edingiz, lekin Hazilkash sovg'a qutingizga paypoq solib ketibdi.",
+            Role.MASHKA: "😂 Bugun kimningdir hamyoniga ko'z olaytirgandingiz, lekin Hazilkash sizga cho'ntak o'rniga tikilgan yostiq ko'rsatib ketdi.",
+            Role.KILLER: "😂 Bugun pichog'ingiz bilan kimnidir ovlamoqchi edingiz, lekin Hazilkash sizga qoshiq ushlatib ketdi.",
+            Role.SORCERER: "😂 Bugun afsunlaringizni ishga solmoqchi edingiz, lekin Hazilkash sehrli kitobingizga osh retsepti yozib ketdi.",
+            Role.MAQ: "😂 Bugun sehr bilan javob bermoqchi edingiz, lekin Hazilkash tayoqchangizni qalamga almashtirib ketdi.",
+            Role.MINER: "😂 Bugun konga bormoqchi edingiz, lekin Hazilkash belkuragingizni o'yinchoq qilib qo'yibdi.",
+            Role.JOKER: "😂 Bugun karta o'yinini boshlamoqchi edingiz, lekin Hazilkash kartalaringizni UNO bilan almashtirib ketdi.",
+            Role.ARSONIST: "😂 Bugun alangani yoqmoqchi edingiz, lekin Hazilkash gugurtingizni namlab qo'yibdi.",
+            Role.WOLF: "😂 Bugun ovga chiqmoqchi edingiz, lekin Hazilkash uvillashingizni mushuk miyoviga almashtirib ketdi.",
+            Role.BUM: "😂 Bugun kimnidir kuzatmoqchi edingiz, lekin Hazilkash butilkangizga kompot quyib ketibdi.",
+            Role.CROOK: "😂 Bugun kimnidir chalg'itmoqchi edingiz, lekin Hazilkash sizning o'zingizni chalg'itib ketdi.",
+            Role.LUCKY: "😂 Bugun omadingizga ishonib yotgandingiz, lekin Hazilkash omad tumoringizni muzlatkich magnitiga almashtirib ketdi.",
+            Role.JESTER: "😂 Bugun sahnani o'zingizniki qilmoqchi edingiz, lekin Hazilkash sizdan oldin kuldirib ketdi.",
+            Role.CITIZEN: "😂 Siz bugun tinchgina uxlamoqchi edingiz, lekin Hazilkash yostig'ingiz ostiga chiyillaydigan o'yinchoq qo'yib ketdi.",
+            Role.WATCHER: "😂 Bugun kimnidir poylamoqchi edingiz, lekin Hazilkash durbiningizga rangli shisha o'rnatib ketdi.",
+            Role.SNITCH: "😂 Bugun kimningdir sirini sotmoqchi edingiz, lekin Hazilkash yozuvlaringizni teskari qilib qo'yibdi.",
+            Role.MAYOR: "😂 Bugun obro'yingizga suyanmoqchi edingiz, lekin Hazilkash nutqingizni latifalar bilan almashtirib ketdi.",
+            Role.PRANKSTER: "😂 Bugun o'zingiz hazil qilmoqchi edingiz, lekin Hazilkash sizni ham hazilga aylantirib ketdi.",
+        }
+        return messages.get(role, "😂 Hazilkash bugungi rejangizni kulgili prankka aylantirib yubordi.")
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
         safe_words = escape(words.strip()[:500])
@@ -1769,6 +1788,8 @@ class GameEngine:
         if role == Role.CROOK:
             return "🤹🏻 Kimni chalg'itasiz?", target_keyboard("block", game_id, player.telegram_id, targets)
         if role == Role.PRANKSTER:
+            return "😂 Kimni hazil bilan chalg'itasiz?", target_keyboard("prank", game_id, player.telegram_id, targets)
+        if role == Role.JOKER:
             return "🃏 4 kartadan birini o'lim kartasi sifatida tanlang.", joker_death_card_keyboard(game_id, player.telegram_id)
         if role == Role.SNITCH:
             return "🤓 Kimni tekshirasiz?", target_keyboard("check", game_id, player.telegram_id, targets)
@@ -2111,6 +2132,7 @@ class GameEngine:
             "mine": ActionType.MINE,
             "mine_protect": ActionType.MINE_PROTECT,
             "prank": ActionType.PRANK,
+            "joker_card": ActionType.PRANK,
             "joker_target": ActionType.PRANK,
             "grant": ActionType.GRANT,
             "steal": ActionType.STEAL,
@@ -2172,7 +2194,8 @@ class GameEngine:
                 Role.BUM: {"visit"},
                 Role.SORCERER: {"revenge"},
                 Role.MINER: {"mine", "mine_protect"},
-                Role.PRANKSTER: {"prank", "joker_target"},
+                Role.PRANKSTER: {"prank"},
+                Role.JOKER: {"joker_card", "joker_target"},
                 Role.SNITCH: {"check"},
                 Role.HOJIAKA: {"grant"},
                 Role.MASHKA: {"steal"},
@@ -2245,7 +2268,7 @@ class GameEngine:
                     return False, "Avval 3 xil o'yinchini belgilang, keyin o'zingizni tanlashingiz mumkin."
 
             if action_type in {ActionType.MINE, ActionType.MINE_PROTECT} or (
-                actor_role == Role.PRANKSTER and action_key == "prank"
+                actor_role == Role.JOKER and action_key == "joker_card"
             ):
                 target = actor
             else:
@@ -2259,7 +2282,7 @@ class GameEngine:
                 ).scalar_one_or_none()
                 if target is None or not target.alive:
                     return False, "Nishon noto'g'ri."
-            if actor_role == Role.PRANKSTER and action_key == "prank":
+            if actor_role == Role.JOKER and action_key == "joker_card":
                 if target_id not in {1, 2, 3, 4}:
                     return False, "Karta noto'g'ri."
                 existing_prank = (
@@ -2296,7 +2319,7 @@ class GameEngine:
                 except TelegramForbiddenError:
                     pass
                 return True, "O'lim kartasi saqlandi."
-            if actor_role == Role.PRANKSTER and action_key == "joker_target":
+            if actor_role == Role.JOKER and action_key == "joker_target":
                 prank_action = (
                     await session.execute(
                         select(NightAction).where(
@@ -2345,10 +2368,12 @@ class GameEngine:
                 success_text = f"Siz {target.display_name}ga ehson qilishni tanladingiz."
             elif action_type == ActionType.STEAL:
                 success_text = f"Siz {target.display_name}dan o'g'irlashni tanladingiz."
-            elif action_key == "prank":
+            elif action_key == "joker_card":
                 success_text = "Siz o'lim kartasini tanladingiz."
             elif action_key == "joker_target":
                 success_text = f"Siz {target.display_name}ga kartalar yubordingiz."
+            elif action_key == "prank":
+                success_text = f"Siz {target.display_name}ni hazil bilan chalg'itishni tanladingiz."
             elif action_key == "arson":
                 if target_id == actor_id:
                     success_text = "Siz o'zingizni tanladingiz. G'azabkor alangasi yoqiladi."
@@ -2702,6 +2727,8 @@ class GameEngine:
             visitors_by_target: dict[int, list[int]] = defaultdict(list)
             dead: set[int] = set()
             protected_group_lines: list[str] = []
+            prank_notices: list[tuple[int, str]] = []
+            prank_blocked_targets: set[int] = set()
 
             for act in actions:
                 if act.actor_telegram_id not in alive_ids:
@@ -2738,6 +2765,19 @@ class GameEngine:
                         protected_group_lines.append(
                             "🤹🏻 Bu tunda Qaroqchi kimnidir chalg'itib qo'ydi."
                         )
+                elif act.action_type == ActionType.PRANK.value and act.target_telegram_id:
+                    actor_role_value = Role(actor.role)
+                    if actor_role_value != Role.PRANKSTER:
+                        continue
+                    target = player_map.get(act.target_telegram_id)
+                    if target is None or not target.alive:
+                        continue
+                    if act.target_telegram_id in prank_blocked_targets:
+                        continue
+                    blocked.add(act.target_telegram_id)
+                    prank_blocked_targets.add(act.target_telegram_id)
+                    protected_group_lines.append("😂 Hazilkash bu tunda kimningdir rejasini buzib qo'ydi.")
+                    prank_notices.append((act.target_telegram_id, self._prank_message_for_role(Role(target.role))))
 
             for act in actions:
                 if act.actor_telegram_id in blocked:
@@ -2813,7 +2853,7 @@ class GameEngine:
                     hojiaka_grants.append((act.actor_telegram_id, target_id))
                 elif act.action_type == ActionType.STEAL.value and role == Role.MASHKA:
                     mashka_steals.append((act.actor_telegram_id, target_id))
-                elif act.action_type == ActionType.PRANK.value and role == Role.PRANKSTER:
+                elif act.action_type == ActionType.PRANK.value and role == Role.JOKER:
                     joker_actions.append(act)
                 elif act.details == "arson" and role == Role.ARSONIST:
                     arson_actions.append((act.actor_telegram_id, target_id))
@@ -3118,7 +3158,7 @@ class GameEngine:
                 if result == "dead":
                     dead.add(target_player.telegram_id)
                     death_causes[target_player.telegram_id] = "joker"
-                    death_visitors[target_player.telegram_id] = role_label(Role.PRANKSTER)
+                    death_visitors[target_player.telegram_id] = role_label(Role.JOKER)
                     joker_group_lines.append("🃏 Joker bugun hursand chunki karta o'yinida golib boldi.")
                 else:
                     joker_group_lines.append("🃏 Joker bugun hafa chunki karta o'yinida golib bolmadi.")
@@ -3653,6 +3693,16 @@ class GameEngine:
                 pass
 
         for telegram_id, text in protected_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        for telegram_id, text in prank_notices:
             try:
                 await bot.send_message(
                     telegram_id,
@@ -6018,6 +6068,9 @@ class GameEngine:
             return await self.find_active_game(session, chat_id)
 
     async def should_delete_message_for_non_player(self, chat_id: int, user_id: int) -> bool:
+        if await self.is_vip_user_active(user_id):
+            return False
+
         now = self._monotonic()
         cached = self._active_participants_cache.get(chat_id)
         if cached and cached[0] > now:

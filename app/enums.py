@@ -67,6 +67,7 @@ class Role(str, Enum):
     MAQ = "maq"
     MINER = "miner"
     PRANKSTER = "prankster"
+    JOKER = "joker"
     HOJIAKA = "hojiaka"
     MASHKA = "mashka"
 
