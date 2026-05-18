@@ -117,6 +117,7 @@ PREMIUM_RESET_INTERVAL_MINUTES_KEY = "premium_reset_interval_minutes"
 DIAMOND_LOG_LAST_SENT_ID_KEY = "diamond_log_last_sent_id"
 CHANNEL_GIFTS_ENABLED_PREFIX = "channel_gifts_enabled:"
 ADMIN_GROUP_ID_KEY = "admin_group_id"
+TOURNAMENT_GAME_PREFIX = "tournament_game:"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -909,7 +910,38 @@ class GameEngine:
         ).order_by(Game.id.desc())
         return (await session.execute(stmt)).scalars().first()
 
-    async def create_game_registration(self, bot: Bot, chat_id: int, chat_title: str, creator_id: int) -> tuple[bool, str]:
+    @staticmethod
+    def _tournament_game_key(game_id: int) -> str:
+        return f"{TOURNAMENT_GAME_PREFIX}{game_id}"
+
+    async def _is_tournament_game_in_session(self, session: AsyncSession, game_id: int) -> bool:
+        value = (
+            await session.execute(
+                select(BotSetting.value).where(BotSetting.key == self._tournament_game_key(game_id))
+            )
+        ).scalar_one_or_none()
+        return value == "1"
+
+    async def _set_tournament_game_in_session(self, session: AsyncSession, game_id: int) -> None:
+        key = self._tournament_game_key(game_id)
+        row = (
+            await session.execute(select(BotSetting).where(BotSetting.key == key))
+        ).scalar_one_or_none()
+        if row is None:
+            session.add(BotSetting(key=key, value="1"))
+        else:
+            row.value = "1"
+
+    async def create_game_registration(
+        self,
+        bot: Bot,
+        chat_id: int,
+        chat_title: str,
+        creator_id: int,
+        *,
+        tournament: bool = False,
+        role_preset: Optional[str] = None,
+    ) -> tuple[bool, str]:
         async with self.session_factory() as session:
             active = await self.find_active_game(session, chat_id)
             lang = await self.get_group_language(chat_id)
@@ -918,14 +950,28 @@ class GameEngine:
                     current_end = self._ensure_utc(active.registration_ends_at) if active.registration_ends_at else self._now_utc()
                     if current_end < self._now_utc():
                         current_end = self._now_utc()
+                    existing_is_tournament = await self._is_tournament_game_in_session(session, active.id)
+                    if tournament and not existing_is_tournament:
+                        players_count = await session.scalar(
+                            select(func.count(GamePlayer.id)).where(GamePlayer.game_id == active.id)
+                        )
+                        if players_count:
+                            return False, "Avvalgi oddiy ro'yxatda o'yinchilar bor. Turnir boshlash uchun o'yinni /stop qilib, /turnir ni qayta bering."
                     active.registration_ends_at = current_end + timedelta(seconds=30)
                     active.creator_telegram_id = creator_id
+                    if role_preset:
+                        active.role_preset = role_preset
+                    if tournament:
+                        await self._set_tournament_game_in_session(session, active.id)
+                    is_tournament = tournament or existing_is_tournament
                     self._add_game_log(
                         session,
                         active,
                         "registration_extended_by_game_command",
                         seconds=30,
                         registration_ends_at=active.registration_ends_at.isoformat(),
+                        tournament=is_tournament,
+                        role_preset=active.role_preset,
                     )
                     old_msg_id = active.lobby_message_id
                     if old_msg_id:
@@ -933,7 +979,7 @@ class GameEngine:
                             await bot.delete_message(chat_id, old_msg_id)
                         except (TelegramBadRequest, TelegramForbiddenError):
                             pass
-                    text = await self._build_lobby_text(session, active.id, lang, ended=False)
+                    text = await self._build_lobby_text(session, active.id, lang, ended=False, tournament=is_tournament)
                     msg = await bot.send_message(
                         chat_id,
                         text,
@@ -943,6 +989,7 @@ class GameEngine:
                             bot_username=self.settings.bot_username,
                             chat_id=chat_id,
                             active=True,
+                            tournament=is_tournament,
                         ),
                     )
                     active.lobby_message_id = msg.message_id
@@ -987,7 +1034,7 @@ class GameEngine:
                 phase=GamePhase.REGISTRATION.value,
                 active_key=1,
                 registration_ends_at=ends_at,
-                role_preset=group.role_preset or "black23",
+                role_preset=role_preset or group.role_preset or "black23",
             )
             session.add(game)
             try:
@@ -995,8 +1042,10 @@ class GameEngine:
             except IntegrityError:
                 await session.rollback()
                 return False, t(lang, "active_game_exists")
+            if tournament:
+                await self._set_tournament_game_in_session(session, game.id)
 
-            text = await self._build_lobby_text(session, game.id, lang, ended=False)
+            text = await self._build_lobby_text(session, game.id, lang, ended=False, tournament=tournament)
             msg = await bot.send_message(
                 chat_id,
                 text,
@@ -1006,6 +1055,7 @@ class GameEngine:
                     bot_username=self.settings.bot_username,
                     chat_id=chat_id,
                     active=True,
+                    tournament=tournament,
                 ),
             )
             game.lobby_message_id = msg.message_id
@@ -1016,6 +1066,7 @@ class GameEngine:
                 creator_id=creator_id,
                 registration_timeout=timeout,
                 registration_ends_at=ends_at.isoformat(),
+                tournament=tournament,
             )
             await session.commit()
 
@@ -1032,7 +1083,22 @@ class GameEngine:
             logger.exception("Failed to schedule registration jobs for game_id=%s", game.id)
         return True, t(await self.get_group_language(chat_id), "registration_started")
 
-    async def _build_lobby_text(self, session: AsyncSession, game_id: int, lang: str, ended: bool) -> str:
+    @staticmethod
+    def _tournament_team_emoji(team_key: Optional[str]) -> str:
+        if team_key == "blue":
+            return "🔵"
+        if team_key == "red":
+            return "🔴"
+        return ""
+
+    async def _build_lobby_text(
+        self,
+        session: AsyncSession,
+        game_id: int,
+        lang: str,
+        ended: bool,
+        tournament: bool = False,
+    ) -> str:
         players = (
             await session.execute(
                 select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
@@ -1045,7 +1111,15 @@ class GameEngine:
         else:
             return t(lang, "lobby_started_title")
 
-        names = ", ".join(self._tg_mention(p.telegram_id, p.display_name) for p in players) if players else t(lang, "lobby_empty")
+        if players:
+            names = ", ".join(
+                f"{self._tournament_team_emoji(p.transformed_to_team)} {self._tg_mention(p.telegram_id, p.display_name)}"
+                if tournament and self._tournament_team_emoji(p.transformed_to_team)
+                else self._tg_mention(p.telegram_id, p.display_name)
+                for p in players
+            )
+        else:
+            names = t(lang, "lobby_empty")
         return (
             f"{title}\n"
             f"{t(lang, 'lobby_registered')}\n\n"
@@ -1059,13 +1133,15 @@ class GameEngine:
             if game is None or game.lobby_message_id is None:
                 return
             lang = await self.get_group_language(game.chat_id)
-            text = await self._build_lobby_text(session, game.id, lang, ended)
+            is_tournament = await self._is_tournament_game_in_session(session, game.id)
+            text = await self._build_lobby_text(session, game.id, lang, ended, tournament=is_tournament)
             kb = lobby_keyboard(
                 lang=lang,
                 game_id=game.id,
                 bot_username=self.settings.bot_username,
                 chat_id=game.chat_id,
                 active=(not ended),
+                tournament=is_tournament,
             )
 
         try:
@@ -1134,12 +1210,20 @@ class GameEngine:
         await self.log(game_id, LogType.GAME_EVENT.value, f"Registration warning {seconds_left}s")
         await bot.send_message(game.chat_id, t(lang, key))
 
-    async def join_game(self, bot: Bot, game_id: int, tg_user: TgUser) -> tuple[bool, str]:
+    async def join_game(
+        self,
+        bot: Bot,
+        game_id: int,
+        tg_user: TgUser,
+        tournament_team: Optional[str] = None,
+    ) -> tuple[bool, str]:
         if not self._has_visible_nickname(self._profile_name_from_tg(tg_user)):
             return (
                 False,
                 "Nikingiz ko'rinmayapti. O'yinda qatnashish uchun Telegram ismingizni ko'rinadigan qilib o'zgartiring va qayta urinib ko'ring.",
             )
+        if tournament_team not in {None, "blue", "red"}:
+            return False, "Komanda noto'g'ri tanlandi."
         user = await self.ensure_user(tg_user)
         locked_until = self._ensure_utc(user.play_locked_until) if user.play_locked_until else None
         now = self._now_utc()
@@ -1154,8 +1238,10 @@ class GameEngine:
             lang = await self.get_group_language(game.chat_id)
             if game.status != GameStatus.REGISTRATION.value:
                 return False, t(lang, "registration_closed_cb")
-            group = (await session.execute(select(Group).where(Group.chat_id == game.chat_id))).scalar_one_or_none()
-            preset = group.role_preset if group else "black23"
+            is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            if is_tournament and tournament_team is None:
+                return False, "Turnirda qo'shilish uchun 🔵 yoki 🔴 komandani tanlang."
+            preset = game.role_preset or "black23"
             max_players = role_preset_max_players(preset)
             current_count = await session.scalar(select(func.count(GamePlayer.id)).where(GamePlayer.game_id == game_id))
             if (current_count or 0) >= max_players:
@@ -1170,6 +1256,21 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if exists is not None:
+                if is_tournament and tournament_team and exists.transformed_to_team != tournament_team:
+                    exists.transformed_to_team = tournament_team
+                    self._add_game_log(
+                        session,
+                        game,
+                        "tournament_team_changed",
+                        actor=exists,
+                        tournament_team=tournament_team,
+                    )
+                    chat_id = game.chat_id
+                    await session.commit()
+                    self._invalidate_game_cache(chat_id)
+                    await self.update_lobby(bot, game_id)
+                    emoji = self._tournament_team_emoji(tournament_team)
+                    return True, f"{emoji} Komandangiz o'zgartirildi."
                 return False, t(lang, "already_joined")
 
             player = GamePlayer(
@@ -1177,11 +1278,18 @@ class GameEngine:
                 user_id=user.id,
                 telegram_id=tg_user.id,
                 display_name=user.display_name,
+                transformed_to_team=tournament_team if is_tournament else None,
             )
             session.add(player)
             try:
                 await session.flush()
-                self._add_game_log(session, game, "player_joined", actor=player)
+                self._add_game_log(
+                    session,
+                    game,
+                    "player_joined",
+                    actor=player,
+                    tournament_team=tournament_team if is_tournament else None,
+                )
                 chat_id = game.chat_id
                 await session.commit()
             except IntegrityError:
@@ -1190,6 +1298,8 @@ class GameEngine:
 
         self._invalidate_game_cache(chat_id)
         await self.update_lobby(bot, game_id)
+        if tournament_team:
+            return True, f"{self._tournament_team_emoji(tournament_team)} Siz turnir komandasiga qo'shildingiz."
         return True, t(await self.get_user_language(tg_user.id), "joined")
 
     async def join_game_by_deeplink(
@@ -5099,25 +5209,43 @@ class GameEngine:
             losers: list[GamePlayer] = []
             reward_by_user: dict[int, tuple[int, int, bool]] = {}
             news_bonus_ids = await self.news_bonus_subscriber_ids(bot, [p.telegram_id for p in players])
+            is_tournament = await self._is_tournament_game_in_session(session, game_id)
             arsonist_forced_win = any(
                 Role(p.role) == Role.ARSONIST and bool(p.won)
                 for p in players
                 if p.role is not None
             )
+
+            def base_winner(player: GamePlayer) -> bool:
+                is_win = bool(player.won) or (player.team == winner_team.value and player.alive)
+                if player.role == Role.MINER.value and player.alive:
+                    is_win = True
+                if player.role == Role.SORCERER.value:
+                    is_win = bool(player.won)
+                if arsonist_forced_win:
+                    is_win = bool(player.won)
+                if player.left_game:
+                    is_win = False
+                return is_win
+
+            tournament_winning_teams: set[str] = set()
+            if is_tournament:
+                tournament_winning_teams = {
+                    str(p.transformed_to_team)
+                    for p in players
+                    if p.transformed_to_team in {"blue", "red"} and base_winner(p)
+                }
+
             for p in players:
                 # O'yin davomida o'lganlar yakunda mag'lub hisoblanadi.
                 # Faqat Suidsid kabi alohida shart bilan yutgan rollar p.won orqali g'olib bo'lib qoladi.
-                is_winner = bool(p.won) or (p.team == winner_team.value and p.alive)
-                if p.role == Role.MINER.value and p.alive:
+                is_winner = base_winner(p)
+                if (
+                    is_tournament
+                    and p.transformed_to_team in tournament_winning_teams
+                    and not p.left_game
+                ):
                     is_winner = True
-                # Afsungar faqat maxsus qasos yutug'i belgilangan bo'lsa g'olib bo'ladi.
-                if p.role == Role.SORCERER.value:
-                    is_winner = bool(p.won)
-                if arsonist_forced_win:
-                    is_winner = bool(p.won)
-                # O'yindan ixtiyoriy chiqib ketganlar yutmaydi.
-                if p.left_game:
-                    is_winner = False
                 p.won = is_winner
                 bonus_multiplier = 2 if p.telegram_id in news_bonus_ids else 1
                 reward_dollar = (

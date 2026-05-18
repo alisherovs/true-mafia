@@ -48,6 +48,43 @@ async def join_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     await callback.answer(text, show_alert=show_alert)
 
 
+@router.callback_query(F.data.startswith("jointeam:"))
+async def join_team_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = callback.data.split(":")
+    if len(parts) != 3 or parts[2] not in {"blue", "red"}:
+        await callback.answer("Bad callback", show_alert=True)
+        return
+
+    game_id = int(parts[1])
+    team_key = parts[2]
+    if callback.message.chat.type == "private":
+        await callback.answer(t(await engine.get_user_language(callback.from_user.id), "group_only"), show_alert=True)
+        return
+
+    active = await engine.active_game_for_chat(callback.message.chat.id)
+    if active is None or active.id != game_id:
+        await callback.answer(t(await engine.get_group_language(callback.message.chat.id), "callback_expired"), show_alert=True)
+        return
+
+    ok, text = await engine.join_game(callback.bot, game_id, callback.from_user, tournament_team=team_key)
+    show_alert = not ok
+    if ok:
+        try:
+            await callback.bot.send_message(
+                callback.from_user.id,
+                text,
+                reply_markup=await engine.group_return_keyboard(callback.bot, callback.message.chat.id),
+            )
+            text = f"{text} Tasdiq xabari bot private chatiga yuborildi."
+        except TelegramForbiddenError:
+            text = f"{text}\n\nBotga o'tish tugmasini bosing va private chatni oching."
+            show_alert = True
+    await callback.answer(text, show_alert=show_alert)
+
+
 @router.callback_query(F.data.startswith("role:"))
 async def role_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None:

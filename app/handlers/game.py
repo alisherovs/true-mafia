@@ -11,7 +11,13 @@ from app.texts import t
 router = Router()
 
 
-async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str | None = None) -> None:
+async def _start_game_with_mode(
+    message: Message,
+    engine: GameEngine,
+    mode: str | None = None,
+    *,
+    tournament: bool = False,
+) -> None:
     if message.from_user is None:
         return
     if message.chat.type == "private":
@@ -43,11 +49,15 @@ async def _start_game_with_mode(message: Message, engine: GameEngine, mode: str 
         chat_id=message.chat.id,
         chat_title=message.chat.title or "Group",
         creator_id=message.from_user.id,
+        tournament=tournament,
+        role_preset=mode,
     )
     if not ok:
         await message.answer(text)
     elif mode:
         await message.answer(f"✅ Mode tanlandi: <b>{mode}</b>")
+    elif tournament:
+        await message.answer("🏆 Turnir ro'yxatdan o'tishi boshlandi.")
 
 
 @router.message(Command("game"))
@@ -58,6 +68,16 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
             await message.reply(err)
             return
     await _start_game_with_mode(message, engine)
+
+
+@router.message(Command("turnir"))
+async def cmd_tournament_game(message: Message, engine: GameEngine) -> None:
+    if message.from_user and message.chat.type != "private":
+        ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "game")
+        if not ok:
+            await message.reply(err)
+            return
+    await _start_game_with_mode(message, engine, tournament=True)
 
 
 @router.message(Command("classic"))

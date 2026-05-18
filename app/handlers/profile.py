@@ -38,6 +38,7 @@ PRIVATE_COMMANDS_TEXT = (
 GROUP_COMMANDS_TEXT = (
     "📋 <b>Guruh buyruqlari</b>\n\n"
     "/game - ro'yxatdan o'tishni boshlash\n"
+    "/turnir - turnir ro'yxatdan o'tishini boshlash\n"
     "/classic - Classic mode bilan ro'yxatdan o'tishni boshlash\n"
     "/super - Super mode bilan ro'yxatdan o'tishni boshlash\n"
     "/mega - Mega mode bilan ro'yxatdan o'tishni boshlash\n"

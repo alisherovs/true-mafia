@@ -492,17 +492,45 @@ async def cmd_gbust(message: Message, engine: GameEngine) -> None:
     await message.reply(text)
 
 
-async def _burn_user_balance(message: Message, settings: Settings, field: str, label: str) -> None:
+async def _burn_user_balance(
+    message: Message,
+    command: CommandObject,
+    settings: Settings,
+    field: str,
+    label: str,
+) -> None:
     if message.from_user is None or message.from_user.id not in settings.admin_ids:
         return
-    if message.reply_to_message is None or message.reply_to_message.from_user is None:
-        await message.reply("Bu buyruqni player xabariga reply qilib ishlating.")
+
+    raw_args = (command.args or "").strip()
+    target_id: int | None = None
+    target_fallback_name: str | None = None
+
+    if raw_args:
+        first_arg = raw_args.split(maxsplit=1)[0].strip()
+        if not first_arg.lstrip("-").isdigit():
+            await message.reply(
+                "Format noto'g'ri.\n"
+                "ID bilan: <code>/bust1 7044905076</code>\n"
+                "Yoki user xabariga reply qilib: <code>/bust1</code>"
+            )
+            return
+        target_id = int(first_arg)
+        target_fallback_name = str(target_id)
+    elif message.reply_to_message and message.reply_to_message.from_user:
+        target_tg = message.reply_to_message.from_user
+        target_id = target_tg.id
+        target_fallback_name = target_tg.full_name or str(target_tg.id)
+    else:
+        await message.reply(
+            "Bu buyruqni ID bilan yoki player xabariga reply qilib ishlating.\n"
+            "Masalan: <code>/bust1 7044905076</code>"
+        )
         return
 
-    target_tg = message.reply_to_message.from_user
     async with SessionLocal() as session:
         user = (
-            await session.execute(select(User).where(User.telegram_id == target_tg.id))
+            await session.execute(select(User).where(User.telegram_id == target_id))
         ).scalar_one_or_none()
         if user is None:
             await message.reply("Foydalanuvchi topilmadi. U avval /start bosgan bo'lishi kerak.")
@@ -519,20 +547,41 @@ async def _burn_user_balance(message: Message, settings: Settings, field: str, l
                 note=f"Admin tomonidan olmoslar 0 qilindi: admin={message.from_user.id}",
                 chat_id=message.chat.id,
             )
+        elif field == "dollar":
+            _record_dollar_transaction(
+                session,
+                user,
+                -burned,
+                "admin_bust",
+                note=f"Admin tomonidan dollarlar 0 qilindi: admin={message.from_user.id}",
+                chat_id=message.chat.id,
+            )
         await session.commit()
 
-    target_name = _user_link(target_tg.id, user.display_name or target_tg.full_name or str(target_tg.id))
+    target_name = _user_link(user.telegram_id, user.display_name or target_fallback_name or str(user.telegram_id))
     await message.reply(f"🔥 {target_name} balansidagi {label} kuyib ketdi.\nMiqdor: <b>{burned}</b>")
 
 
 @router.message(Command("bust1"))
-async def cmd_bust_diamonds(message: Message, settings: Settings) -> None:
-    await _burn_user_balance(message, settings, "diamonds", "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmoslar")
+async def cmd_bust_diamonds(message: Message, command: CommandObject, settings: Settings) -> None:
+    await _burn_user_balance(
+        message,
+        command,
+        settings,
+        "diamonds",
+        "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmoslar",
+    )
 
 
 @router.message(Command("bust2"))
-async def cmd_bust_dollars(message: Message, settings: Settings) -> None:
-    await _burn_user_balance(message, settings, "dollar", "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarlar")
+async def cmd_bust_dollars(message: Message, command: CommandObject, settings: Settings) -> None:
+    await _burn_user_balance(
+        message,
+        command,
+        settings,
+        "dollar",
+        "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarlar",
+    )
 
 
 @router.message(Command("give", "giveto"))

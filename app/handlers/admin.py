@@ -67,6 +67,7 @@ OWNER_COMMANDS_TEXT = (
     "/top - TOP reyting\n\n"
     "🎮 <b>Guruh va o'yin buyruqlari</b>\n"
     "/game - ro'yxatdan o'tishni boshlash yoki +30 sekund uzaytirish\n"
+    "/turnir - turnir ro'yxatdan o'tishini boshlash\n"
     "/classic - Classic mode bilan ro'yxatdan o'tishni boshlash\n"
     "/super - Super mode bilan ro'yxatdan o'tishni boshlash\n"
     "/mega - Mega mode bilan ro'yxatdan o'tishni boshlash\n"

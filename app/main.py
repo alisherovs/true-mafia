@@ -99,6 +99,7 @@ async def set_commands(bot: Bot) -> None:
     group_commands = [
         BotCommand(command="start", description="O'yinni boshlash"),
         BotCommand(command="game", description="Ro'yxatdan o'tishni boshlash"),
+        BotCommand(command="turnir", description="Turnir o'yinini boshlash"),
         BotCommand(command="classic", description="Classic mode"),
         BotCommand(command="super", description="Super mode"),
         BotCommand(command="mega", description="Mega mode"),
