@@ -148,7 +148,7 @@ def _diamond_transfer_kwargs(
         f" {amount} olmos",
     ]
     if note and note != "-":
-        parts.append(f"\nIzoh: {note}")
+        parts.append(f"\n💬 Izoh: {note.strip()}")
     return Text(*parts).as_kwargs()
 
 
@@ -629,7 +629,7 @@ async def cmd_give(message: Message, command: CommandObject, engine: GameEngine)
             await message.reply("Target foydalanuvchi topilmadi. U /start qilishi kerak.")
             return
 
-    ok, status = await engine.transfer_diamonds(sender.telegram_id, target_id, amount)
+    ok, status = await engine.transfer_diamonds(sender.telegram_id, target_id, amount, note=note)
     if not ok:
         if "Balans" in status:
             await message.reply(t(lang, "give_not_enough"))

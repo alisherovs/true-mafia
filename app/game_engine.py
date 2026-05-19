@@ -6633,9 +6633,22 @@ class GameEngine:
             "giveaway_protection": gs.giveaway_protection,
         }
 
-    async def transfer_diamonds(self, from_user_id: int, to_user_id: int, amount: int) -> tuple[bool, str]:
+    async def transfer_diamonds(
+        self,
+        from_user_id: int,
+        to_user_id: int,
+        amount: int,
+        *,
+        note: str = "",
+    ) -> tuple[bool, str]:
         if amount <= 0:
             return False, "Miqdor musbat bo'lishi kerak."
+        clean_note = self._short_text(note, 180)
+        out_note = "Userga almaz o'tkazma"
+        in_note = "Userdan almaz qabul qilindi"
+        if clean_note:
+            out_note = f"{out_note}. Izoh: {clean_note}"
+            in_note = f"{in_note}. Izoh: {clean_note}"
         async with self.session_factory() as session:
             sender = (await session.execute(select(User).where(User.telegram_id == from_user_id))).scalar_one_or_none()
             receiver = (await session.execute(select(User).where(User.telegram_id == to_user_id))).scalar_one_or_none()
@@ -6650,7 +6663,7 @@ class GameEngine:
                 sender,
                 -amount,
                 "transfer_out",
-                note="Userga almaz o'tkazma",
+                note=out_note,
                 counterparty=receiver,
             )
             self._record_diamond_transaction(
@@ -6658,7 +6671,7 @@ class GameEngine:
                 receiver,
                 amount,
                 "transfer_in",
-                note="Userdan almaz qabul qilindi",
+                note=in_note,
                 counterparty=sender,
             )
             await session.commit()
@@ -7248,13 +7261,8 @@ class GameEngine:
             return text
         return f"{text[: max(0, limit - 1)]}…"
 
-    @staticmethod
-    def _diamond_log_threshold_filter():
-        return func.abs(DiamondTransaction.amount) >= DIAMOND_LOG_MIN_AMOUNT
-
     async def _owner_diamond_audit_lines(self, limit: int = 15, *, title: str = "💎 <b>Almaz loglari</b>") -> list[str]:
         limit = min(max(5, int(limit)), 50)
-        threshold_filter = self._diamond_log_threshold_filter()
         async with self.session_factory() as session:
             income_expr = func.coalesce(
                 func.sum(case((DiamondTransaction.amount > 0, DiamondTransaction.amount), else_=0)),
@@ -7266,7 +7274,7 @@ class GameEngine:
             )
             total_income, total_expense, tx_count = (
                 await session.execute(
-                    select(income_expr, expense_expr, func.count(DiamondTransaction.id)).where(threshold_filter)
+                    select(income_expr, expense_expr, func.count(DiamondTransaction.id))
                 )
             ).one()
             by_action = (
@@ -7284,7 +7292,6 @@ class GameEngine:
                             0,
                         ),
                     )
-                    .where(threshold_filter)
                     .group_by(DiamondTransaction.action)
                     .order_by(func.count(DiamondTransaction.id).desc())
                     .limit(10)
@@ -7306,7 +7313,6 @@ class GameEngine:
                         user_income_expr,
                         user_expense_expr,
                     )
-                    .where(threshold_filter)
                     .group_by(DiamondTransaction.user_telegram_id)
                     .order_by(user_expense_expr.desc(), user_income_expr.desc())
                     .limit(10)
@@ -7315,7 +7321,6 @@ class GameEngine:
             recent = (
                 await session.execute(
                     select(DiamondTransaction)
-                    .where(threshold_filter)
                     .order_by(DiamondTransaction.created_at.desc(), DiamondTransaction.id.desc())
                     .limit(limit)
                 )
@@ -7325,14 +7330,13 @@ class GameEngine:
             return [
                 title,
                 "",
-                f"Hali <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz yoki undan yuqori kirim-chiqim logi yozilmagan.\n"
-                "Mayda amallar bu bo'limda ko'rsatilmaydi.",
+                "Hali almaz kirim-chiqim logi yozilmagan.",
             ]
 
         lines = [
             title,
             "",
-            f"Filter: <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz va undan yuqori",
+            "Filter: <b>yo'q</b> — barcha olmos amallari ko'rsatiladi",
             f"📥 Jami kirim: <b>{int(total_income or 0)}</b>",
             f"📤 Jami sarf: <b>{int(total_expense or 0)}</b>",
             f"🧾 Amallar soni: <b>{int(tx_count or 0)}</b>",
@@ -7356,7 +7360,7 @@ class GameEngine:
             sign = "+" if int(item.amount or 0) > 0 else ""
             label = self._diamond_action_label(item.action)
             when = self._format_tx_time(item.created_at)
-            note = f"\n   📝 {escape(self._short_text(item.note))}" if item.note else ""
+            note = f"\n   💬 Izoh: {escape(self._short_text(item.note))}" if item.note else ""
             counterparty = ""
             if item.counterparty_telegram_id:
                 counterparty_name = escape(self._short_text(item.counterparty_name or str(item.counterparty_telegram_id), 64))
@@ -7422,7 +7426,7 @@ class GameEngine:
         if item.chat_id:
             parts.append(f"🏠 <code>{item.chat_id}</code>")
         if item.note:
-            parts.append(f"📝 {escape(self._short_text(item.note, 120))}")
+            parts.append(f"💬 Izoh: {escape(self._short_text(item.note, 120))}")
         return "\n".join(parts)
 
     async def send_pending_diamond_logs(self, bot: Bot) -> int:
@@ -7452,17 +7456,11 @@ class GameEngine:
             return 0
 
         newest_id = max(int(item.id) for item in rows)
-        visible_rows = [item for item in rows if abs(int(item.amount or 0)) >= DIAMOND_LOG_MIN_AMOUNT]
-        if not visible_rows:
-            async with self.session_factory() as session:
-                await self._set_bot_setting_value(session, DIAMOND_LOG_LAST_SENT_ID_KEY, str(newest_id))
-                await session.commit()
-            return 0
 
         lines = ["💎 <b>Yangi almaz loglari</b>", ""]
-        lines.append(f"Filter: <b>{DIAMOND_LOG_MIN_AMOUNT}</b> almaz va undan yuqori")
+        lines.append("Filter: <b>yo'q</b> — barcha olmos amallari")
         lines.append("")
-        for item in visible_rows:
+        for item in rows:
             lines.extend([self._diamond_transaction_line(item), ""])
         chunks = self._split_report_lines(lines)
 
