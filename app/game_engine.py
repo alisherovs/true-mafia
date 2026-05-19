@@ -7203,29 +7203,29 @@ class GameEngine:
     @staticmethod
     def _diamond_action_label(action: str) -> str:
         labels = {
-            "admin_grant": "admin kredit",
-            "admin_bust": "admin bankrot",
+            "admin_grant": "Admin krediti",
+            "admin_bust": "Admin bankrot",
             "diamond_payment": "Stars xarid",
-            "diamond_to_dollar": "dollarga almashtirish",
-            "game_participation_reward": "o'yin ishtirok mukofoti",
-            "game_winner_reward": "g'olib mukofoti",
-            "giveaway_create": "sovg'a ochish",
-            "giveaway_refund": "sovg'a qaytarish",
-            "giveaway_win": "sovg'a yutish",
-            "hero_add_points": "geroy ball",
-            "hero_buy": "geroy xarid",
-            "hero_market_buy": "geroy marketplace xarid",
-            "hero_market_sale": "geroy marketplace sotuv",
-            "hero_sale_cancel": "geroy sotuvdan qaytarish",
-            "hojiaka_grant": "hojiaka ehson",
-            "miner_reward": "konchi topilmasi",
-            "mashka_steal_in": "mashka o'g'irlik kirim",
-            "mashka_steal_out": "mashka o'g'irlik chiqim",
-            "premium_group_contribution": "premium guruh",
-            "shop_item_buy": "do'kon mahsulot",
-            "shop_role_buy": "rol xarid",
-            "transfer_in": "o'tkazma kirim",
-            "transfer_out": "o'tkazma chiqim",
+            "diamond_to_dollar": "Dollarga almashtirish",
+            "game_participation_reward": "O'yin ishtirok mukofoti",
+            "game_winner_reward": "G'olib mukofoti",
+            "giveaway_create": "Sovg'a ochish",
+            "giveaway_refund": "Sovg'a qaytarish",
+            "giveaway_win": "Sovg'a yutish",
+            "hero_add_points": "Geroy ball",
+            "hero_buy": "Geroy xarid",
+            "hero_market_buy": "Geroy marketplace xarid",
+            "hero_market_sale": "Geroy marketplace sotuv",
+            "hero_sale_cancel": "Geroy sotuvdan qaytarish",
+            "hojiaka_grant": "Hojiaka ehson",
+            "miner_reward": "Konchi topilmasi",
+            "mashka_steal_in": "Mashka o'g'irlik kirim",
+            "mashka_steal_out": "Mashka o'g'irlik chiqim",
+            "premium_group_contribution": "Premium guruh",
+            "shop_item_buy": "Do'kon mahsulot",
+            "shop_role_buy": "Rol xarid",
+            "transfer_in": "O'tkazma kirim",
+            "transfer_out": "O'tkazma chiqim",
         }
         return labels.get(action, action.replace("_", " "))
 
@@ -7252,7 +7252,7 @@ class GameEngine:
             return "--"
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        return value.astimezone(timezone.utc).strftime("%d.%m.%Y | %H:%M")
 
     @staticmethod
     def _short_text(value: Optional[str], limit: int = 140) -> str:
@@ -7357,20 +7357,7 @@ class GameEngine:
 
         lines.extend(["", f"🕘 <b>Oxirgi {limit} amal:</b>"])
         for item in recent:
-            sign = "+" if int(item.amount or 0) > 0 else ""
-            label = self._diamond_action_label(item.action)
-            when = self._format_tx_time(item.created_at)
-            note = f"\n   💬 Izoh: {escape(self._short_text(item.note))}" if item.note else ""
-            counterparty = ""
-            if item.counterparty_telegram_id:
-                counterparty_name = escape(self._short_text(item.counterparty_name or str(item.counterparty_telegram_id), 64))
-                counterparty = f"\n   ↔️ {counterparty_name} (<code>{item.counterparty_telegram_id}</code>)"
-            chat = f"\n   🏠 chat: <code>{item.chat_id}</code>" if item.chat_id else ""
-            user_link = self._tg_mention(item.user_telegram_id, item.user_name)
-            lines.append(
-                f"{when} • {user_link}: <b>{sign}{int(item.amount or 0)}</b> "
-                f"({escape(label)}) → balans <b>{int(item.balance_after or 0)}</b>{counterparty}{chat}{note}"
-            )
+            lines.append(self._diamond_transaction_line(item))
         return lines
 
     async def owner_diamond_audit_text(self, limit: int = 15) -> str:
@@ -7411,22 +7398,24 @@ class GameEngine:
         return True, f"Almaz loglari <b>{escape(chat_title)}</b> guruhiga yuborildi. Xabarlar: <b>{sent}</b> ta.", sent
 
     def _diamond_transaction_line(self, item: DiamondTransaction) -> str:
-        sign = "+" if int(item.amount or 0) > 0 else ""
+        amount = int(item.amount or 0)
+        sign = "+" if amount > 0 else ""
+        direction = "➕" if amount > 0 else "➖"
         label = self._diamond_action_label(item.action)
         when = self._format_tx_time(item.created_at)
         user_link = self._tg_mention(item.user_telegram_id, item.user_name)
-        parts = [
-            f"#{item.id} • {when}",
-            f"{user_link}: <b>{sign}{int(item.amount or 0)}</b> ({escape(label)})",
-            f"Balans: <b>{int(item.balance_after or 0)}</b>",
-        ]
+        parts = ["━━━━━━━━━━━━", f"#{item.id} • {when}", ""]
+        parts.append(f"👤 {user_link}: ID <code>{item.user_telegram_id}</code>")
+        parts.append(f"{direction} <b>{sign}{amount}</b> 💎 — {escape(label)}")
+        parts.append(f"💰 Balans: <b>{int(item.balance_after or 0)}</b> 💎")
         if item.counterparty_telegram_id:
             counterparty = escape(self._short_text(item.counterparty_name or str(item.counterparty_telegram_id), 64))
-            parts.append(f"↔️ {counterparty} (<code>{item.counterparty_telegram_id}</code>)")
+            parts.append(f"↔️ Qarshi tomon: {counterparty} | ID <code>{item.counterparty_telegram_id}</code>")
         if item.chat_id:
-            parts.append(f"🏠 <code>{item.chat_id}</code>")
+            parts.append(f"🏠 Chat: <code>{item.chat_id}</code>")
         if item.note:
-            parts.append(f"💬 Izoh: {escape(self._short_text(item.note, 120))}")
+            parts.extend(["", f"📝 {escape(self._short_text(item.note, 160))}"])
+        parts.append("━━━━━━━━━━━━")
         return "\n".join(parts)
 
     async def send_pending_diamond_logs(self, bot: Bot) -> int:
