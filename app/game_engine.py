@@ -5627,29 +5627,37 @@ class GameEngine:
     @staticmethod
     def _hero_panel_text(hero: Hero) -> str:
         info = hero_level_for_points(int(hero.points or 0))
+        fmt = lambda value: f"{int(value or 0):,}".replace(",", " ")
+        diamond = f'<tg-emoji emoji-id="{DIAMOND_EMOJI_ID}">💎</tg-emoji>'
+        money = f'<tg-emoji emoji-id="{DOLLAR_EMOJI_ID}">💶</tg-emoji>'
+        sword = f'<tg-emoji emoji-id="{SWORD_EMOJI_ID}">⚔️</tg-emoji>'
+        power_text = "MAX" if info.max_hit else info.power_text
         next_text = (
-            f"{info.next_level} => {info.next_points} ball"
+            f"{info.next_level}-daraja uchun {fmt(info.next_points)} ball"
             if info.next_level and info.next_points is not None
             else "Maksimal daraja"
         )
         sale_text = ""
         if hero.is_for_sale:
-            sale_text = f"\n🏷 Sotuvda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {hero.sale_price_diamonds or 0}"
+            sale_text = f"\n🏷 <b>Sotuvda:</b> {diamond} <b>{fmt(hero.sale_price_diamonds)}</b>"
         return (
-            "Geroylar haqida\n\n"
-            f"🥷 Geroy: {safe_hero_name(hero.name)}\n"
-            f"⭐️ Daraja: {info.level}\n"
-            f"👊 Kuch: {info.power_text}\n"
-            f"🖤 Himoya: {int(hero.current_defense or 0)}%\n"
-            f"♥️ Max himoya: {HERO_FULL_DEFENSE_PERCENT}%\n"
-            f"🩸 Zaryad miqdori: {int(hero.charge or 0)}\n"
-            f"☑️ Jami ballari: {int(hero.points or 0)} ball\n"
-            f"⏫ Keyingi daraja = {next_text}{sale_text}\n\n"
-            "🛒 Xaridlar uchun:\n"
-            f"➕ 1000 Ball qo'shish = <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_ADD_POINTS_PRICE_DIAMONDS}\n"
-            f"🛡 Himoyani to'liq yangilash ({HERO_FULL_DEFENSE_PERCENT}%) = 💶 {HERO_UPGRADE_DEFENSE_PRICE_DOLLAR}\n"
-            f"🩸 Qurolni zaryadlash = 💶 {HERO_RECHARGE_PRICE_DOLLAR}\n"
-            f"🖋 Geroy nomini o'zgertirish = 💶 {HERO_RENAME_PRICE_DOLLAR}"
+            "🥷 <b>GEROY MA'LUMOTI</b>\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>Geroy:</b> <b>{safe_hero_name(hero.name)}</b>\n"
+            f"⭐️ <b>Daraja:</b> <b>{info.level}</b>\n"
+            f"🏆 <b>Jami ball:</b> <b>{fmt(hero.points)}</b>\n\n"
+            f"{sword} <b>Kuch:</b> <b>{power_text}</b>\n"
+            f"🛡 <b>Himoya:</b> <b>{int(hero.current_defense or 0)}% / {HERO_FULL_DEFENSE_PERCENT}%</b>\n"
+            f"🩸 <b>Zaryad:</b> <b>{int(hero.charge or 0)} ta</b>\n\n"
+            f"🚀 <b>Keyingi daraja:</b> <b>{next_text}</b>"
+            f"{sale_text}\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🛒 <b>Upgrade & Xaridlar</b>\n\n"
+            f"➕ <b>+{fmt(HERO_ADD_POINTS_AMOUNT)} Ball</b> - {diamond} <b>{fmt(HERO_ADD_POINTS_PRICE_DIAMONDS)}</b>\n"
+            f"🛡 <b>To'liq himoya</b> - {money} <b>{fmt(HERO_UPGRADE_DEFENSE_PRICE_DOLLAR)}</b>\n"
+            f"🩸 <b>Qurol zaryadi</b> - {money} <b>{fmt(HERO_RECHARGE_PRICE_DOLLAR)}</b>\n"
+            f"🖋 <b>Nomni o'zgartirish</b> - {money} <b>{fmt(HERO_RENAME_PRICE_DOLLAR)}</b>\n"
+            "━━━━━━━━━━━━━━━"
         )
 
     async def hero_panel_data(self, telegram_id: int) -> tuple[bool, str, bool]:
