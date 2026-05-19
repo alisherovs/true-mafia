@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import BASE_DIR, Settings
 from app.enums import ActionType, GamePhase, GameStatus, LogType, Role, Team
 from app.keyboards import (
+    JOKER_CARD_LABELS,
     confirm_hang_keyboard,
     commissar_action_keyboard,
     commissar_target_keyboard,
@@ -2171,6 +2172,28 @@ class GameEngine:
             )
         ).scalars().all()
 
+    async def _announce_immediate_joker_result(
+        self,
+        bot: Bot,
+        game: Game,
+        target_player: GamePlayer,
+        is_dead: bool,
+    ) -> None:
+        if is_dead:
+            death_text = "\n".join(
+                [
+                    "🃏 Joker bugun hursand chunki karta o'yinida golib boldi.",
+                    self._death_story_line(
+                        target_player,
+                        cause="joker",
+                        visitor_label=role_label(Role.JOKER),
+                    ),
+                ]
+            )
+        else:
+            death_text = "🃏 Joker bugun hafa chunki karta o'yinida golib bolmadi."
+        await self._safe_send_message(bot, game.chat_id, death_text)
+
     async def _remember_night_prompt(
         self,
         game_id: int,
@@ -3316,13 +3339,21 @@ class GameEngine:
                     details = json.loads(act.details or "{}")
                 except (TypeError, ValueError):
                     details = {}
+                if details.get("announced"):
+                    continue
                 result = details.get("result")
+                if result is None:
+                    details["target_card"] = "timeout"
+                    details["result"] = "dead"
+                    details["announced"] = True
+                    act.details = json.dumps(details)
+                    result = "dead"
                 if result == "dead":
                     dead.add(target_player.telegram_id)
                     death_causes[target_player.telegram_id] = "joker"
                     death_visitors[target_player.telegram_id] = role_label(Role.JOKER)
                     joker_group_lines.append("🃏 Joker bugun hursand chunki karta o'yinida golib boldi.")
-                else:
+                elif result == "safe":
                     joker_group_lines.append("🃏 Joker bugun hafa chunki karta o'yinida golib bolmadi.")
 
             arson_group_lines: list[str] = []
@@ -5101,7 +5132,7 @@ class GameEngine:
             return False, "Noto'g'ri karta."
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
-            if game is None or game.status != GameStatus.ACTIVE.value or game.phase != GamePhase.NIGHT.value:
+            if game is None or game.status != GameStatus.ACTIVE.value:
                 return False, t(self.settings.default_language, "callback_expired")
             prank_action = (
                 await session.execute(
@@ -5126,6 +5157,7 @@ class GameEngine:
             is_dead = picked_card == death_card
             details["target_card"] = picked_card
             details["result"] = "dead" if is_dead else "safe"
+            details["announced"] = True
             prank_action.details = json.dumps(details)
             target_player = (
                 await session.execute(
@@ -5135,6 +5167,13 @@ class GameEngine:
                     )
                 )
             ).scalar_one_or_none()
+            if target_player is None:
+                return False, "Nishon topilmadi."
+            if not target_player.alive:
+                return False, "Bu o'yinchi allaqachon o'lgan."
+            if is_dead:
+                target_player.alive = False
+                target_player.death_day = max(0, int(game.day_number or 0))
             actor_player = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -5144,24 +5183,27 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             await session.commit()
-            if target_player is not None:
-                try:
-                    await bot.send_message(
-                        target_id,
-                        "💀 Siz o'lim kartasini tanladingiz va o'ldingiz."
+            picked_label = JOKER_CARD_LABELS.get(picked_card, str(picked_card))
+            death_label = JOKER_CARD_LABELS.get(death_card, str(death_card))
+            try:
+                await bot.send_message(
+                    target_id,
+                    (
+                        f"💀 Siz {picked_label} o'lim kartasini tanladingiz va o'ldingiz."
                         if is_dead else
-                        "🍀 Sizning omadingiz keldi.",
-                        reply_markup=await self.group_return_keyboard(bot, game.chat_id),
-                    )
-                except TelegramForbiddenError:
-                    pass
+                        f"🍀 Siz {picked_label} kartasini tanladingiz. Omadingiz keldi."
+                    ),
+                    reply_markup=await self.group_return_keyboard(bot, game.chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
             if actor_player is not None:
                 try:
                     await bot.send_message(
                         actor_id,
                         (
                             f"🃏 {self._tg_mention(target_id, target_player.display_name if target_player else str(target_id))} "
-                            "o'lim kartasini tanladi."
+                            f"{death_label} o'lim kartasini tanladi."
                         ) if is_dead else (
                             f"🃏 {self._tg_mention(target_id, target_player.display_name if target_player else str(target_id))} omon qoldi."
                         ),
@@ -5169,6 +5211,11 @@ class GameEngine:
                     )
                 except TelegramForbiddenError:
                     pass
+        await self._announce_immediate_joker_result(bot, game, target_player, is_dead)
+        if is_dead:
+            winner = await self.check_winner(game_id)
+            if winner:
+                await self.finish_game(bot, game_id, winner)
         return True, "Karta tanlandi."
 
     async def check_winner(self, game_id: int) -> Optional[Team]:

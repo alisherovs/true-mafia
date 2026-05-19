@@ -8,6 +8,13 @@ from app.enums import Role
 from app.roles import ACTIVE_ROLE_POOL, SHOP_ROLE_CATALOG, role_label
 from app.texts import t
 
+JOKER_CARD_LABELS = {
+    1: "♠️",
+    2: "♥️",
+    3: "♦️",
+    4: "♣️",
+}
+
 LANGS = [
     ("az", "🇦🇿 Azərbaycanca"),
     ("tr", "🇹🇷 Türkçe"),
@@ -273,7 +280,7 @@ def target_keyboard(prefix: str, game_id: int, actor_id: int, choices: list[tupl
 
 def joker_death_card_keyboard(game_id: int, actor_id: int) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"act:joker_card:{game_id}:{actor_id}:{idx}")]
+        [InlineKeyboardButton(text=f"🃏 {JOKER_CARD_LABELS[idx]}", callback_data=f"act:joker_card:{game_id}:{actor_id}:{idx}")]
         for idx in (1, 2, 3, 4)
     ]
     rows.append([InlineKeyboardButton(text="O'tkazib yuborish", callback_data=f"skip:night:{game_id}:{actor_id}")])
@@ -291,7 +298,7 @@ def joker_target_keyboard(game_id: int, actor_id: int, choices: list[tuple[int, 
 
 def joker_victim_card_keyboard(game_id: int, target_id: int, actor_id: int) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🃏 Karta {idx}", callback_data=f"jokerpick:{game_id}:{target_id}:{actor_id}:{idx}")]
+        [InlineKeyboardButton(text=f"🃏 {JOKER_CARD_LABELS[idx]}", callback_data=f"jokerpick:{game_id}:{target_id}:{actor_id}:{idx}")]
         for idx in (1, 2, 3, 4)
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
