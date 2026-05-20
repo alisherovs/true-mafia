@@ -8,6 +8,9 @@ from app.enums import Role
 from app.roles import ACTIVE_ROLE_POOL, SHOP_ROLE_CATALOG, role_label
 from app.texts import t
 
+DIAMOND_BUTTON_EMOJI = "💎"
+DOLLAR_BUTTON_EMOJI = "💵"
+
 JOKER_CARD_LABELS = {
     1: "♠️",
     2: "♥️",
@@ -92,8 +95,8 @@ def profile_dashboard_keyboard(
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
         [
-            InlineKeyboardButton(text="💎 Xarid qilish", callback_data="diamond:shop"),
-            InlineKeyboardButton(text="💵 Xarid qilish", callback_data="dollar:shop"),
+            InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} Xarid qilish", callback_data="diamond:shop"),
+            InlineKeyboardButton(text=f"{DOLLAR_BUTTON_EMOJI} Xarid qilish", callback_data="dollar:shop"),
         ],
         [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
         *([[InlineKeyboardButton(text="🥷 Mening geroyim", callback_data="hero:panel")]] if has_hero else []),
@@ -176,8 +179,8 @@ def commands_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🃏 Qoidalar", callback_data="rules:show"),
             ],
             [
-                InlineKeyboardButton(text="💵 Dollar", callback_data="dollar:shop"),
-                InlineKeyboardButton(text="💎 Almaz", callback_data="diamond:shop"),
+                InlineKeyboardButton(text=f"{DOLLAR_BUTTON_EMOJI} Dollar", callback_data="dollar:shop"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} Almaz", callback_data="diamond:shop"),
             ],
             [InlineKeyboardButton(text="◀️ User panel", callback_data="profile:open")],
         ]
@@ -502,17 +505,17 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
     hero_button = (
         InlineKeyboardButton(text="🥷 Geroyim", callback_data="hero:panel")
         if has_hero
-        else InlineKeyboardButton(text="🥷 Geroy sotib olish - 100💎", callback_data="hero:shop:buy")
+        else InlineKeyboardButton(text=f"🥷 Geroy sotib olish - 100{DIAMOND_BUTTON_EMOJI}", callback_data="hero:shop:buy")
     )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [hero_button],
-            [InlineKeyboardButton(text="🛡 Himoya - 100💵", callback_data="shop:buy:protection")],
-            [InlineKeyboardButton(text="⚖️ Ovozdan himoya - 1💎", callback_data="shop:buy:vote_protection")],
-            [InlineKeyboardButton(text="💊 Doridan himoya - 100💵", callback_data="shop:buy:drug_protection")],
-            [InlineKeyboardButton(text="🎭 Maska - 100💵", callback_data="shop:buy:mask")],
-            [InlineKeyboardButton(text="🧿 Qotildan himoya - 2💎", callback_data="shop:buy:killer_protection")],
-            [InlineKeyboardButton(text="📦 Sirpanishdan himoya - 300💵", callback_data="shop:buy:miner_protection")],
+            [InlineKeyboardButton(text=f"🛡 Himoya - 100{DOLLAR_BUTTON_EMOJI}", callback_data="shop:buy:protection")],
+            [InlineKeyboardButton(text=f"⚖️ Ovozdan himoya - 1{DIAMOND_BUTTON_EMOJI}", callback_data="shop:buy:vote_protection")],
+            [InlineKeyboardButton(text=f"💊 Doridan himoya - 100{DOLLAR_BUTTON_EMOJI}", callback_data="shop:buy:drug_protection")],
+            [InlineKeyboardButton(text=f"🎭 Maska - 100{DOLLAR_BUTTON_EMOJI}", callback_data="shop:buy:mask")],
+            [InlineKeyboardButton(text=f"🧿 Qotildan himoya - 2{DIAMOND_BUTTON_EMOJI}", callback_data="shop:buy:killer_protection")],
+            [InlineKeyboardButton(text=f"📦 Sirpanishdan himoya - 300{DOLLAR_BUTTON_EMOJI}", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
             [InlineKeyboardButton(text="👑 VIP User", callback_data="vip:open")],
             [InlineKeyboardButton(text="🎁 Telegram sovg'asiga almashtirish", callback_data="shop:gifts")],
@@ -524,7 +527,7 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
 def vip_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💎 30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
+            [InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
             [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
             [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
             [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
@@ -541,7 +544,7 @@ def box_info_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="🎁 Ochish", callback_data=f"box:open:{box_type}")]]
     if can_paid_open:
-        rows.append([InlineKeyboardButton(text=f"💵 {paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
+        rows.append([InlineKeyboardButton(text=f"{DOLLAR_BUTTON_EMOJI} {paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="vip:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -570,7 +573,7 @@ _GIFT_TIER_EMOJI = [
     (50, "🎂"),
     (100, "🧸"),
     (250, "🍾"),
-    (500, "💎"),
+    (500, DIAMOND_BUTTON_EMOJI),
     (1000, "👑"),
     (2500, "🏆"),
     (5000, "💍"),
@@ -616,7 +619,7 @@ def gift_shop_keyboard(gifts: list[object], stars_per_diamond: int) -> InlineKey
         emoji = _pick_gift_emoji(getattr(sticker, "emoji", None), stars)
         rows.append([
             InlineKeyboardButton(
-                text=f"{emoji} {stars}⭐ — {diamonds}💎{suffix}",
+                text=f"{emoji} {stars}⭐ — {diamonds}{DIAMOND_BUTTON_EMOJI}{suffix}",
                 callback_data=f"gift:buy:{gift_id}",
             )
         ])
@@ -631,7 +634,7 @@ def premium_shop_keyboard(plans: list[tuple[int, int, int]]) -> InlineKeyboardMa
     for months, stars, diamonds in plans:
         rows.append([
             InlineKeyboardButton(
-                text=f"👑 {months} oy — {diamonds}💎",
+                text=f"👑 {months} oy — {diamonds}{DIAMOND_BUTTON_EMOJI}",
                 callback_data=f"gift:premium:buy:{months}",
             )
         ])
@@ -739,7 +742,7 @@ def owner_hero_market_keyboard(has_channel: bool) -> InlineKeyboardMarkup:
 def role_shop_keyboard() -> InlineKeyboardMarkup:
     rows = []
     for item in SHOP_ROLE_CATALOG:
-        icon = "💎" if item.currency == "diamonds" else "💵"
+        icon = DIAMOND_BUTTON_EMOJI if item.currency == "diamonds" else DOLLAR_BUTTON_EMOJI
         rows.append([
             InlineKeyboardButton(
                 text=f"{role_label(item.role)} - {item.price}{icon}",
@@ -747,7 +750,7 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
             )
         ])
     rows.append([InlineKeyboardButton(text="🎒 Mening rollarim", callback_data="shop:my_roles")])
-    rows.append([InlineKeyboardButton(text="🚫 Faol rolni o'chirish - 100💵", callback_data="shop:disable_roles")])
+    rows.append([InlineKeyboardButton(text=f"🚫 Faol rolni o'chirish - 100{DOLLAR_BUTTON_EMOJI}", callback_data="shop:disable_roles")])
     rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -768,7 +771,7 @@ def my_roles_keyboard(roles: list[str], selected_role: str | None = None) -> Inl
 
 def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=f"🚫 {role_label(role)} - 100💵", callback_data=f"shop:disable_role:{role.value}")]
+        [InlineKeyboardButton(text=f"🚫 {role_label(role)} - 100{DOLLAR_BUTTON_EMOJI}", callback_data=f"shop:disable_role:{role.value}")]
         for role in ACTIVE_ROLE_POOL
         if role not in {Role.CITIZEN, Role.DON}
     ]
@@ -780,14 +783,13 @@ def dollar_exchange_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💎 1 → 💵 500", callback_data="dollar:exchange:1"),
-                InlineKeyboardButton(text="💎 5 → 💵 2500", callback_data="dollar:exchange:5"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 1 → {DOLLAR_BUTTON_EMOJI} 500", callback_data="dollar:exchange:1"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 5 → {DOLLAR_BUTTON_EMOJI} 2500", callback_data="dollar:exchange:5"),
             ],
             [
-                InlineKeyboardButton(text="💎 10 → 💵 5000", callback_data="dollar:exchange:10"),
-                InlineKeyboardButton(text="💎 50 → 💵 25000", callback_data="dollar:exchange:50"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 10 → {DOLLAR_BUTTON_EMOJI} 5000", callback_data="dollar:exchange:10"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 50 → {DOLLAR_BUTTON_EMOJI} 25000", callback_data="dollar:exchange:50"),
             ],
-            [InlineKeyboardButton(text="💎 Hammasini almashtirish", callback_data="dollar:exchange:all")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
         ]
     )
@@ -798,16 +800,16 @@ def diamond_shop_keyboard(admin_username: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="💎 1 - ⭐ 7", callback_data="diamond:buy:1"),
-                InlineKeyboardButton(text="💎 10 - ⭐ 70", callback_data="diamond:buy:10"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 1 - ⭐ 7", callback_data="diamond:buy:1"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 10 - ⭐ 70", callback_data="diamond:buy:10"),
             ],
             [
-                InlineKeyboardButton(text="💎 30 - ⭐ 200", callback_data="diamond:buy:30"),
-                InlineKeyboardButton(text="💎 70 - ⭐ 450", callback_data="diamond:buy:70"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 30 - ⭐ 200", callback_data="diamond:buy:30"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 70 - ⭐ 450", callback_data="diamond:buy:70"),
             ],
             [
-                InlineKeyboardButton(text="💎 250 - ⭐ 1300", callback_data="diamond:buy:250"),
-                InlineKeyboardButton(text="💎 1000 - ⭐ 5000", callback_data="diamond:buy:1000"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 250 - ⭐ 1300", callback_data="diamond:buy:250"),
+                InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} 1000 - ⭐ 5000", callback_data="diamond:buy:1000"),
             ],
             [
                 InlineKeyboardButton(text="👤 Admin orqali", url=admin_url),
@@ -821,8 +823,8 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
-            [InlineKeyboardButton(text="💎 TOP 30 almaz", callback_data="owner:diamond_top")],
-            [InlineKeyboardButton(text="💎 Almaz loglari", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} TOP 30 almaz", callback_data="owner:diamond_top")],
+            [InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
             [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
@@ -875,7 +877,7 @@ def owner_diamond_top_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:diamond_top")],
-            [InlineKeyboardButton(text="💎 Almaz loglari", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text=f"{DIAMOND_BUTTON_EMOJI} Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
@@ -945,7 +947,7 @@ def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineK
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{group.title} - 💎 {total}",
+                    text=f"{group.title} - {DIAMOND_BUTTON_EMOJI} {total}",
                     callback_data=f"owner:premium_bankrupt:{group.id}",
                 )
             ]
@@ -972,7 +974,7 @@ def premium_groups_keyboard(groups: list[object]) -> InlineKeyboardMarkup:
         rows.append(
             [
                 InlineKeyboardButton(
-                    text=f"{group.title} - 💎 {total}",
+                    text=f"{group.title} - {DIAMOND_BUTTON_EMOJI} {total}",
                     url=group.invite_link,
                 )
             ]
@@ -1017,7 +1019,7 @@ def settings_main_keyboard() -> InlineKeyboardMarkup:
 
 def settings_giveaway_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn("💎 Olmoslar", "settings:giveaway:diamond")],
+        [_btn(f"{DIAMOND_BUTTON_EMOJI} Olmoslar", "settings:giveaway:diamond")],
         [_btn("🛡 Himoyalar", "settings:giveaway:protection")],
         _back_exit_row("main"),
     ])

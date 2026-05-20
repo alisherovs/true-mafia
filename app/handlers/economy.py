@@ -17,6 +17,7 @@ from app.config import Settings
 from app.database import SessionLocal
 from app.game_engine import GameEngine
 from app.keyboards import (
+    DIAMOND_BUTTON_EMOJI,
     box_info_keyboard,
     box_pick_keyboard,
     diamond_shop_keyboard,
@@ -923,7 +924,7 @@ async def cmd_send(message: Message, command: CommandObject, engine: GameEngine)
     )
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway_id}")]
+            [InlineKeyboardButton(text=f"🎁 1 {DIAMOND_BUTTON_EMOJI} olish", callback_data=f"sendgift:claim:{giveaway_id}")]
         ]
     )
     sent = await message.answer(text, reply_markup=kb)
@@ -1036,7 +1037,7 @@ async def sendgift_claim_callback(callback: CallbackQuery, engine: GameEngine) -
                 )
             kb = InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🎁 1 💎 olish", callback_data=f"sendgift:claim:{giveaway_id}")]
+                    [InlineKeyboardButton(text=f"🎁 1 {DIAMOND_BUTTON_EMOJI} olish", callback_data=f"sendgift:claim:{giveaway_id}")]
                 ]
             )
             try:
