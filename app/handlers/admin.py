@@ -37,7 +37,7 @@ def _invoice_summary(data: dict) -> str:
     stars = int(data.get("stars", 0))
     return (
         "🧾 <b>Almaz invoice</b>\n\n"
-        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
+        f"<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
         f"⭐ Telegram Stars: <b>{stars}</b>\n\n"
         "Yetkazib berish usulini tanlang:"
     )
@@ -792,7 +792,7 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         await message.answer(
             "✅ Invoice yuborildi.\n\n"
             f"User ID: <code>{target_user_id}</code>\n"
-            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
+            f"<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> Almaz: <b>{diamonds}</b>\n"
             f"⭐ Stars: <b>{stars}</b>",
             reply_markup=owner_invoice_after_keyboard(),
         )
@@ -851,7 +851,7 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             "✅ Premium guruh qo'shildi.\n\n"
             f"🎲 Nomi: <b>{group.title}</b>\n"
             f"🔗 Link: {group.invite_link}\n"
-            f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Narx: <b>{group.diamond_price}</b>",
+            f"<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> Narx: <b>{group.diamond_price}</b>",
             reply_markup=owner_premium_groups_keyboard(),
         )
         return True
