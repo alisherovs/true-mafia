@@ -8551,6 +8551,22 @@ class GameEngine:
             lines.append(f"{index}. {first} + {second} — {duration}dan beri para 💞")
         return "\n".join(lines)
 
+    async def my_couple_text(self, chat_id: int, user_id: int) -> str:
+        async with self.session_factory() as session:
+            couple = await self._active_couple_for_user(session, chat_id, user_id)
+            if couple is None:
+                return "💔 Sizda bu guruhda aktiv para yo'q."
+            duration = self._couple_duration_text(couple.created_at)
+            if couple.user_one_telegram_id == user_id:
+                partner_id = couple.user_two_telegram_id
+                partner_name = couple.user_two_name
+            else:
+                partner_id = couple.user_one_telegram_id
+                partner_name = couple.user_one_name
+
+        partner = self._tg_mention(partner_id, partner_name)
+        return f"💞 Siz {partner} bilan {duration}dan beri sheriksiz."
+
     async def unpair_user(self, chat_id: int, user_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
             couple = await self._active_couple_for_user(session, chat_id, user_id)

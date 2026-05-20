@@ -58,6 +58,17 @@ async def cmd_stats(message: Message, engine: GameEngine) -> None:
     await message.reply(await engine.couple_stats_text(message.chat.id))
 
 
+@router.message(Command("mypara"))
+async def cmd_mypara(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        lang = await engine.get_user_language(message.from_user.id)
+        await message.answer(t(lang, "command_in_group"))
+        return
+    await message.reply(await engine.my_couple_text(message.chat.id, message.from_user.id))
+
+
 @router.message(Command("unpara"))
 async def cmd_unpara(message: Message, engine: GameEngine) -> None:
     if message.from_user is None:
@@ -110,8 +121,11 @@ async def para_callback(callback: CallbackQuery, engine: GameEngine) -> None:
         return
 
     try:
-        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.delete()
     except TelegramBadRequest:
-        pass
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except TelegramBadRequest:
+            pass
     await callback.message.answer(text)
     await callback.answer("Javob qabul qilindi.")
