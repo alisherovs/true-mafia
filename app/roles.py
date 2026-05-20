@@ -222,10 +222,10 @@ ROLE_META: dict[Role, RoleMeta] = {
     ),
     Role.HOJIAKA: RoleMeta(
         Role.HOJIAKA,
-        Team.CITY,
+        Team.NEUTRAL,
         "🕌",
         "Hojiaka",
-        "Har tunda bir o'yinchiga ehson qilasiz: himoya buyumi, dollar yoki kamdan-kam olmos.",
+        "Singleton rol. Har tunda bir o'yinchiga ehson qilasiz: himoya buyumi, dollar yoki kamdan-kam olmos. O'yin oxirigacha tirik qolsangiz yutasiz.",
     ),
     Role.MASHKA: RoleMeta(
         Role.MASHKA,

@@ -11,7 +11,7 @@ from math import floor
 from typing import Optional
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from app.models import DollarTransaction, GambleMinesGame, GambleUserStats, User
@@ -227,9 +227,11 @@ class MinesEngine:
             active = await self._active_game(session, tg_user.id)
             stats = await self._stats(session, tg_user.id)
             if active is not None:
+                active.chat_id = chat_id
                 active.payout = MinesMath.payout(
                     int(active.bet), len(_loads_int_set(active.opened_json)), int(user.dollar or 0), int(stats.win_streak or 0)
                 )
+                active.last_action_at = _utcnow()
                 await session.commit()
                 return MinesView(
                     MinesRenderer.text(active, balance=int(user.dollar or 0), streak=int(stats.win_streak or 0), result="Davom etayotgan o'yiningiz tiklandi."),
@@ -306,6 +308,9 @@ class MinesEngine:
                 )
             ).scalar_one_or_none()
             if game and game.message_id is None:
+                game.message_id = message_id
+                await session.commit()
+            elif game and game.message_id != message_id:
                 game.message_id = message_id
                 await session.commit()
 
@@ -425,6 +430,69 @@ class MinesEngine:
         finally:
             lock.release()
 
+    async def weekly_top_text(self, limit: int = 10) -> str:
+        now = _utcnow()
+        since = now - timedelta(days=7)
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        GambleMinesGame.user_telegram_id,
+                        func.coalesce(func.sum(GambleMinesGame.payout), 0).label("total_won"),
+                        func.count(GambleMinesGame.id).label("games_count"),
+                        func.coalesce(func.max(GambleMinesGame.payout), 0).label("best_win"),
+                    )
+                    .where(
+                        GambleMinesGame.status == "cashed",
+                        GambleMinesGame.payout > 0,
+                        GambleMinesGame.ended_at.is_not(None),
+                        GambleMinesGame.ended_at >= since,
+                    )
+                    .group_by(GambleMinesGame.user_telegram_id)
+                    .order_by(desc("total_won"), desc("best_win"))
+                    .limit(max(1, min(30, int(limit))))
+                )
+            ).all()
+            users = {}
+            if rows:
+                user_ids = [int(row.user_telegram_id) for row in rows]
+                users = {
+                    user.telegram_id: user
+                    for user in (
+                        await session.execute(select(User).where(User.telegram_id.in_(user_ids)))
+                    ).scalars().all()
+                }
+
+        if not rows:
+            return (
+                "🏆 <b>Haftalik qimorvozlar TOP</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                "Hali bu haftada yutuq olgan qimorvoz yo'q.\n\n"
+                "Faqat safe katak ochib, <b>💰 Pulni olish</b> orqali cashout qilingan yutuqlar statistikaga kiradi."
+            )
+
+        lines: list[str] = []
+        for idx, row in enumerate(rows, 1):
+            telegram_id = int(row.user_telegram_id)
+            user = users.get(telegram_id)
+            name = user.display_name if user else str(telegram_id)
+            total_won = int(row.total_won or 0)
+            games_count = int(row.games_count or 0)
+            best_win = int(row.best_win or 0)
+            lines.append(
+                f"{idx}. {_user_link(telegram_id, name)} — <b>{total_won}</b> 💵\n"
+                f"   🎮 Cashout: <b>{games_count}</b> | 🔥 Eng katta: <b>{best_win}</b>"
+            )
+
+        return (
+            "🏆 <b>Haftalik eng yaxshi qimorvozlar</b>\n"
+            "━━━━━━━━━━━━━━━\n"
+            + "\n".join(lines)
+            + "\n━━━━━━━━━━━━━━━\n"
+            "📌 Hisob: oxirgi 7 kun ichida cashout qilingan umumiy yutuq.\n"
+            "⚠️ Katak ochilmasdan bosilgan pul olish statistikaga kirmaydi."
+        )
+
     async def _ensure_user(self, session: AsyncSession, tg_user) -> User:
         user = (await session.execute(select(User).where(User.telegram_id == tg_user.id))).scalar_one_or_none()
         if user is None:
@@ -500,6 +568,10 @@ def _loads_int_set(raw: str) -> set[int]:
         if 0 <= value < GRID_SIZE:
             result.add(value)
     return result
+
+
+def _user_link(user_id: int, name: str) -> str:
+    return f'<a href="tg://user?id={user_id}">{escape(name or str(user_id))}</a>'
 
 
 def _game_lock(game_id: int) -> asyncio.Lock:

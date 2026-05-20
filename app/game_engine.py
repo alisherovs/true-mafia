@@ -5244,11 +5244,17 @@ class GameEngine:
             killer_count = sum(1 for t in teams if t == Team.KILLER.value)
             neutral_count = sum(1 for t in teams if t == Team.NEUTRAL.value)
             city_count = len(alive) - mafia_count - killer_count - neutral_count
+            passive_survivor_count = sum(
+                1
+                for p in alive
+                if p.role == Role.HOJIAKA.value
+            )
             
             singleton_count = killer_count + neutral_count
+            blocking_singleton_count = max(0, singleton_count - passive_survivor_count)
 
-            # Mafia yo'q va singleton shaharni yenga olmaydigan holat: tirik shahar tomoni yutadi.
-            if mafia_count == 0 and (singleton_count == 0 or city_count >= 2):
+            # Hojiaka kabi passiv singletonlar o'yinni cho'zmaydi; tirik qolsa yakunda baribir g'olib bo'ladi.
+            if mafia_count == 0 and (blocking_singleton_count == 0 or city_count >= 2):
                 return Team.CITY
             
             # Qotil o'z qolsa → Qotil yutadi
@@ -5265,16 +5271,16 @@ class GameEngine:
                 return Team.MAFIA
 
             # 1 ta shahar + 1 ta mafia + 1 ta singleton bo'lsa o'yin davom etadi.
-            if city_count == 1 and mafia_count == 1 and singleton_count == 1:
+            if city_count == 1 and mafia_count == 1 and blocking_singleton_count == 1:
                 return None
 
             # 2 ta mafia + 1 ta neutral bo'lsa (qotil yo'q) mafia tomoni yutadi.
-            if city_count == 0 and mafia_count >= 2 and neutral_count == 1 and killer_count == 0:
+            if city_count == 0 and mafia_count >= 2 and blocking_singleton_count == 1 and killer_count == 0:
                 return Team.MAFIA
             
             # Asosiy qaror: Mafia soni ≥ city + neutral soni bo'lsa → Mafia yutadi
             # (Qotil hisob bo'lmaydi, u o'zining o'yinini o'ynaydi)
-            non_mafia_fighting = city_count + neutral_count
+            non_mafia_fighting = city_count + max(0, neutral_count - passive_survivor_count)
             if mafia_count > 0 and mafia_count >= non_mafia_fighting and killer_count == 0:
                 return Team.MAFIA
             
@@ -5319,6 +5325,8 @@ class GameEngine:
             def base_winner(player: GamePlayer) -> bool:
                 is_win = bool(player.won) or (player.team == winner_team.value and player.alive)
                 if player.role == Role.MINER.value and player.alive:
+                    is_win = True
+                if player.role == Role.HOJIAKA.value and player.alive:
                     is_win = True
                 if player.role == Role.SORCERER.value:
                     is_win = bool(player.won)

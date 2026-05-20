@@ -1133,16 +1133,17 @@ def settings_weapon_toggle_keyboard(weapon_key: str, is_enabled: bool = True) ->
 def settings_leave_keyboard(current: bool = True, lock_minutes: int = 30) -> InlineKeyboardMarkup:
     on_mark = "✅ " if current else ""
     off_mark = "✅ " if not current else ""
+    lock_label = "o'chirilgan" if lock_minutes <= 0 else f"{lock_minutes} daqiqa"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [_btn(f"{on_mark}Ha - Ruxsat", "settings:leave:on")],
-        [_btn(f"{off_mark}Yo'q - Taqiq", "settings:leave:off")],
-        [_btn(f"⏱ Blok vaqti: {lock_minutes} daqiqa", "settings:leave:lock")],
+        [_btn(f"{on_mark}✅ /leave yoqilsin", "settings:leave:on")],
+        [_btn(f"{off_mark}🚫 /leave o'chirilsin", "settings:leave:off")],
+        [_btn(f"⏱ Qayta qo'shilish bloki: {lock_label}", "settings:leave:lock")],
         _back_exit_row("main"),
     ])
 
 
 def settings_leave_lock_keyboard(current_minutes: int = 30) -> InlineKeyboardMarkup:
-    options = [0, 5, 10, 15, 30, 60, 120]
+    options = [0, 5, 10, 15, 30, 45, 60, 120, 180, 360, 720, 1440]
     rows = []
     for value in options:
         mark = "✅ " if value == current_minutes else ""

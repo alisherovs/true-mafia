@@ -75,6 +75,20 @@ EXTRA_LABELS: dict[str, str] = {
 }
 
 
+def _leave_settings_text(allowed: bool, lock_minutes: int, notice: str = "") -> str:
+    status = "✅ Yoqilgan" if allowed else "🚫 O'chirilgan"
+    lock_text = "blok qo'yilmaydi" if lock_minutes <= 0 else f"{lock_minutes} daqiqa"
+    prefix = f"{notice}\n\n" if notice else ""
+    return (
+        f"{prefix}"
+        "🚪 <b>/leave sozlamalari</b>\n\n"
+        f"Holat: <b>{status}</b>\n"
+        f"Qayta qo'shilish bloki: <b>{lock_text}</b>\n\n"
+        "O'yinchi /leave qilsa ro'yxatdan yoki o'yindan chiqariladi. "
+        "Blok vaqti tugamaguncha u qayta ro'yxatdan o'ta olmaydi."
+    )
+
+
 def _get_chat_id(callback: CallbackQuery) -> int:
     return SETTINGS_CHAT_MAP.get(callback.from_user.id, 0)
 
@@ -151,6 +165,13 @@ async def settings_back(callback: CallbackQuery, engine: GameEngine) -> None:
     elif target == "weapons":
         states = await gsm.get_all_weapons(chat_id)
         await callback.message.edit_text("🔫 <b>Qurollar</b>\n\nQaysi qurolni sozlamoqchisiz?", reply_markup=settings_weapons_keyboard(states))
+    elif target == "leave":
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        await callback.message.edit_text(
+            _leave_settings_text(bool(gs.leave_allowed), lock_minutes),
+            reply_markup=settings_leave_keyboard(bool(gs.leave_allowed), lock_minutes),
+        )
     elif target == "permissions":
         states = await gsm.get_all_command_permissions(chat_id)
         await callback.message.edit_text("🔐 <b>Buyruqlarga ruxsatlar</b>\n\nQaysi buyruqqa ruxsat bermoqchisiz?", reply_markup=settings_permissions_keyboard(states))
@@ -289,12 +310,14 @@ async def settings_weapon_handler(callback: CallbackQuery, engine: GameEngine) -
 async def settings_leave_menu(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.message is None: await callback.answer(); return
     chat_id = _get_chat_id(callback)
+    if chat_id == 0:
+        await callback.answer("⚠️ Guruhda /settings qayta yuboring.", show_alert=True)
+        return
     gsm = GroupSettingsManager(engine.session_factory)
     gs = await gsm.get_settings(chat_id)
     lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
     await callback.message.edit_text(
-        "🚪 <b>/leave buyrug'iga ruxsat beramizmi?</b>\n\n"
-        f"⏱ Chiqib ketgandan keyingi blok: <b>{lock_minutes} daqiqa</b>",
+        _leave_settings_text(bool(gs.leave_allowed), lock_minutes),
         reply_markup=settings_leave_keyboard(gs.leave_allowed, lock_minutes),
     )
     await callback.answer()
@@ -313,7 +336,7 @@ async def settings_leave_handler(callback: CallbackQuery, engine: GameEngine) ->
         gs = await gsm.get_settings(chat_id)
         lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
         await callback.message.edit_text(
-            "✅ /leave buyrug'i yoqildi.",
+            _leave_settings_text(True, lock_minutes, "✅ /leave buyrug'i yoqildi."),
             reply_markup=settings_leave_keyboard(True, lock_minutes),
         )
     elif action == "off":
@@ -321,23 +344,25 @@ async def settings_leave_handler(callback: CallbackQuery, engine: GameEngine) ->
         gs = await gsm.get_settings(chat_id)
         lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
         await callback.message.edit_text(
-            "🚫 /leave buyrug'i o'chirildi.",
+            _leave_settings_text(False, lock_minutes, "🚫 /leave buyrug'i o'chirildi."),
             reply_markup=settings_leave_keyboard(False, lock_minutes),
+        )
+    elif action == "lock" and len(parts) > 3 and parts[3].isdigit():
+        await gsm.set_leave_lock_minutes(chat_id, int(parts[3]))
+        gs = await gsm.get_settings(chat_id)
+        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
+        lock_text = "o'chirildi" if lock_minutes <= 0 else f"<b>{lock_minutes} daqiqa</b>"
+        await callback.message.edit_text(
+            _leave_settings_text(bool(gs.leave_allowed), lock_minutes, f"✅ /leave bloklash vaqti yangilandi: {lock_text}"),
+            reply_markup=settings_leave_keyboard(bool(gs.leave_allowed), lock_minutes),
         )
     elif action == "lock":
         gs = await gsm.get_settings(chat_id)
         lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
         await callback.message.edit_text(
             "⏱ <b>/leave bloklash vaqti</b>\n\n"
-            "O'yinchi /leave qilgandan keyin qayta o'yinga qo'shila olmaslik vaqtini tanlang.",
-            reply_markup=settings_leave_lock_keyboard(lock_minutes),
-        )
-    elif action == "lock" and len(parts) > 3 and parts[3].isdigit():
-        await gsm.set_leave_lock_minutes(chat_id, int(parts[3]))
-        gs = await gsm.get_settings(chat_id)
-        lock_minutes = int(getattr(gs, "leave_lock_minutes", 30) or 0)
-        await callback.message.edit_text(
-            f"✅ /leave bloklash vaqti: <b>{lock_minutes} daqiqa</b>",
+            "O'yinchi /leave qilgandan keyin qayta o'yinga qo'shila olmaslik vaqtini tanlang.\n"
+            "0 tanlansa blok qo'yilmaydi.",
             reply_markup=settings_leave_lock_keyboard(lock_minutes),
         )
     await callback.answer()

@@ -22,6 +22,12 @@ async def cmd_qimor(message: Message, command: CommandObject) -> None:
         await mines.set_message_id(view.game_id, view.token, sent.message_id)
 
 
+@router.message(Command("topq"))
+async def cmd_topq(message: Message) -> None:
+    mines = MinesEngine(SessionLocal)
+    await message.answer(await mines.weekly_top_text(limit=10))
+
+
 @router.callback_query(F.data.startswith("gm:"))
 async def gamble_mines_callback(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
@@ -56,4 +62,3 @@ async def gamble_mines_callback(callback: CallbackQuery) -> None:
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
-
