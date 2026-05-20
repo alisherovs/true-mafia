@@ -399,6 +399,24 @@ class GambleUserStats(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ActivityScoreEvent(Base):
+    __tablename__ = "activity_score_events"
+    __table_args__ = (
+        Index("ix_activity_score_chat_created", "chat_id", "created_at"),
+        Index("ix_activity_score_user_created", "user_telegram_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    game_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_name: Mapped[str] = mapped_column(String(255), default="User")
+    points: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(64), default="activity")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class CreditLoan(Base):
     __tablename__ = "credit_loans"
     __table_args__ = (

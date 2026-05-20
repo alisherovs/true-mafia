@@ -47,6 +47,7 @@ from app.keyboards import (
     vote_keyboard,
 )
 from app.models import (
+    ActivityScoreEvent,
     BotSetting,
     DiamondGiveaway,
     DiamondTransaction,
@@ -239,6 +240,32 @@ class GameEngine:
     def _tg_mention(user_id: int, display_name: str) -> str:
         safe_name = escape(display_name or "Unknown")
         return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
+    @staticmethod
+    def _activity_now_text() -> str:
+        uz_time = datetime.now(timezone(timedelta(hours=5)))
+        return uz_time.strftime("%d.%m.%Y %H:%M")
+
+    def _add_activity_points(
+        self,
+        session: AsyncSession,
+        game: Game,
+        player: GamePlayer,
+        points: int,
+        source: str,
+    ) -> None:
+        if points <= 0:
+            return
+        session.add(
+            ActivityScoreEvent(
+                chat_id=game.chat_id,
+                game_id=game.id,
+                user_telegram_id=player.telegram_id,
+                user_name=player.display_name or "User",
+                points=points,
+                source=source,
+            )
+        )
 
     async def _safe_send_message(self, bot: Bot, chat_id: int, text: str, **kwargs: Any) -> Any | None:
         try:
@@ -3822,6 +3849,18 @@ class GameEngine:
                 death_visitors.pop(victim_id, None)
                 sorcerer_judgement_prompts.append((game.id, victim_id, attacker_id, role_label(attacker_role)))
 
+            scored_night_actor_ids: set[int] = set()
+            for act in actions:
+                if act.action_type == ActionType.SKIP.value or act.actor_telegram_id in scored_night_actor_ids:
+                    continue
+                actor = player_map.get(act.actor_telegram_id)
+                if actor is None or not actor.alive:
+                    continue
+                if self._night_prompt_for_player(game_id, night, actor, alive_players) is None:
+                    continue
+                scored_night_actor_ids.add(act.actor_telegram_id)
+                self._add_activity_points(session, game, actor, 10, "night_action")
+
             night_actor_ids = {
                 act.actor_telegram_id
                 for act in actions
@@ -6326,6 +6365,7 @@ class GameEngine:
                     target=target,
                     damage=entered_damage,
                 )
+                self._add_activity_points(session, game, attacker, 30, "hero_kill")
             else:
                 self._add_game_log(
                     session,
@@ -8315,6 +8355,78 @@ class GameEngine:
                 )
             ).all()
             return [(name, int(wins or 0), int(total or 0)) for name, wins, total in rows]
+
+    async def weekly_activity_top_text(
+        self,
+        bot: Bot,
+        chat_id: Optional[int] = None,
+        *,
+        admin_limit: int = 30,
+        member_limit: int = 30,
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(days=7)
+        admin_limit = max(1, min(30, int(admin_limit)))
+        member_limit = max(1, min(30, int(member_limit)))
+        fetch_limit = max(60, admin_limit + member_limit + 20)
+
+        async with self.session_factory() as session:
+            stmt = (
+                select(
+                    ActivityScoreEvent.user_telegram_id,
+                    func.max(ActivityScoreEvent.user_name).label("user_name"),
+                    func.coalesce(func.sum(ActivityScoreEvent.points), 0).label("score"),
+                )
+                .where(ActivityScoreEvent.created_at >= since)
+                .group_by(ActivityScoreEvent.user_telegram_id)
+                .order_by(func.coalesce(func.sum(ActivityScoreEvent.points), 0).desc())
+                .limit(fetch_limit)
+            )
+            if chat_id is not None:
+                stmt = stmt.where(ActivityScoreEvent.chat_id == chat_id)
+            rows = (await session.execute(stmt)).all()
+
+        admins: list[tuple[int, str, int]] = []
+        members: list[tuple[int, str, int]] = []
+        for row in rows:
+            user_id = int(row.user_telegram_id)
+            name = row.user_name or f"ID:{user_id}"
+            score = int(row.score or 0)
+            if score <= 0:
+                continue
+
+            is_admin = user_id in self.settings.admin_ids if chat_id is None else False
+            if chat_id is not None:
+                try:
+                    member = await bot.get_chat_member(chat_id, user_id)
+                    is_admin = member.status in {ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.CREATOR}
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    is_admin = False
+
+            bucket = admins if is_admin else members
+            limit = admin_limit if is_admin else member_limit
+            if len(bucket) < limit:
+                bucket.append((user_id, name, score))
+
+        lines = [
+            "📊 <b>Oxirgi 7 kunlik faollik</b>",
+            f"⏰ {self._activity_now_text()}",
+            "",
+            "👑 <b>#admins TOP:</b>",
+        ]
+        if admins:
+            for index, (user_id, name, score) in enumerate(admins, start=1):
+                lines.append(f"{index}. {self._tg_mention(user_id, name)} - {score} ⭐")
+        else:
+            lines.append("Hali ball yo'q.")
+
+        lines.extend(["", "👥 <b>#members TOP:</b>"])
+        if members:
+            for index, (user_id, name, score) in enumerate(members, start=1):
+                lines.append(f"{index}. {self._tg_mention(user_id, name)} - {score} ⭐")
+        else:
+            lines.append("Hali ball yo'q.")
+        return "\n".join(lines)
 
     async def group_settings(self, chat_id: int) -> Group:
         group = await self.get_or_create_group(chat_id, "Group")

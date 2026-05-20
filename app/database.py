@@ -229,6 +229,12 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_premium_groups_group_chat_id ON premium_groups(group_chat_id)")
     )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_activity_score_chat_created ON activity_score_events(chat_id, created_at)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_activity_score_user_created ON activity_score_events(user_telegram_id, created_at)")
+    )
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_premium_groups_reset_at ON premium_groups(reset_at)"))
     await conn.execute(
         text(
