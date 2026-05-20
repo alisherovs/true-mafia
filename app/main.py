@@ -116,7 +116,6 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="setminplayers", description="Minimal o'yinchilarni sozlash"),
         BotCommand(command="lang", description="Tilni o'zgartirish"),
         BotCommand(command="profile", description="Profilingiz"),
-        BotCommand(command="you", description="User profilini ko'rish"),
         BotCommand(command="shop", description="Do'kon"),
         BotCommand(command="give", description="Almaz berish"),
         BotCommand(command="gsend", description="Premium guruh reytingi"),

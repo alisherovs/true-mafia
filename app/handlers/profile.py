@@ -53,7 +53,6 @@ GROUP_COMMANDS_TEXT = (
     "/roles - rollar haqida ma'lumot\n"
     "/lang - guruh tilini o'zgartirish\n"
     "/profile - profilingiz\n"
-    "/you - reply yoki user ID orqali profilni ko'rish\n"
     "/give miqdor - sovg'a paneli ochish\n"
     "/gsend miqdor - guruhni premium reytingga chiqarish uchun almaz yuborish"
 )
@@ -114,10 +113,12 @@ async def _resolve_you_target(message: Message, command: CommandObject, engine: 
 
 
 @router.message(Command("you"))
-async def cmd_you(message: Message, command: CommandObject, engine: GameEngine) -> None:
+async def cmd_you(message: Message, command: CommandObject, engine: GameEngine, settings: Settings) -> None:
+    if message.from_user is None or message.from_user.id not in settings.admin_ids:
+        await message.answer("❌ Sizda bu buyruqni ishlatish huquqi yo'q.")
+        return
+
     if message.chat.type == "private":
-        if message.from_user is None:
-            return
         user = await engine.ensure_user(message.from_user)
         await message.answer(**engine.format_user_dashboard_entities(user))
         return
