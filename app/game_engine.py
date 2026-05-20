@@ -523,6 +523,8 @@ class GameEngine:
             visitor = "🃏 Joker"
         elif cause == "inactive":
             visitor = "😴 uyqu"
+        elif cause == "couple":
+            visitor = "💞 Para qismati"
         else:
             visitor = "noma'lum mehmon"
         if cause == "inactive":
@@ -531,6 +533,8 @@ class GameEngine:
                 "Men o'yin payti boshqa uxlamayma-a-a-a-n\n"
                 f"U edi {role}"
             )
+        if cause == "couple":
+            return f"💞 {role} {name} sherigi ortidan o'yindan chiqdi."
         return f"Tunda {role} {name}...\nvaxshiylarcha o'ldirildi. Aytishlaricha unikiga {visitor} kelgan."
 
     @staticmethod
@@ -553,6 +557,8 @@ class GameEngine:
             return f"{_ce('🧟', ZOMBIE_EMOJI_ID)} G'azabkor alangasi"
         if cause == "joker":
             return "🃏 Joker"
+        if cause == "couple":
+            return "💞 Para qismati"
         return "noma'lum mehmon"
 
     def _build_alive_status_text(
@@ -1024,6 +1030,61 @@ class GameEngine:
             .values(transformed_to_team=None)
         )
 
+    async def _expand_tournament_couple_deaths(
+        self,
+        session: AsyncSession,
+        game: Game,
+        players: list[GamePlayer],
+        dead_ids: set[int],
+        *,
+        death_causes: Optional[dict[int, str]] = None,
+        death_visitors: Optional[dict[int, str]] = None,
+    ) -> list[str]:
+        if not dead_ids or not await self._is_tournament_game_in_session(session, game.id):
+            return []
+
+        player_by_id = {player.telegram_id: player for player in players}
+        couples = (
+            await session.execute(
+                select(CoupleRelationship).where(
+                    CoupleRelationship.chat_id == game.chat_id,
+                    CoupleRelationship.active.is_(True),
+                )
+            )
+        ).scalars().all()
+        lines: list[str] = []
+        changed = True
+        while changed:
+            changed = False
+            for couple in couples:
+                first_id = couple.user_one_telegram_id
+                second_id = couple.user_two_telegram_id
+                if first_id not in player_by_id or second_id not in player_by_id:
+                    continue
+                if first_id in dead_ids and second_id not in dead_ids:
+                    fallen_id, partner_id = first_id, second_id
+                elif second_id in dead_ids and first_id not in dead_ids:
+                    fallen_id, partner_id = second_id, first_id
+                else:
+                    continue
+
+                partner = player_by_id.get(partner_id)
+                fallen = player_by_id.get(fallen_id)
+                if partner is None or fallen is None or not partner.alive:
+                    continue
+                dead_ids.add(partner_id)
+                if death_causes is not None:
+                    death_causes[partner_id] = "couple"
+                if death_visitors is not None:
+                    death_visitors[partner_id] = "💞 Para qismati"
+                lines.append(
+                    "💞 Turnir para qoidasi: "
+                    f"{self._tg_mention(partner.telegram_id, partner.display_name)} "
+                    f"sherigi {self._tg_mention(fallen.telegram_id, fallen.display_name)} ortidan o'yindan chiqdi."
+                )
+                changed = True
+        return lines
+
     async def create_game_registration(
         self,
         bot: Bot,
@@ -1232,10 +1293,12 @@ class GameEngine:
             )
         else:
             names = t(lang, "lobby_empty")
+        tournament_note = "💞 Turnirga faqat aktiv parasi borlar qo'shila oladi.\n" if tournament else ""
         return (
             f"{title}\n"
             f"{t(lang, 'lobby_registered')}\n\n"
             f"{names}\n\n"
+            f"{tournament_note}"
             f"{t(lang, 'lobby_total', count=len(players))}"
         )
 
@@ -1355,6 +1418,10 @@ class GameEngine:
                 return False, "Bu oddiy ro'yxatdan o'tish. Turnir komandasi tanlanmaydi."
             if is_tournament and tournament_team is None:
                 return False, "Turnirda qo'shilish uchun 🔵 yoki 🔴 komandani tanlang."
+            if is_tournament:
+                couple = await self._active_couple_for_user(session, game.chat_id, tg_user.id)
+                if couple is None:
+                    return False, "💞 Turnirga faqat parasi borlar qo'shila oladi. Avval reply qilib /para orqali para olib keling."
             preset = game.role_preset or "black23"
             max_players = role_preset_max_players(preset)
             current_count = await session.scalar(select(func.count(GamePlayer.id)).where(GamePlayer.game_id == game_id))
@@ -1703,6 +1770,44 @@ class GameEngine:
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc()))
             ).scalars().all()
             lang = await self.get_group_language(game.chat_id)
+            is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            removed_unpaired_names: list[str] = []
+            if is_tournament and players:
+                active_couples = (
+                    await session.execute(
+                        select(CoupleRelationship).where(
+                            CoupleRelationship.chat_id == game.chat_id,
+                            CoupleRelationship.active.is_(True),
+                        )
+                    )
+                ).scalars().all()
+                paired_ids = {
+                    user_id
+                    for couple in active_couples
+                    for user_id in (couple.user_one_telegram_id, couple.user_two_telegram_id)
+                }
+                valid_players: list[GamePlayer] = []
+                for player in players:
+                    if player.telegram_id in paired_ids:
+                        valid_players.append(player)
+                    else:
+                        removed_unpaired_names.append(self._tg_mention(player.telegram_id, player.display_name))
+                        await session.delete(player)
+                if removed_unpaired_names:
+                    players = valid_players
+                    self._add_game_log(
+                        session,
+                        game,
+                        "tournament_unpaired_players_removed",
+                        removed=removed_unpaired_names,
+                    )
+                    await session.commit()
+                    await self._safe_send_message(
+                        bot,
+                        game.chat_id,
+                        "💞 Turnirga parasi yo'q o'yinchilar ro'yxatdan chiqarildi:\n"
+                        + "\n".join(removed_unpaired_names),
+                    )
             gsm = GroupSettingsManager(self.session_factory)
             admin_start_confirm = await gsm.get_extra_enabled(game.chat_id, "admin_start_confirm")
 
@@ -3931,6 +4036,16 @@ class GameEngine:
                         inactive_nights=player.inactive_rounds,
                     )
 
+            couple_death_lines = await self._expand_tournament_couple_deaths(
+                session,
+                game,
+                alive_players,
+                dead,
+                death_causes=death_causes,
+                death_visitors=death_visitors,
+            )
+            night_event_lines.extend(couple_death_lines)
+
             for dead_id in dead:
                 pl = player_map.get(dead_id)
                 if pl:
@@ -4968,8 +5083,26 @@ class GameEngine:
                         f"{self._tg_mention(target.telegram_id, target.display_name)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
                         f"U edi {role_label(target.role)}.."
                     )
+                    all_players_for_day_death = (
+                        await session.execute(
+                            select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                        )
+                    ).scalars().all()
+                    day_dead_ids = {target.telegram_id}
+                    couple_day_lines = await self._expand_tournament_couple_deaths(
+                        session,
+                        game,
+                        all_players_for_day_death,
+                        day_dead_ids,
+                    )
+                    for player in all_players_for_day_death:
+                        if player.telegram_id in day_dead_ids and player.alive:
+                            player.alive = False
+                            player.death_day = game.day_number
                     await session.commit()
                     await self._safe_send_message(bot, chat_id, vote_text)
+                    for line in couple_day_lines:
+                        await self._safe_send_message(bot, chat_id, line)
 
                     if Role(target.role) == Role.JESTER:
                         await self._safe_send_message(
@@ -4980,12 +5113,8 @@ class GameEngine:
                         )
 
                     succession_events = self._apply_role_successions(
-                        (
-                            await session.execute(
-                                select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
-                            )
-                        ).scalars().all(),
-                        {target.telegram_id},
+                        all_players_for_day_death,
+                        day_dead_ids,
                     )
                     if succession_events:
                         await session.commit()
@@ -5105,6 +5234,22 @@ class GameEngine:
             target.alive = False
             target.death_day = game.day_number
             sorcerer.sorcerer_revenge_used = True
+            all_players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            revenge_dead_ids = {target.telegram_id}
+            couple_revenge_lines = await self._expand_tournament_couple_deaths(
+                session,
+                game,
+                all_players,
+                revenge_dead_ids,
+            )
+            for player in all_players:
+                if player.telegram_id in revenge_dead_ids and player.alive:
+                    player.alive = False
+                    player.death_day = game.day_number
             self._add_game_log(
                 session,
                 game,
@@ -5120,13 +5265,10 @@ class GameEngine:
                 f"{_ce('💣', SKULL_EMOJI_ID)} Afsungar afsun qildi va {self._tg_mention(target.telegram_id, target.display_name)}ni jahannamga olib ketdi!\n\n"
                 f"U edi {role_label(target.role)}",
             )
+            for line in couple_revenge_lines:
+                await self._safe_send_message(bot, game.chat_id, line)
 
-            all_players = (
-                await session.execute(
-                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
-                )
-            ).scalars().all()
-            extra_successions = self._apply_role_successions(all_players, {target.telegram_id})
+            extra_successions = self._apply_role_successions(all_players, revenge_dead_ids)
             if extra_successions:
                 await session.commit()
             for line, heir_id, new_role in extra_successions:
@@ -5217,6 +5359,22 @@ class GameEngine:
 
             attacker.alive = False
             attacker.death_day = game.day_number
+            all_players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            judgement_dead_ids = {attacker.telegram_id}
+            couple_judgement_lines = await self._expand_tournament_couple_deaths(
+                session,
+                game,
+                all_players,
+                judgement_dead_ids,
+            )
+            for player in all_players:
+                if player.telegram_id in judgement_dead_ids and player.alive:
+                    player.alive = False
+                    player.death_day = game.day_number
             await session.commit()
 
             await self._safe_send_message(
@@ -5225,13 +5383,10 @@ class GameEngine:
                 f"💀 Sehrgar {self._tg_mention(attacker.telegram_id, attacker.display_name)} "
                 f"({role_label(attacker.role)}) xatosini kechirmadi va oldirdi!",
             )
+            for line in couple_judgement_lines:
+                await self._safe_send_message(bot, chat_id, line)
 
-            all_players = (
-                await session.execute(
-                    select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
-                )
-            ).scalars().all()
-            extra_successions = self._apply_role_successions(all_players, {attacker.telegram_id})
+            extra_successions = self._apply_role_successions(all_players, judgement_dead_ids)
             if extra_successions:
                 await session.commit()
             for line, heir_id, new_role in extra_successions:
@@ -5301,9 +5456,26 @@ class GameEngine:
                 return False, "Nishon topilmadi."
             if not target_player.alive:
                 return False, "Bu o'yinchi allaqachon o'lgan."
+            couple_joker_lines: list[str] = []
             if is_dead:
                 target_player.alive = False
                 target_player.death_day = max(0, int(game.day_number or 0))
+                all_players = (
+                    await session.execute(
+                        select(GamePlayer).where(GamePlayer.game_id == game_id).order_by(GamePlayer.id.asc())
+                    )
+                ).scalars().all()
+                joker_dead_ids = {target_player.telegram_id}
+                couple_joker_lines = await self._expand_tournament_couple_deaths(
+                    session,
+                    game,
+                    all_players,
+                    joker_dead_ids,
+                )
+                for player in all_players:
+                    if player.telegram_id in joker_dead_ids and player.alive:
+                        player.alive = False
+                        player.death_day = max(0, int(game.day_number or 0))
             actor_player = (
                 await session.execute(
                     select(GamePlayer).where(
@@ -5342,6 +5514,8 @@ class GameEngine:
                 except TelegramForbiddenError:
                     pass
         await self._announce_immediate_joker_result(bot, game, target_player, is_dead)
+        for line in couple_joker_lines:
+            await self._safe_send_message(bot, game.chat_id, line)
         if is_dead:
             winner = await self.check_winner(game_id)
             if winner:
@@ -5466,13 +5640,29 @@ class GameEngine:
                     is_win = False
                 return is_win
 
-            tournament_winning_teams: set[str] = set()
+            tournament_couple_winner_ids: set[int] = set()
             if is_tournament:
-                tournament_winning_teams = {
-                    str(p.transformed_to_team)
-                    for p in players
-                    if p.transformed_to_team in {"blue", "red"} and base_winner(p)
+                player_ids = {player.telegram_id for player in players}
+                base_winner_ids = {
+                    player.telegram_id
+                    for player in players
+                    if base_winner(player)
                 }
+                active_couples = (
+                    await session.execute(
+                        select(CoupleRelationship).where(
+                            CoupleRelationship.chat_id == game.chat_id,
+                            CoupleRelationship.active.is_(True),
+                        )
+                    )
+                ).scalars().all()
+                for couple in active_couples:
+                    first_id = couple.user_one_telegram_id
+                    second_id = couple.user_two_telegram_id
+                    if first_id not in player_ids or second_id not in player_ids:
+                        continue
+                    if first_id in base_winner_ids or second_id in base_winner_ids:
+                        tournament_couple_winner_ids.update({first_id, second_id})
 
             for p in players:
                 # O'yin davomida o'lganlar yakunda mag'lub hisoblanadi.
@@ -5480,7 +5670,7 @@ class GameEngine:
                 is_winner = base_winner(p)
                 if (
                     is_tournament
-                    and p.transformed_to_team in tournament_winning_teams
+                    and p.telegram_id in tournament_couple_winner_ids
                     and not p.left_game
                 ):
                     is_winner = True
@@ -6341,6 +6531,7 @@ class GameEngine:
             killed = target.hero_hp <= 0
             kill_text = ""
             succession_events: list[tuple[str, int, Role]] = []
+            couple_hero_lines: list[str] = []
             if killed:
                 target.alive = False
                 target.killed_by_hero = True
@@ -6353,7 +6544,18 @@ class GameEngine:
                         select(GamePlayer).where(GamePlayer.game_id == game.id).order_by(GamePlayer.id.asc())
                     )
                 ).scalars().all()
-                succession_events = self._apply_role_successions(all_players, {target.telegram_id})
+                hero_dead_ids = {target.telegram_id}
+                couple_hero_lines = await self._expand_tournament_couple_deaths(
+                    session,
+                    game,
+                    all_players,
+                    hero_dead_ids,
+                )
+                for player in all_players:
+                    if player.telegram_id in hero_dead_ids and player.alive:
+                        player.alive = False
+                        player.death_day = game.day_number
+                succession_events = self._apply_role_successions(all_players, hero_dead_ids)
                 target_name = self._tg_mention(target.telegram_id, target.display_name)
                 kill_text = (
                     f"⚰️ {role_label(target.role)} {target_name}ni {role_label(attacker.role)} "
@@ -6387,6 +6589,8 @@ class GameEngine:
 
         if killed:
             await bot.send_message(chat_id, kill_text)
+            for line in couple_hero_lines:
+                await self._safe_send_message(bot, chat_id, line)
             for line, heir_id, new_role in succession_events:
                 await bot.send_message(chat_id, line)
                 try:
