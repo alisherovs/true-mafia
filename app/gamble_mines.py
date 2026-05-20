@@ -30,8 +30,8 @@ RICH_TAX_TIERS = (
     (250_000, 0.12),
     (100_000, 0.07),
 )
-MONEY_EMOJI_ID = "5375296873982604963"
-DIAMOND_EMOJI_ID = "5471952986970267163"
+MONEY_EMOJI_ID = "5409048419211682843"
+DIAMOND_EMOJI_ID = "5427168083074628963"
 MINE_EMOJI_ID = "5469654973308476699"
 GIFT_EMOJI_ID = "5199749070830197566"
 BANK_EMOJI_ID = "5264895611517300926"
@@ -210,9 +210,9 @@ class MinesRenderer:
         return (
             f"{status_line}\n"
             "━━━━━━━━━━━━━━━\n"
-            f"{_ce('💰', MONEY_EMOJI_ID)} Stavka: <b>{int(game.bet)}</b> dollar\n"
+            f"{_ce('💵', MONEY_EMOJI_ID)} Stavka: <b>{int(game.bet)}</b> dollar\n"
             f"📈 Multiplier: <b>x{multiplier:.2f}</b>\n"
-            f"{_ce('💰', MONEY_EMOJI_ID)} Hozirgi yutuq: <b>{potential}</b> dollar\n"
+            f"{_ce('💵', MONEY_EMOJI_ID)} Hozirgi yutuq: <b>{potential}</b> dollar\n"
             f"{_ce('💎', DIAMOND_EMOJI_ID)} Ochilgan safe: <b>{opened_count}</b> ta\n"
             f"{_ce('💣', MINE_EMOJI_ID)} Qolgan mina taxmini: <b>{mine_hint}</b> ta\n"
             f"🔥 Streak: <b>{int(streak)}</b>\n"
@@ -225,9 +225,9 @@ class MinesRenderer:
     @staticmethod
     def final_text(game: GambleMinesGame) -> str:
         if game.status == "cashed":
-            return f"{_ce('💰', MONEY_EMOJI_ID)} <b>{int(game.payout or 0)}</b> dollar yutdingiz!"
+            return f"{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.payout or 0)}</b> dollar yutdingiz!"
         if game.status == "lost":
-            return f"{_ce('💣', MINE_EMOJI_ID)} Mina portladi!\n{_ce('💰', MONEY_EMOJI_ID)} <b>{int(game.bet or 0)}</b> dollar kuyib ketdi."
+            return f"{_ce('💣', MINE_EMOJI_ID)} Mina portladi!\n{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.bet or 0)}</b> dollar kuyib ketdi."
         return MinesRenderer.text(game)
 
 
@@ -473,7 +473,7 @@ class MinesEngine:
                 "🏆 <b>Haftalik qimorvozlar TOP</b>\n"
                 "━━━━━━━━━━━━━━━\n"
                 "Hali bu haftada yutuq olgan qimorvoz yo'q.\n\n"
-                f"Faqat safe katak ochib, <b>{_ce('💰', MONEY_EMOJI_ID)} Pulni olish</b> orqali cashout qilingan yutuqlar statistikaga kiradi."
+                f"Faqat safe katak ochib, <b>{_ce('💵', MONEY_EMOJI_ID)} Pulni olish</b> orqali cashout qilingan yutuqlar statistikaga kiradi."
             )
 
         lines: list[str] = []
@@ -485,7 +485,7 @@ class MinesEngine:
             games_count = int(row.games_count or 0)
             best_win = int(row.best_win or 0)
             lines.append(
-                f"{idx}. {_user_link(telegram_id, name)} — <b>{total_won}</b> {_ce('💰', MONEY_EMOJI_ID)}\n"
+                f"{idx}. {_user_link(telegram_id, name)} — <b>{total_won}</b> {_ce('💵', MONEY_EMOJI_ID)}\n"
                 f"   🎮 Cashout: <b>{games_count}</b> | 🔥 Eng katta: <b>{best_win}</b>"
             )
 

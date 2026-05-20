@@ -38,8 +38,8 @@ from app.models import BotSetting
 from app.texts import t
 
 router = Router()
-DIAMOND_EMOJI_ID = "5471952986970267163"
-DOLLAR_EMOJI_ID = "5375296873982604963"
+DIAMOND_EMOJI_ID = "5427168083074628963"
+DOLLAR_EMOJI_ID = "5409048419211682843"
 GIFT_EMOJI_ID = "5199749070830197566"
 LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
@@ -279,7 +279,7 @@ def _giveaway_text(creator: User, giveaway: DiamondGiveaway) -> str:
         else _user_link(creator.telegram_id, raw_creator_name)
     )
     return (
-        f"{creator_name} kimgadir {giveaway.amount} ta <tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> sovg'a qilmoqchi!\n\n"
+        f"{creator_name} kimgadir {giveaway.amount} ta <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> sovg'a qilmoqchi!\n\n"
         f"Ishtirokchilar:\n{participants_text}\n\n"
         f"Ishtirokchilar soni: {len(participants)}/50"
     )
@@ -322,9 +322,9 @@ async def _finish_giveaway(
     final_text = (
         f"{_giveaway_text(creator, giveaway)}\n\n"
         f"🎉 G'olib: {_user_link(winner_id, winner_name)}\n"
-        f"<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> {giveaway.amount} olmos hisobiga qo'shildi."
+        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {giveaway.amount} olmos hisobiga qo'shildi."
     )
-    private_text = f"🎉 Siz sovg'ada yutdingiz!\n<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> {giveaway.amount} olmos hisobingizga qo'shildi."
+    private_text = f"🎉 Siz sovg'ada yutdingiz!\n<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {giveaway.amount} olmos hisobingizga qo'shildi."
     return winner_id, final_text, private_text
 
 
@@ -334,7 +334,7 @@ async def cmd_shop(message: Message, engine: GameEngine) -> None:
     has_hero = await engine.user_has_hero(message.from_user.id) if message.from_user else False
     await message.answer(
         "🛒 <b>Do'kon</b>\n\n"
-        "Himoya va maxsus imkoniyatlarni <tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> almaz orqali sotib olishingiz mumkin.",
+        "Himoya va maxsus imkoniyatlarni <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almaz orqali sotib olishingiz mumkin.",
         reply_markup=shop_keyboard(has_hero),
     )
 
@@ -348,7 +348,7 @@ async def shop_open_callback(callback: CallbackQuery, engine: GameEngine) -> Non
     has_hero = await engine.user_has_hero(callback.from_user.id)
     await callback.message.edit_text(
         "🛒 <b>Do'kon</b>\n\n"
-        "Kerakli itemni tanlang. Xarid summasi profilingizdagi <tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> almazdan yechiladi.",
+        "Kerakli itemni tanlang. Xarid summasi profilingizdagi <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollar yoki <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> almazdan yechiladi.",
         reply_markup=shop_keyboard(has_hero),
     )
     await callback.answer()
@@ -404,7 +404,7 @@ async def shop_disable_roles_callback(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "🚫 <b>Faol rolni o'chirish</b>\n\n"
         "Tanlangan faol rol keyingi o'yin role pool'idan olib tashlanadi.\n"
-        "Narx: <b><tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> 100</b>",
+        "Narx: <b><tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 100</b>",
         reply_markup=disable_role_shop_keyboard(),
     )
     await callback.answer()
@@ -447,9 +447,9 @@ async def dollar_shop_open(callback: CallbackQuery, engine: GameEngine) -> None:
         return
     await engine.ensure_user(callback.from_user)
     await callback.message.edit_text(
-        "<tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> <b>Dollar olish</b>\n\n"
+        "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> <b>Dollar olish</b>\n\n"
         "Bu bo'limda almazni dollarga almashtirish yoki dollar krediti olish mumkin.\n"
-        "Kurs: <b><tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> 1 almaz = <tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> 500 dollar</b>",
+        "Kurs: <b><tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz = <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 500 dollar</b>",
         reply_markup=dollar_exchange_keyboard(),
     )
     await callback.answer()
@@ -476,7 +476,7 @@ async def cmd_gsend(message: Message, command: CommandObject, engine: GameEngine
 
     raw_amount = (command.args or "").strip()
     if not raw_amount.isdigit():
-        await message.reply("Foydalanish: <code>/gsend 10</code>\nKurs: yuborilgan <tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> premium guruh reytingiga qo'shiladi.")
+        await message.reply("Foydalanish: <code>/gsend 10</code>\nKurs: yuborilgan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> premium guruh reytingiga qo'shiladi.")
         return
 
     ok, text = await engine.contribute_premium_group(
@@ -577,7 +577,7 @@ async def cmd_bust_diamonds(message: Message, command: CommandObject, settings: 
         command,
         settings,
         "diamonds",
-        "<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> olmoslar",
+        "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmoslar",
     )
 
 
@@ -588,7 +588,7 @@ async def cmd_bust_dollars(message: Message, command: CommandObject, settings: S
         command,
         settings,
         "dollar",
-        "<tg-emoji emoji-id=\"5375296873982604963\">💰</tg-emoji> dollarlar",
+        "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarlar",
     )
 
 
@@ -676,7 +676,7 @@ def _dollar_transfer_kwargs(
         " ➔ ",
         _user_text_link(target_id, target_name),
         ": ",
-        CustomEmoji("💰", custom_emoji_id=DOLLAR_EMOJI_ID),
+        CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID),
         f" {amount} dollar",
     ]
     if note and note != "-":
@@ -1170,7 +1170,7 @@ async def diamond_shop_open(callback: CallbackQuery, engine: GameEngine) -> None
         return
     admin_username = await engine.get_purchase_admin_username()
     await callback.message.edit_text(
-        "<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> <b>Almaz xaridi</b>\n\n"
+        "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> <b>Almaz xaridi</b>\n\n"
         "Kerakli almaz paketini tanlang. Telegram Stars orqali to'lov qilishingiz mumkin.",
         reply_markup=diamond_shop_keyboard(admin_username),
     )
@@ -1305,7 +1305,7 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
     
     await message.answer(
         f"✅ <b>To'lov muvaffaqiyatli!</b>\n\n"
-        f"<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> {diamonds} almaz sizning profilingizga qo'shildi!"
+        f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {diamonds} almaz sizning profilingizga qo'shildi!"
     )
 
 
@@ -1413,7 +1413,7 @@ async def shop_gifts_open(callback: CallbackQuery) -> None:
     text = (
         "🎁 <b>Telegram sovg'alari</b>\n\n"
         f"Almazingizni Telegram sovg'asiga almashtiring.\n"
-        f"Kurs: <b>1<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji> = {STARS_PER_DIAMOND}⭐</b>\n"
+        f"Kurs: <b>1<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> = {STARS_PER_DIAMOND}⭐</b>\n"
         "Sovg'a sizga shaxsiy chatingizga yuboriladi."
     )
     try:
@@ -1449,7 +1449,7 @@ async def gift_buy_confirm(callback: CallbackQuery) -> None:
     text = (
         "🎁 <b>Sovg'ani tasdiqlang</b>\n\n"
         f"Narx: <b>{stars}⭐</b>\n"
-        f"Sizdan yechiladi: <b>{diamonds}<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji></b>\n\n"
+        f"Sizdan yechiladi: <b>{diamonds}<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji></b>\n\n"
         "Tasdiqlasangiz, sovg'a darhol botning shaxsiy chatingizga yuboriladi."
     )
     try:
@@ -1614,7 +1614,7 @@ async def premium_buy_confirm(callback: CallbackQuery) -> None:
     text = (
         "👑 <b>Premium obunani tasdiqlang</b>\n\n"
         f"Muddat: <b>{months} oy</b>\n"
-        f"Narx: <b>{diamonds}<tg-emoji emoji-id=\"5471952986970267163\">💎</tg-emoji></b>\n\n"
+        f"Narx: <b>{diamonds}<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji></b>\n\n"
         "Tasdiqlasangiz, Premium darhol sizning hisobingizga ulanadi."
     )
     try:
