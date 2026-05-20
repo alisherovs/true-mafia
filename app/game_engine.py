@@ -189,6 +189,14 @@ class GameEngine:
         self._return_url_cache_ttl_seconds = 3600.0
         self._chat_permission_cache_ttl = 5.0
         self._cache_limit = 20000
+        self._inactive_elimination_rounds = 2
+        self._night_inactivity_exempt_roles = {
+            Role.COMMISSAR,
+            Role.DON,
+            Role.HOJIAKA,
+            Role.MASHKA,
+            Role.DOCTOR,
+        }
         self._pending_sorcerer_judgements: dict[tuple[int, int, int], tuple[float, str]] = {}
 
     def _monotonic(self) -> float:
@@ -484,8 +492,16 @@ class GameEngine:
             visitor = f"{_ce('🧟', ZOMBIE_EMOJI_ID)} G'azabkor alangasi"
         elif cause == "joker":
             visitor = "🃏 Joker"
+        elif cause == "inactive":
+            visitor = "😴 uyqu"
         else:
             visitor = "noma'lum mehmon"
+        if cause == "inactive":
+            return (
+                f"O'limidan oldin kimdir {name} qichqirganini eshitdi:\n"
+                "Men o'yin payti boshqa uxlamayma-a-a-a-n\n"
+                f"U edi {role}"
+            )
         return f"Tunda {role} {name}...\nvaxshiylarcha o'ldirildi. Aytishlaricha unikiga {visitor} kelgan."
 
     @staticmethod
@@ -3647,46 +3663,73 @@ class GameEngine:
                     )
                 watcher_lines.append((watcher_id, text))
 
+            def pick_sorcerer_revenge_attacker(victim_id: int) -> tuple[int | None, Role | None]:
+                mafia_targets = set(don_kills) | set(mafia_fallback_kills)
+                if victim_id in mafia_targets:
+                    # Mafia tomondan Afsungarga hujum bo'lsa qasos birinchi navbatda Donga tushadi.
+                    # Don yo'q bo'lsa, aynan shu Afsungarni nishonga olgan mafia tomoni hujumchisi olinadi.
+                    alive_don = next(
+                        (
+                            p
+                            for p in alive_players
+                            if Role(p.role) == Role.DON
+                            and p.telegram_id in alive_ids
+                        ),
+                        None,
+                    )
+                    if alive_don is not None:
+                        return alive_don.telegram_id, Role.DON
+                    mafia_actor = next(
+                        (
+                            a.actor_telegram_id
+                            for a in actions
+                            if a.action_type == ActionType.KILL.value
+                            and a.target_telegram_id == victim_id
+                            and a.actor_telegram_id in player_map
+                            and Role(player_map[a.actor_telegram_id].role)
+                            in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
+                        ),
+                        None,
+                    )
+                    if mafia_actor is not None:
+                        return mafia_actor, Role(player_map[mafia_actor].role)
+
+                if victim_id in killer_kills:
+                    killer_actor = next(
+                        (
+                            a.actor_telegram_id
+                            for a in actions
+                            if a.action_type == ActionType.KILL.value
+                            and a.details == "killer"
+                            and a.target_telegram_id == victim_id
+                            and a.actor_telegram_id in player_map
+                        ),
+                        None,
+                    )
+                    if killer_actor is not None:
+                        return killer_actor, Role.KILLER
+
+                if victim_id in commissar_shots:
+                    shooter = next(
+                        (
+                            a.actor_telegram_id
+                            for a in actions
+                            if a.action_type == ActionType.SHOOT.value
+                            and a.target_telegram_id == victim_id
+                            and a.actor_telegram_id in player_map
+                        ),
+                        None,
+                    )
+                    if shooter is not None:
+                        return shooter, Role.COMMISSAR
+
+                return None, None
+
             sorcerer_revenge_candidates: list[tuple[int, int, Role | None]] = []
             for victim_id in list(dead):
                 victim = player_map.get(victim_id)
                 if victim and Role(victim.role) == Role.SORCERER:
-                    attacker = None
-                    all_mafia_kill_targets = set(don_kills) | set(mafia_fallback_kills)
-                    if victim_id in all_mafia_kill_targets:
-                        alive_don = next(
-                            (
-                                p.telegram_id
-                                for p in alive_players
-                                if Role(p.role) == Role.DON and p.telegram_id in alive_ids
-                            ),
-                            None,
-                        )
-                        if alive_don is not None:
-                            attacker = alive_don
-                        else:
-                            mafia_actors = [
-                                a.actor_telegram_id
-                                for a in actions
-                                if a.action_type == ActionType.KILL.value
-                                and a.target_telegram_id == victim_id
-                                and a.actor_telegram_id in player_map
-                                and Role(player_map[a.actor_telegram_id].role) in {Role.DON, Role.MAFIA, Role.SPY, Role.HIRED_KILLER}
-                            ]
-                            attacker = mafia_actors[0] if mafia_actors else None
-                    if attacker is None and victim_id in killer_kills:
-                        killer_actors = [
-                            a.actor_telegram_id
-                            for a in actions
-                            if a.action_type == ActionType.KILL.value and a.details == "killer"
-                        ]
-                        attacker = killer_actors[0] if killer_actors else None
-                    elif victim_id in commissar_shots:
-                        shooter = [a.actor_telegram_id for a in actions if a.action_type == ActionType.SHOOT.value]
-                        attacker = shooter[0] if shooter else None
-                    attacker_role = None
-                    if attacker and attacker in player_map and player_map[attacker].role:
-                        attacker_role = Role(player_map[attacker].role)
+                    attacker, attacker_role = pick_sorcerer_revenge_attacker(victim_id)
                     if attacker:
                         sorcerer_revenge_candidates.append((victim_id, attacker, attacker_role))
 
@@ -3712,7 +3755,7 @@ class GameEngine:
                             )
                         except TelegramForbiddenError:
                             pass
-                if attacker in alive_ids:
+                if attacker in alive_ids and attacker not in dead:
                     dead.add(attacker)
                     death_causes[attacker] = "sorcerer"
                     death_visitors[attacker] = role_label(Role.SORCERER.value)
@@ -3778,6 +3821,74 @@ class GameEngine:
                 death_causes.pop(victim_id, None)
                 death_visitors.pop(victim_id, None)
                 sorcerer_judgement_prompts.append((game.id, victim_id, attacker_id, role_label(attacker_role)))
+
+            night_actor_ids = {
+                act.actor_telegram_id
+                for act in actions
+                if act.actor_telegram_id in alive_ids
+            }
+            mine_rows = (
+                await session.execute(
+                    select(NightAction.actor_telegram_id, NightAction.target_telegram_id).where(
+                        NightAction.game_id == game_id,
+                        NightAction.action_type == ActionType.MINE.value,
+                        NightAction.target_telegram_id.is_not(None),
+                    )
+                )
+            ).all()
+            miner_visits: dict[int, set[int]] = defaultdict(set)
+            for actor_id, mine_number in mine_rows:
+                if mine_number is not None:
+                    miner_visits[actor_id].add(mine_number)
+            arson_rows = (
+                await session.execute(
+                    select(NightAction.actor_telegram_id, NightAction.target_telegram_id).where(
+                        NightAction.game_id == game_id,
+                        NightAction.details == "arson",
+                        NightAction.target_telegram_id.is_not(None),
+                    )
+                )
+            ).all()
+            arson_marks: dict[int, set[int]] = defaultdict(set)
+            for actor_id, target_id in arson_rows:
+                if target_id is not None and actor_id != target_id:
+                    arson_marks[actor_id].add(target_id)
+
+            for player in alive_players:
+                player_id = player.telegram_id
+                role = Role(player.role)
+                prompt = self._night_prompt_for_player(
+                    game_id,
+                    night,
+                    player,
+                    alive_players,
+                    miner_visits,
+                    arson_marks,
+                )
+                if (
+                    player_id in dead
+                    or player_id in blocked
+                    or prompt is None
+                    or role in self._night_inactivity_exempt_roles
+                    or player_id in night_actor_ids
+                ):
+                    player.inactive_rounds = 0
+                    continue
+
+                player.inactive_rounds = (player.inactive_rounds or 0) + 1
+                if player.inactive_rounds >= self._inactive_elimination_rounds:
+                    dead.add(player_id)
+                    death_causes[player_id] = "inactive"
+                    player.left_game = True
+                    player.awaiting_last_words = False
+                    player.last_words = None
+                    self._add_game_log(
+                        session,
+                        game,
+                        "player_removed_for_night_inactivity",
+                        actor=player,
+                        inactive_nights=player.inactive_rounds,
+                    )
 
             for dead_id in dead:
                 pl = player_map.get(dead_id)
@@ -4517,52 +4628,7 @@ class GameEngine:
         game: Game,
         votes: list[Vote],
     ) -> None:
-        game_id = game.id
-
-        active_ids = {action.actor_telegram_id for action in (
-                await session.execute(
-                    select(NightAction).where(
-                        NightAction.game_id == game_id,
-                        NightAction.night_number == game.night_number,
-                    )
-                )
-            ).scalars().all()}
-        active_ids.update(vote.voter_telegram_id for vote in votes)
-        active_ids.update(
-            hang_vote.voter_telegram_id
-            for hang_vote in (
-                await session.execute(
-                    select(HangVote).where(
-                        HangVote.game_id == game_id,
-                        HangVote.day_number == game.day_number,
-                    )
-                )
-            ).scalars().all()
-        )
-        active_ids.update(
-            skip.user_telegram_id
-            for skip in (
-                await session.execute(
-                    select(SkipDecision).where(
-                        SkipDecision.game_id == game_id,
-                        SkipDecision.day_number == game.day_number,
-                    )
-                )
-            ).scalars().all()
-        )
-
-        alive_after_vote = await self._alive_players(session, game_id)
-        active_ids.update(
-            player.telegram_id
-            for player in alive_after_vote
-            if self._is_day_blocked(player, game)
-        )
-        for player in alive_after_vote:
-            if player.telegram_id in active_ids:
-                player.inactive_rounds = 0
-            else:
-                player.inactive_rounds = (player.inactive_rounds or 0) + 1
-        await session.commit()
+        return
 
     async def confirm_hang(
         self,
