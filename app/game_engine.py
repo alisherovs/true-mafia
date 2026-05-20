@@ -1416,8 +1416,6 @@ class GameEngine:
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
             if tournament_team is not None and not is_tournament:
                 return False, "Bu oddiy ro'yxatdan o'tish. Turnir komandasi tanlanmaydi."
-            if is_tournament and tournament_team is None:
-                return False, "Turnirda qo'shilish uchun 🔵 yoki 🔴 komandani tanlang."
             if is_tournament:
                 couple = await self._active_couple_for_user(session, game.chat_id, tg_user.id)
                 if couple is None:
