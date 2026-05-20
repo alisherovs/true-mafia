@@ -11,13 +11,60 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
+from aiogram.types import CallbackQuery
 from aiogram.types import ErrorEvent, Message
+from sqlalchemy import select
 
 from app.config import get_settings
+from app.credit import CreditService
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
 from app.handlers import admin, callbacks, economy, emoji_debug, gamble, game, hero, language, profile, roles, settings as settings_handler, start, top
+from app.models import CreditBlockedUser
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
+
+
+class CreditBlockMessageMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.from_user:
+            async with SessionLocal() as session:
+                blocked = (
+                    await session.execute(
+                        select(CreditBlockedUser.telegram_id).where(CreditBlockedUser.telegram_id == event.from_user.id)
+                    )
+                ).scalar_one_or_none()
+            if blocked is not None:
+                try:
+                    await event.answer("🚫 Kredit qarzi muddatida so'ndirilmagani uchun botdan bloklangansiz.")
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    pass
+                return None
+        return await handler(event, data)
+
+
+class CreditBlockCallbackMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[CallbackQuery, dict[str, Any]], Awaitable[Any]],
+        event: CallbackQuery,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.from_user:
+            async with SessionLocal() as session:
+                blocked = (
+                    await session.execute(
+                        select(CreditBlockedUser.telegram_id).where(CreditBlockedUser.telegram_id == event.from_user.id)
+                    )
+                ).scalar_one_or_none()
+            if blocked is not None:
+                await event.answer("🚫 Kredit qarzi sabab botdan bloklangansiz.", show_alert=True)
+                return None
+        return await handler(event, data)
 
 
 class DeleteGroupCommandMiddleware(BaseMiddleware):
@@ -145,6 +192,8 @@ async def main() -> None:
         settings.bot_username = me.username
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
+    dp.message.middleware(CreditBlockMessageMiddleware())
+    dp.callback_query.middleware(CreditBlockCallbackMiddleware())
     dp.message.middleware(DeleteGroupCommandMiddleware())
     dp.message.middleware(ChatRestrictionMiddleware())
     dp.errors.register(global_error_handler)
@@ -196,6 +245,19 @@ async def main() -> None:
         coalesce=True,
         max_instances=1,
         misfire_grace_time=30,
+    )
+    credit_service = CreditService(SessionLocal)
+    scheduler.add_job(
+        credit_service.daily_watchdog,
+        "cron",
+        hour=5,
+        minute=0,
+        args=[bot],
+        id="credit_daily_watchdog",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
     await set_commands(bot)
 

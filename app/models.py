@@ -399,6 +399,39 @@ class GambleUserStats(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class CreditLoan(Base):
+    __tablename__ = "credit_loans"
+    __table_args__ = (
+        Index("ix_credit_loans_user_status", "user_telegram_id", "status"),
+        Index("ix_credit_loans_status_due", "status", "due_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    principal: Mapped[int] = mapped_column(Integer)
+    interest: Mapped[int] = mapped_column(Integer)
+    total_due: Mapped[int] = mapped_column(Integer)
+    term_days: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_reminder_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class CreditBlockedUser(Base):
+    __tablename__ = "credit_blocked_users"
+
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="User")
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    loan_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class BotSetting(Base):
     __tablename__ = "bot_settings"
 

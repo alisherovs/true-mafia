@@ -8,9 +8,16 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
 from app.config import Settings
+from app.credit import CREDIT_AMOUNTS, CREDIT_DAYS, CreditService
 from app.database import SessionLocal
 from app.game_engine import GameEngine
-from app.keyboards import commands_keyboard, profile_dashboard_keyboard
+from app.keyboards import (
+    commands_keyboard,
+    credit_confirm_keyboard,
+    credit_days_keyboard,
+    credit_menu_keyboard,
+    profile_dashboard_keyboard,
+)
 from app.models import User
 from sqlalchemy import select
 
@@ -223,3 +230,106 @@ async def inventory_toggle_callback(callback: CallbackQuery, engine: GameEngine,
     except TelegramBadRequest:
         pass
     await callback.answer("Sozlama yangilandi.")
+
+
+@router.callback_query(F.data == "credit:open")
+async def credit_open_callback(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    credit = CreditService(SessionLocal)
+    text, has_active = await credit.menu_text(callback.from_user.id)
+    try:
+        await callback.message.edit_text(text, reply_markup=credit_menu_keyboard(has_active))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("credit:amount:"))
+async def credit_amount_callback(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    try:
+        amount = int((callback.data or "").split(":")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Miqdor noto'g'ri.", show_alert=True)
+        return
+    if amount not in CREDIT_AMOUNTS:
+        await callback.answer("Miqdor noto'g'ri.", show_alert=True)
+        return
+    credit = CreditService(SessionLocal)
+    try:
+        await callback.message.edit_text(credit.amount_text(amount), reply_markup=credit_days_keyboard(amount))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("credit:days:"))
+async def credit_days_callback(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    parts = (callback.data or "").split(":")
+    try:
+        amount = int(parts[2])
+        days = int(parts[3])
+    except (IndexError, ValueError):
+        await callback.answer("Tanlov noto'g'ri.", show_alert=True)
+        return
+    if amount not in CREDIT_AMOUNTS or days not in CREDIT_DAYS:
+        await callback.answer("Tanlov noto'g'ri.", show_alert=True)
+        return
+    credit = CreditService(SessionLocal)
+    try:
+        await callback.message.edit_text(credit.confirm_text(amount, days), reply_markup=credit_confirm_keyboard(amount, days))
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("credit:take:"))
+async def credit_take_callback(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    parts = (callback.data or "").split(":")
+    try:
+        amount = int(parts[2])
+        days = int(parts[3])
+    except (IndexError, ValueError):
+        await callback.answer("Tanlov noto'g'ri.", show_alert=True)
+        return
+    credit = CreditService(SessionLocal)
+    ok, text = await credit.take_credit(callback.from_user, amount, days)
+    if ok:
+        menu_text, has_active = await credit.menu_text(callback.from_user.id)
+        text = f"{text}\n\n{menu_text}"
+    else:
+        has_active = False
+    try:
+        await callback.message.edit_text(text, reply_markup=credit_menu_keyboard(has_active))
+    except TelegramBadRequest:
+        pass
+    await callback.answer("Kredit berildi." if ok else "Kredit berilmadi.", show_alert=not ok)
+
+
+@router.callback_query(F.data == "credit:repay")
+async def credit_repay_callback(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer()
+        return
+    credit = CreditService(SessionLocal)
+    ok, text = await credit.repay(callback.from_user.id)
+    if ok:
+        menu_text, has_active = await credit.menu_text(callback.from_user.id)
+        text = f"{text}\n\n{menu_text}"
+    else:
+        has_active = True
+    try:
+        await callback.message.edit_text(text, reply_markup=credit_menu_keyboard(has_active))
+    except TelegramBadRequest:
+        pass
+    await callback.answer("Kredit so'ndirildi." if ok else "So'ndirilmadi.", show_alert=not ok)

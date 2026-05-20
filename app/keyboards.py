@@ -110,6 +110,7 @@ def profile_dashboard_keyboard(
             _toggle_button("📁", "use_fake_document", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
+        [InlineKeyboardButton(text="💳 Kredit", callback_data="credit:open")],
         [
             diamond_icon_button("Xarid qilish", callback_data="diamond:shop"),
             dollar_icon_button("Xarid qilish", callback_data="dollar:shop"),
@@ -128,6 +129,51 @@ def rules_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="start:back")],
+        ]
+    )
+
+
+def credit_menu_keyboard(has_active_loan: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if has_active_loan:
+        rows.append([InlineKeyboardButton(text="💵 Kreditni so'ndirish", callback_data="credit:repay")])
+    else:
+        rows.extend(
+            [
+                [
+                    InlineKeyboardButton(text="💵 1000", callback_data="credit:amount:1000"),
+                    InlineKeyboardButton(text="💵 2500", callback_data="credit:amount:2500"),
+                ],
+                [
+                    InlineKeyboardButton(text="💵 5000", callback_data="credit:amount:5000"),
+                    InlineKeyboardButton(text="💵 7500", callback_data="credit:amount:7500"),
+                ],
+                [InlineKeyboardButton(text="💵 10000", callback_data="credit:amount:10000")],
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Profil", callback_data="profile:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def credit_days_keyboard(amount: int) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    days = list(range(1, 8))
+    for idx in range(0, len(days), 2):
+        rows.append(
+            [
+                InlineKeyboardButton(text=f"{day} kun", callback_data=f"credit:days:{amount}:{day}")
+                for day in days[idx:idx + 2]
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="◀️ Kredit", callback_data="credit:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def credit_confirm_keyboard(amount: int, days: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Kredit olish", callback_data=f"credit:take:{amount}:{days}")],
+            [InlineKeyboardButton(text="◀️ Muddatni tanlash", callback_data=f"credit:amount:{amount}")],
         ]
     )
 
