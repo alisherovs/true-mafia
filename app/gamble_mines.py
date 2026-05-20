@@ -20,10 +20,9 @@ from app.models import DollarTransaction, GambleMinesGame, GambleUserStats, User
 GRID_SIZE = 36
 GRID_WIDTH = 6
 MIN_BET = 10
-MAX_BET = 5000
-DAILY_BET_LIMIT = 20_000
+DAILY_WIN_LIMIT = 50_000
 COOLDOWN_SECONDS = 20
-MAX_PAYOUT = 25_000
+MAX_PAYOUT = DAILY_WIN_LIMIT
 HOUSE_PAYOUT_FACTOR = 0.92
 _GAME_LOCKS: dict[int, asyncio.Lock] = {}
 RICH_TAX_TIERS = (
@@ -73,8 +72,6 @@ class MinesAntiCheatValidator:
             return False, 0, "Summa faqat butun son bo'lishi kerak. Masalan: <code>/qimor 100</code>"
         if amount < MIN_BET:
             return False, 0, f"Minimal stavka: <b>{MIN_BET}</b> dollar."
-        if amount > MAX_BET:
-            return False, 0, f"Maksimal stavka: <b>{MAX_BET}</b> dollar."
         return True, amount, ""
 
     @staticmethod
@@ -251,16 +248,6 @@ class MinesEngine:
                 wait = int((_ensure_aware(stats.last_started_at) + timedelta(seconds=COOLDOWN_SECONDS) - now).total_seconds())
                 return MinesView(f"⏳ Keyingi qimorgacha <b>{wait}</b> sekund kuting.", None, "Cooldown hali tugamadi.", True)
 
-            today_bet = await self._today_bet(session, tg_user.id, now)
-            if today_bet + bet > DAILY_BET_LIMIT:
-                left = max(0, DAILY_BET_LIMIT - today_bet)
-                return MinesView(
-                    f"🚫 Kunlik qimor limiti tugadi.\nBugun qolgan limit: <b>{left}</b> dollar.",
-                    None,
-                    "Kunlik limit tugagan.",
-                    True,
-                )
-
             if int(user.dollar or 0) < bet:
                 return MinesView("Balans yetarli emas.", None, "Balans yetarli emas.", True)
 
@@ -400,6 +387,13 @@ class MinesEngine:
                 if payout <= 0:
                     return MinesView("", None, "Yutuq mavjud emas.", True)
                 now = _utcnow()
+                today_won = await self._today_won(session, tg_user_id, now)
+                if today_won >= DAILY_WIN_LIMIT:
+                    return MinesView("", None, "Kunlik yutuq limiti tugagan: 50000 dollar.", True)
+                if today_won + payout > DAILY_WIN_LIMIT:
+                    payout = DAILY_WIN_LIMIT - today_won
+                    if payout <= 0:
+                        return MinesView("", None, "Kunlik yutuq limiti tugagan: 50000 dollar.", True)
                 user.dollar = int(user.dollar or 0) + payout
                 game.status = "cashed"
                 game.payout = payout
@@ -541,12 +535,14 @@ class MinesEngine:
             )
         ).scalar_one_or_none()
 
-    async def _today_bet(self, session: AsyncSession, telegram_id: int, now: datetime) -> int:
+    async def _today_won(self, session: AsyncSession, telegram_id: int, now: datetime) -> int:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         value = await session.scalar(
-            select(func.coalesce(func.sum(GambleMinesGame.bet), 0)).where(
+            select(func.coalesce(func.sum(GambleMinesGame.payout), 0)).where(
                 GambleMinesGame.user_telegram_id == telegram_id,
-                GambleMinesGame.created_at >= start,
+                GambleMinesGame.status == "cashed",
+                GambleMinesGame.ended_at.is_not(None),
+                GambleMinesGame.ended_at >= start,
             )
         )
         return int(value or 0)

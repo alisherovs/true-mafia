@@ -442,7 +442,7 @@ async def dollar_shop_open(callback: CallbackQuery, engine: GameEngine) -> None:
     await engine.ensure_user(callback.from_user)
     await callback.message.edit_text(
         "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> <b>Dollar olish</b>\n\n"
-        "Bu bo'limda faqat almazni dollarga almashtirasiz.\n"
+        "Bu bo'limda almazni dollarga almashtirish yoki dollar krediti olish mumkin.\n"
         "Kurs: <b><tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 1 almaz = <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> 500 dollar</b>",
         reply_markup=dollar_exchange_keyboard(),
     )

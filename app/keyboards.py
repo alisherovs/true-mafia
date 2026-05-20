@@ -110,7 +110,6 @@ def profile_dashboard_keyboard(
             _toggle_button("📁", "use_fake_document", user),
         ],
         [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
-        [InlineKeyboardButton(text="💳 Kredit", callback_data="credit:open")],
         [
             diamond_icon_button("Xarid qilish", callback_data="diamond:shop"),
             dollar_icon_button("Xarid qilish", callback_data="dollar:shop"),
@@ -151,7 +150,7 @@ def credit_menu_keyboard(has_active_loan: bool = False) -> InlineKeyboardMarkup:
                 [InlineKeyboardButton(text="💵 10000", callback_data="credit:amount:10000")],
             ]
         )
-    rows.append([InlineKeyboardButton(text="◀️ Profil", callback_data="profile:open")])
+    rows.append([InlineKeyboardButton(text="◀️ Dollar bo'limi", callback_data="dollar:shop")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -844,6 +843,7 @@ def disable_role_shop_keyboard() -> InlineKeyboardMarkup:
 def dollar_exchange_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="💳 Kredit", callback_data="credit:open")],
             [
                 diamond_icon_button(f"1 → {DOLLAR_BUTTON_EMOJI} 500", callback_data="dollar:exchange:1"),
                 diamond_icon_button(f"5 → {DOLLAR_BUTTON_EMOJI} 2500", callback_data="dollar:exchange:5"),
