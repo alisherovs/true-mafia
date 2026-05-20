@@ -19,7 +19,7 @@ from app.config import get_settings
 from app.credit import CreditService
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
-from app.handlers import admin, callbacks, economy, emoji_debug, gamble, game, hero, language, profile, roles, settings as settings_handler, start, top
+from app.handlers import admin, callbacks, economy, emoji_debug, gamble, game, hero, language, para, profile, roles, settings as settings_handler, start, top
 from app.models import CreditBlockedUser
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
@@ -209,6 +209,7 @@ async def main() -> None:
     dp.include_router(economy.router)
     dp.include_router(gamble.router)
     dp.include_router(hero.router)
+    dp.include_router(para.router)
     dp.include_router(settings_handler.router)
     dp.include_router(top.router)
     dp.include_router(callbacks.router)

@@ -27,6 +27,7 @@ from app.keyboards import (
     confirm_hang_keyboard,
     commissar_action_keyboard,
     commissar_target_keyboard,
+    couple_request_keyboard,
     go_private_keyboard,
     go_role_private_keyboard,
     go_vote_private_keyboard,
@@ -49,6 +50,7 @@ from app.keyboards import (
 from app.models import (
     ActivityScoreEvent,
     BotSetting,
+    CoupleRelationship,
     DiamondGiveaway,
     DiamondTransaction,
     DollarTransaction,
@@ -8427,6 +8429,144 @@ class GameEngine:
         else:
             lines.append("Hali ball yo'q.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _couple_duration_text(started_at: datetime) -> str:
+        started = GameEngine._ensure_utc(started_at)
+        total_seconds = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
+        days, remainder = divmod(total_seconds, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes = max(1, remainder // 60) if total_seconds < 3600 else remainder // 60
+        if days:
+            return f"{days} kun {hours} soat"
+        if hours:
+            return f"{hours} soat {minutes} daqiqa"
+        return f"{minutes} daqiqa"
+
+    async def _active_couple_for_user(
+        self,
+        session: AsyncSession,
+        chat_id: int,
+        user_id: int,
+    ) -> Optional[CoupleRelationship]:
+        return (
+            await session.execute(
+                select(CoupleRelationship).where(
+                    CoupleRelationship.chat_id == chat_id,
+                    CoupleRelationship.active.is_(True),
+                    (
+                        (CoupleRelationship.user_one_telegram_id == user_id)
+                        | (CoupleRelationship.user_two_telegram_id == user_id)
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+
+    async def create_couple_request(
+        self,
+        chat_id: int,
+        requester_id: int,
+        requester_name: str,
+        target_id: int,
+        target_name: str,
+    ) -> tuple[bool, str, Optional[InlineKeyboardMarkup]]:
+        if requester_id == target_id:
+            return False, "O'zingiz bilan para bo'la olmaysiz.", None
+
+        async with self.session_factory() as session:
+            requester_pair = await self._active_couple_for_user(session, chat_id, requester_id)
+            if requester_pair is not None:
+                return False, "Sizda allaqachon para bor. Avval /unpara bilan uzing.", None
+            target_pair = await self._active_couple_for_user(session, chat_id, target_id)
+            if target_pair is not None:
+                return False, "Bu foydalanuvchining allaqachon parasi bor.", None
+
+        requester = self._tg_mention(requester_id, requester_name)
+        target = self._tg_mention(target_id, target_name)
+        text = (
+            f"💌 {target}, {requester} siz bilan para bo'lmoqchi.\n\n"
+            "Javobingizni tanlang:"
+        )
+        return True, text, couple_request_keyboard(chat_id, requester_id, target_id)
+
+    async def answer_couple_request(
+        self,
+        chat_id: int,
+        requester_id: int,
+        requester_name: str,
+        target_id: int,
+        target_name: str,
+        accepted: bool,
+        actor_id: int,
+    ) -> tuple[bool, str]:
+        if actor_id != target_id:
+            return False, "Bu so'rov faqat siz uchun emas."
+
+        requester = self._tg_mention(requester_id, requester_name)
+        target = self._tg_mention(target_id, target_name)
+        if not accepted:
+            return True, f"💔 {requester} para so'rovi {target} tomonidan rad etildi."
+
+        async with self.session_factory() as session:
+            requester_pair = await self._active_couple_for_user(session, chat_id, requester_id)
+            target_pair = await self._active_couple_for_user(session, chat_id, target_id)
+            if requester_pair is not None or target_pair is not None:
+                return False, "Bu so'rov eskirgan. Ishtirokchilardan birida allaqachon para bor."
+
+            session.add(
+                CoupleRelationship(
+                    chat_id=chat_id,
+                    user_one_telegram_id=requester_id,
+                    user_one_name=requester_name or "User",
+                    user_two_telegram_id=target_id,
+                    user_two_name=target_name or "User",
+                    active=True,
+                )
+            )
+            await session.commit()
+
+        return True, f"💞 {requester} sizning para so'rovingiz {target} tomonidan qabul qilindi. Endi sizlar sheriklarsiz."
+
+    async def couple_stats_text(self, chat_id: int) -> str:
+        async with self.session_factory() as session:
+            couples = (
+                await session.execute(
+                    select(CoupleRelationship)
+                    .where(
+                        CoupleRelationship.chat_id == chat_id,
+                        CoupleRelationship.active.is_(True),
+                    )
+                    .order_by(CoupleRelationship.created_at.asc())
+                )
+            ).scalars().all()
+
+        if not couples:
+            return "📊 Hozircha bu guruhda aktiv paralar yo'q."
+
+        lines = ["📊 <b>Paralar statistikasi</b>", ""]
+        for index, couple in enumerate(couples, start=1):
+            first = self._tg_mention(couple.user_one_telegram_id, couple.user_one_name)
+            second = self._tg_mention(couple.user_two_telegram_id, couple.user_two_name)
+            duration = self._couple_duration_text(couple.created_at)
+            lines.append(f"{index}. {first} + {second} — {duration}dan beri para 💞")
+        return "\n".join(lines)
+
+    async def unpair_user(self, chat_id: int, user_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            couple = await self._active_couple_for_user(session, chat_id, user_id)
+            if couple is None:
+                return False, "Sizda bu guruhda aktiv para yo'q."
+            couple.active = False
+            couple.ended_at = datetime.now(timezone.utc)
+            first_name = couple.user_one_name
+            first_id = couple.user_one_telegram_id
+            second_name = couple.user_two_name
+            second_id = couple.user_two_telegram_id
+            await session.commit()
+
+        first = self._tg_mention(first_id, first_name)
+        second = self._tg_mention(second_id, second_name)
+        return True, f"💔 {first} + {second} parasi uzildi. Endi ular sherik emas."
 
     async def group_settings(self, chat_id: int) -> Group:
         group = await self.get_or_create_group(chat_id, "Group")

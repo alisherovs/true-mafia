@@ -417,6 +417,26 @@ class ActivityScoreEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CoupleRelationship(Base):
+    __tablename__ = "couple_relationships"
+    __table_args__ = (
+        Index("ix_couple_chat_active", "chat_id", "active"),
+        Index("ix_couple_user_one_active", "user_one_telegram_id", "active"),
+        Index("ix_couple_user_two_active", "user_two_telegram_id", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_one_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_one_name: Mapped[str] = mapped_column(String(255), default="User")
+    user_two_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_two_name: Mapped[str] = mapped_column(String(255), default="User")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class CreditLoan(Base):
     __tablename__ = "credit_loans"
     __table_args__ = (

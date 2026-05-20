@@ -132,6 +132,23 @@ def rules_back_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def couple_request_keyboard(chat_id: int, requester_id: int, target_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💞 Rozi bo'lish",
+                    callback_data=f"para:accept:{chat_id}:{requester_id}:{target_id}",
+                ),
+                InlineKeyboardButton(
+                    text="💔 Rad etish",
+                    callback_data=f"para:reject:{chat_id}:{requester_id}:{target_id}",
+                ),
+            ],
+        ]
+    )
+
+
 def credit_menu_keyboard(has_active_loan: bool = False) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if has_active_loan:
