@@ -363,6 +363,42 @@ class DollarTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class GambleMinesGame(Base):
+    __tablename__ = "gamble_mines_games"
+    __table_args__ = (
+        Index("ix_gamble_mines_user_status", "user_telegram_id", "status"),
+        Index("ix_gamble_mines_user_created", "user_telegram_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    bet: Mapped[int] = mapped_column(Integer)
+    mine_count: Mapped[int] = mapped_column(Integer, default=5)
+    mines_json: Mapped[str] = mapped_column(Text, default="[]")
+    opened_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    payout: Mapped[int] = mapped_column(Integer, default=0)
+    token: Mapped[str] = mapped_column(String(32), index=True)
+    last_action_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class GambleUserStats(Base):
+    __tablename__ = "gamble_user_stats"
+
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    win_streak: Mapped[int] = mapped_column(Integer, default=0)
+    last_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_bet: Mapped[int] = mapped_column(Integer, default=0)
+    total_payout: Mapped[int] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class BotSetting(Base):
     __tablename__ = "bot_settings"
 

@@ -249,7 +249,7 @@ SHOP_ROLE_CATALOG: tuple[RoleShopItem, ...] = (
     RoleShopItem(Role.DON, 2, "diamonds"),
     RoleShopItem(Role.KILLER, 2, "diamonds"),
     RoleShopItem(Role.GUARD, 2, "diamonds"),
-    RoleShopItem(Role.ARSONIST, 1, "diamonds"),
+    RoleShopItem(Role.ARSONIST, 4, "diamonds"),
     RoleShopItem(Role.MAFIA, 1, "diamonds"),
     RoleShopItem(Role.SERGEANT, 1, "diamonds"),
     RoleShopItem(Role.CROOK, 1, "diamonds"),

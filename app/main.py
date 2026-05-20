@@ -16,7 +16,7 @@ from aiogram.types import ErrorEvent, Message
 from app.config import get_settings
 from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
-from app.handlers import admin, callbacks, economy, emoji_debug, game, hero, language, profile, roles, settings as settings_handler, start, top
+from app.handlers import admin, callbacks, economy, emoji_debug, gamble, game, hero, language, profile, roles, settings as settings_handler, start, top
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
 
@@ -117,6 +117,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="lang", description="Tilni o'zgartirish"),
         BotCommand(command="profile", description="Profilingiz"),
         BotCommand(command="shop", description="Do'kon"),
+        BotCommand(command="qimor", description="Mines qimor"),
         BotCommand(command="give", description="Almaz berish"),
         BotCommand(command="gsend", description="Premium guruh reytingi"),
         BotCommand(command="roles", description="Rollar"),
@@ -156,6 +157,7 @@ async def main() -> None:
     dp.include_router(roles.router)
     dp.include_router(profile.router)
     dp.include_router(economy.router)
+    dp.include_router(gamble.router)
     dp.include_router(hero.router)
     dp.include_router(settings_handler.router)
     dp.include_router(top.router)
