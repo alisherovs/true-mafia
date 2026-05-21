@@ -27,6 +27,11 @@ def currency_icon_button(text: str, currency: str, **kwargs: object) -> InlineKe
         return diamond_icon_button(text, **kwargs)
     return dollar_icon_button(text, **kwargs)
 
+
+def safe_text(text: str, limit: int) -> str:
+    value = " ".join((text or "").split())
+    return value if len(value) <= limit else value[: max(1, limit - 1)] + "…"
+
 JOKER_CARD_LABELS = {
     1: "♠️",
     2: "♥️",
@@ -738,6 +743,7 @@ def hero_panel_keyboard(is_for_sale: bool = False) -> InlineKeyboardMarkup:
     )
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🥷 Mening geroylarim", callback_data="hero:list")],
             [InlineKeyboardButton(text="➕ 1000 Ball qo'shish", callback_data="hero:add_points")],
             [InlineKeyboardButton(text="🛡 Himoyani yangilash", callback_data="hero:upgrade_def")],
             [InlineKeyboardButton(text="🩸 Qurolni zaryadlash", callback_data="hero:recharge")],
@@ -746,6 +752,24 @@ def hero_panel_keyboard(is_for_sale: bool = False) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔙 Orqaga", callback_data="shop:open")],
         ]
     )
+
+
+def hero_list_keyboard(heroes: list[object]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for hero in heroes:
+        marker = "✅ " if getattr(hero, "is_active", False) else ""
+        name = safe_text(str(getattr(hero, "name", "Geroy") or "Geroy"), 24)
+        level = int(getattr(hero, "level", 1) or 1)
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{marker}🥷 {name} | ⭐ {level}",
+                    callback_data=f"hero:select:{int(getattr(hero, 'id'))}",
+                )
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="🔙 Geroy paneli", callback_data="hero:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def hero_game_keyboard(can_attack: bool = True) -> InlineKeyboardMarkup:

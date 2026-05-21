@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import BaseFilter
+from aiogram.filters import BaseFilter, Command
 from aiogram.types import CallbackQuery, Message
 
 from app.game_engine import GameEngine
-from app.keyboards import hero_game_keyboard, hero_panel_keyboard, hero_target_keyboard
+from app.keyboards import hero_game_keyboard, hero_list_keyboard, hero_panel_keyboard, hero_target_keyboard
 
 router = Router()
 PENDING_HERO_ACTIONS: dict[int, dict[str, object]] = {}
@@ -52,6 +52,35 @@ async def hero_panel_callback(callback: CallbackQuery, engine: GameEngine) -> No
         return
     await _show_panel(callback, engine)
     await callback.answer()
+
+
+@router.callback_query(F.data == "hero:list")
+async def hero_list_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await _require_private(callback):
+        return
+    ok, text, heroes = await engine.hero_list_text(callback.from_user.id)
+    await callback.message.edit_text(text, reply_markup=hero_list_keyboard(heroes) if ok else None)
+    await callback.answer(text if not ok else None, show_alert=not ok)
+
+
+@router.callback_query(F.data.startswith("hero:select:"))
+async def hero_select_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await _require_private(callback):
+        return
+    raw = callback.data.rsplit(":", maxsplit=1)[-1]
+    if not raw.isdigit():
+        await callback.answer("Bad callback", show_alert=True)
+        return
+    ok, text = await engine.hero_select_active(callback.from_user.id, int(raw))
+    await callback.answer(text, show_alert=True)
+    ok_list, list_text, heroes = await engine.hero_list_text(callback.from_user.id)
+    await callback.message.edit_text(list_text, reply_markup=hero_list_keyboard(heroes) if ok_list else None)
 
 
 @router.callback_query(F.data.in_({"hero:add_points", "hero:upgrade_def", "hero:recharge"}))
@@ -223,6 +252,29 @@ async def hero_game_hp_callback(callback: CallbackQuery, engine: GameEngine) -> 
         can_attack = panel_ok and can_attack
     await callback.message.edit_text(text, reply_markup=hero_game_keyboard(can_attack=can_attack) if ok else None)
     await callback.answer(text if not ok else None, show_alert=not ok)
+
+
+@router.message(Command("geroyinfo"))
+async def hero_info_command(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    ok, text = await engine.hero_info_text(message.from_user.id)
+    await message.answer(text)
+
+
+@router.message(Command("tgeroy"))
+async def hero_transfer_command(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        await message.reply("Bu buyruqni geroy sovg'a qilinadigan user xabariga reply qilib yuboring.")
+        return
+    target = message.reply_to_message.from_user
+    if target.is_bot:
+        await message.reply("Botga geroy sovg'a qilib bo'lmaydi.")
+        return
+    ok, text = await engine.transfer_active_hero(message.bot, message.from_user.id, target)
+    await message.reply(text)
 
 
 @router.message(PendingHeroFilter())

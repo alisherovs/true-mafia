@@ -5937,9 +5937,17 @@ class GameEngine:
                     select(Hero.id)
                     .join(User, User.id == Hero.owner_user_id)
                     .where(User.telegram_id == telegram_id)
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             return hero_id is not None
+
+    async def _set_active_hero(self, session: AsyncSession, owner_user_id: int, hero: Hero) -> None:
+        heroes = (
+            await session.execute(select(Hero).where(Hero.owner_user_id == owner_user_id))
+        ).scalars().all()
+        for item in heroes:
+            item.is_active = item.id == hero.id
 
     @staticmethod
     def _sync_hero_level(hero: Hero) -> None:
@@ -5988,27 +5996,141 @@ class GameEngine:
 
     async def hero_panel_data(self, telegram_id: int) -> tuple[bool, str, bool]:
         async with self.session_factory() as session:
-            row = (
-                await session.execute(
-                    select(Hero)
-                    .join(User, User.id == Hero.owner_user_id)
-                    .where(User.telegram_id == telegram_id)
-                )
-            ).scalar_one_or_none()
+            _, row = await self._hero_owner_row(session, telegram_id)
             if row is None:
                 return False, "❌ Sizda hali geroy yo'q. Do'kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> 100 almazga sotib olishingiz mumkin.", False
             self._sync_hero_level(row)
             await session.commit()
             return True, self._hero_panel_text(row), bool(row.is_for_sale)
 
+    async def hero_list_text(self, telegram_id: int) -> tuple[bool, str, list[Hero]]:
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None:
+                return False, "Avval /start bosing.", []
+            heroes = (
+                await session.execute(
+                    select(Hero)
+                    .where(Hero.owner_user_id == user.id)
+                    .order_by(Hero.is_active.desc(), Hero.level.desc(), Hero.id.desc())
+                )
+            ).scalars().all()
+            if not heroes:
+                return False, "❌ Sizda hali geroy yo'q.", []
+            active = next((hero for hero in heroes if hero.is_active), None)
+            if active is None:
+                active = heroes[0]
+                await self._set_active_hero(session, user.id, active)
+                await session.commit()
+            for hero in heroes:
+                self._sync_hero_level(hero)
+            await session.commit()
+            lines = ["🥷 <b>Mening geroylarim</b>", "━━━━━━━━━━━━━━━", ""]
+            for idx, hero in enumerate(heroes, 1):
+                mark = "✅ " if hero.is_active else ""
+                lines.append(
+                    f"{idx}. {mark}<b>{safe_hero_name(hero.name)}</b> | ⭐ <b>{int(hero.level or 1)}</b> | "
+                    f"🏆 <b>{int(hero.points or 0)}</b>"
+                )
+            lines.append("\nPastdan aktiv ishlatiladigan geroyni tanlang.")
+            return True, "\n".join(lines), heroes
+
+    async def hero_select_active(self, telegram_id: int, hero_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
+            if user is None:
+                return False, "Avval /start bosing."
+            hero = (
+                await session.execute(select(Hero).where(Hero.id == hero_id, Hero.owner_user_id == user.id))
+            ).scalar_one_or_none()
+            if hero is None:
+                return False, "Bu geroy sizga tegishli emas."
+            if hero.is_for_sale:
+                return False, "Sotuvdagi geroyni aktiv qilib bo'lmaydi. Avval sotuvdan qaytaring."
+            await self._set_active_hero(session, user.id, hero)
+            await session.commit()
+            return True, f"✅ Aktiv geroy tanlandi: {safe_hero_name(hero.name)}"
+
+    async def hero_info_text(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            _, hero = await self._hero_owner_row(session, telegram_id)
+            if hero is None:
+                return False, "❌ Sizda hali geroy yo'q."
+            self._sync_hero_level(hero)
+            await session.commit()
+            return True, self._hero_panel_text(hero)
+
+    async def transfer_active_hero(self, bot: Bot, from_telegram_id: int, target_tg: TgUser) -> tuple[bool, str]:
+        if int(target_tg.id) == int(from_telegram_id):
+            return False, "O'zingizga geroy sovg'a qila olmaysiz."
+        async with self.session_factory() as session:
+            sender, hero = await self._hero_owner_row(session, from_telegram_id)
+            if sender is None or hero is None:
+                return False, "❌ Sizda sovg'a qiladigan aktiv geroy yo'q."
+            if hero.is_for_sale:
+                return False, "Sotuvdagi geroyni sovg'a qilib bo'lmaydi. Avval sotuvdan qaytaring."
+            receiver = (
+                await session.execute(select(User).where(User.telegram_id == target_tg.id))
+            ).scalar_one_or_none()
+            if receiver is None:
+                receiver = User(
+                    telegram_id=target_tg.id,
+                    username=target_tg.username,
+                    display_name=(target_tg.full_name or "User")[:255],
+                    language="uz",
+                )
+                session.add(receiver)
+                await session.flush()
+            else:
+                receiver.username = target_tg.username
+                receiver.display_name = (target_tg.full_name or receiver.display_name or "User")[:255]
+            receiver_has_active = (
+                await session.execute(select(Hero.id).where(Hero.owner_user_id == receiver.id, Hero.is_active.is_(True)).limit(1))
+            ).scalar_one_or_none()
+            old_owner_id = sender.id
+            hero_name = safe_hero_name(hero.name)
+            hero.owner_user_id = receiver.id
+            hero.is_active = receiver_has_active is None
+            hero.is_for_sale = False
+            hero.sale_price_diamonds = None
+            hero.sale_channel_message_id = None
+            next_sender_hero = (
+                await session.execute(
+                    select(Hero)
+                    .where(Hero.owner_user_id == old_owner_id, Hero.id != hero.id)
+                    .order_by(Hero.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if next_sender_hero is not None:
+                next_sender_hero.is_active = True
+            await session.commit()
+
+        receiver_link = self._tg_mention(target_tg.id, target_tg.full_name or str(target_tg.id))
+        sender_link = self._tg_mention(from_telegram_id, sender.display_name if sender else str(from_telegram_id))
+        try:
+            await bot.send_message(
+                target_tg.id,
+                "🎁 <b>Sizga geroy sovg'a qilindi!</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"🥷 Geroy: <b>{hero_name}</b>\n"
+                f"👤 Yuboruvchi: {sender_link}\n"
+                "━━━━━━━━━━━━━━━\n"
+                "Aktiv geroyni tanlash uchun botda 🥷 Mening geroylarim bo'limidan foydalaning.",
+            )
+            dm = "✅ Userga xabar yuborildi."
+        except (TelegramBadRequest, TelegramForbiddenError):
+            dm = "⚠️ Userga private xabar yuborilmadi."
+        return True, f"🎁 <b>{hero_name}</b> geroyi {receiver_link}ga sovg'a qilindi.\n{dm}"
+
     async def buy_hero(self, telegram_id: int) -> tuple[bool, str]:
         async with self.session_factory() as session:
             user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
             if user is None:
                 return False, "Avval /start bosing."
-            existing = (await session.execute(select(Hero.id).where(Hero.owner_user_id == user.id))).scalar_one_or_none()
-            if existing is not None:
-                return False, "Sizda allaqachon geroy bor."
+            has_active = (
+                await session.execute(select(Hero.id).where(Hero.owner_user_id == user.id, Hero.is_active.is_(True)).limit(1))
+            ).scalar_one_or_none()
             if int(user.diamonds or 0) < HERO_BUY_PRICE_DIAMONDS:
                 return False, f"❌ Almaz yetarli emas. Kerak: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {HERO_BUY_PRICE_DIAMONDS}, Sizda: <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {user.diamonds or 0}"
             user.diamonds -= HERO_BUY_PRICE_DIAMONDS
@@ -6028,13 +6150,10 @@ class GameEngine:
                 max_defense=HERO_FULL_DEFENSE_PERCENT,
                 charge=HERO_DEFAULT_CHARGE,
                 max_charge=HERO_MAX_CHARGE,
+                is_active=has_active is None,
             )
             session.add(hero)
-            try:
-                await session.commit()
-            except IntegrityError:
-                await session.rollback()
-                return False, "Sizda allaqachon geroy bor."
+            await session.commit()
         return True, "✅ Tabriklaymiz! Siz 🥷 Geroy sotib oldingiz."
 
     async def hero_add_points(self, telegram_id: int) -> tuple[bool, str]:
@@ -6109,7 +6228,16 @@ class GameEngine:
         user = (await session.execute(select(User).where(User.telegram_id == telegram_id))).scalar_one_or_none()
         if user is None:
             return None, None
-        hero = (await session.execute(select(Hero).where(Hero.owner_user_id == user.id))).scalar_one_or_none()
+        heroes = (
+            await session.execute(
+                select(Hero)
+                .where(Hero.owner_user_id == user.id)
+                .order_by(Hero.is_active.desc(), Hero.id.desc())
+            )
+        ).scalars().all()
+        hero = heroes[0] if heroes else None
+        if hero is not None and not hero.is_active:
+            await self._set_active_hero(session, user.id, hero)
         return user, hero
 
     async def get_hero_market_channel_id(self) -> Optional[str]:
@@ -6267,8 +6395,6 @@ class GameEngine:
             buyer = (await session.execute(select(User).where(User.telegram_id == buyer_telegram_id))).scalar_one_or_none()
             if buyer is None:
                 return False, "Avval /start bosing."
-            if (await session.execute(select(Hero.id).where(Hero.owner_user_id == buyer.id))).scalar_one_or_none() is not None:
-                return False, "❌ Avval o'z geroyingizni soting yoki sotuvdan chiqaring."
             hero = (
                 await session.execute(select(Hero).where(Hero.id == hero_id).with_for_update())
             ).scalar_one_or_none()
@@ -6303,10 +6429,27 @@ class GameEngine:
             seller_telegram_id = seller.telegram_id
             seller_text = f"✅ Geroyingiz sotildi. Hisobingizga <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {price} almaz qo'shildi."
             message_id = hero.sale_channel_message_id
+            seller_owner_id = seller.id
+            was_seller_active = bool(hero.is_active)
+            buyer_has_active = (
+                await session.execute(select(Hero.id).where(Hero.owner_user_id == buyer.id, Hero.is_active.is_(True)).limit(1))
+            ).scalar_one_or_none()
             hero.owner_user_id = buyer.id
+            hero.is_active = buyer_has_active is None
             hero.is_for_sale = False
             hero.sale_price_diamonds = None
             hero.sale_channel_message_id = None
+            if was_seller_active:
+                next_seller_hero = (
+                    await session.execute(
+                        select(Hero)
+                        .where(Hero.owner_user_id == seller_owner_id, Hero.id != hero.id)
+                        .order_by(Hero.id.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if next_seller_hero is not None:
+                    next_seller_hero.is_active = True
             await session.commit()
         if channel_id and message_id:
             try:
@@ -6352,6 +6495,7 @@ class GameEngine:
                 .where(
                     Game.status == GameStatus.ACTIVE.value,
                     GamePlayer.telegram_id == telegram_id,
+                    Hero.is_active.is_(True),
                 )
                 .order_by(Game.id.desc())
             )
@@ -6502,7 +6646,8 @@ class GameEngine:
                     await session.execute(
                         select(Hero)
                         .join(User, User.id == Hero.owner_user_id)
-                        .where(User.telegram_id == target.telegram_id)
+                        .where(User.telegram_id == target.telegram_id, Hero.is_active.is_(True))
+                        .limit(1)
                     )
                 ).scalar_one_or_none()
             if info.max_hit:
@@ -6626,6 +6771,7 @@ class GameEngine:
                         Game.status == GameStatus.ACTIVE.value,
                         Game.phase == GamePhase.DAY_DISCUSSION.value,
                         GamePlayer.alive.is_(True),
+                        Hero.is_active.is_(True),
                         Hero.is_for_sale.is_(False),
                     )
                 )

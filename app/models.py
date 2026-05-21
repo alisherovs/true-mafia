@@ -146,8 +146,8 @@ class GamePlayer(Base):
 class Hero(Base):
     __tablename__ = "heroes"
     __table_args__ = (
-        UniqueConstraint("owner_user_id", name="uq_hero_owner"),
         Index("ix_heroes_for_sale", "is_for_sale", "sale_price_diamonds"),
+        Index("ix_heroes_owner_active", "owner_user_id", "is_active"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -159,6 +159,7 @@ class Hero(Base):
     max_defense: Mapped[float] = mapped_column(Float, default=0.0)
     charge: Mapped[int] = mapped_column(Integer, default=10)
     max_charge: Mapped[int] = mapped_column(Integer, default=10)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
     is_for_sale: Mapped[bool] = mapped_column(Boolean, default=False)
     sale_price_diamonds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     sale_channel_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)

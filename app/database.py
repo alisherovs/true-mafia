@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from contextlib import suppress
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -175,6 +176,13 @@ async def _ensure_lightweight_columns(conn) -> None:
             "game_kind": "VARCHAR(16) DEFAULT 'duel'",
         },
     )
+    await add_missing_columns(
+        "heroes",
+        {
+            "is_active": "BOOLEAN DEFAULT FALSE",
+        },
+    )
+    await _drop_sqlite_hero_owner_unique(conn)
 
     def missing_columns(sync_conn) -> set[str]:
         inspector = inspect(sync_conn)
@@ -229,8 +237,24 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_game_players_telegram_alive ON game_players(telegram_id, alive)")
     )
-    await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_hero_owner ON heroes(owner_user_id)"))
+    with suppress(Exception):
+        await conn.execute(text("DROP INDEX IF EXISTS uq_hero_owner"))
+    with suppress(Exception):
+        await conn.execute(text("ALTER TABLE heroes DROP CONSTRAINT uq_hero_owner"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_heroes_owner_user_id ON heroes(owner_user_id)"))
+    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_heroes_owner_active ON heroes(owner_user_id, is_active)"))
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_heroes_for_sale ON heroes(is_for_sale, sale_price_diamonds)"))
+    await conn.execute(
+        text(
+            "UPDATE heroes SET is_active = TRUE WHERE id IN ("
+            "SELECT latest_id FROM ("
+            "SELECT MAX(id) AS latest_id FROM heroes GROUP BY owner_user_id "
+            "HAVING SUM(CASE WHEN is_active THEN 1 ELSE 0 END) = 0"
+            ")"
+            ")"
+        )
+    )
+
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_premium_groups_total_diamonds ON premium_groups(total_diamonds)")
     )
@@ -323,3 +347,54 @@ async def _ensure_lightweight_columns(conn) -> None:
         await conn.execute(text("DROP TABLE IF EXISTS group_extra_settings"))
         from app.database import Base as _Base
         await conn.run_sync(_Base.metadata.create_all)
+
+
+async def _drop_sqlite_hero_owner_unique(conn) -> None:
+    if conn.dialect.name != "sqlite":
+        return
+    row = (
+        await conn.execute(
+            text("SELECT sql FROM sqlite_master WHERE type='table' AND name='heroes'")
+        )
+    ).first()
+    sql = row[0] if row else ""
+    if "uq_hero_owner" not in (sql or ""):
+        return
+    await conn.execute(text("PRAGMA foreign_keys=OFF"))
+    await conn.execute(
+        text(
+            "CREATE TABLE heroes_new ("
+            "id INTEGER NOT NULL PRIMARY KEY, "
+            "owner_user_id INTEGER NOT NULL, "
+            "name VARCHAR(20) NOT NULL, "
+            "points INTEGER NOT NULL, "
+            "level INTEGER NOT NULL, "
+            "current_defense INTEGER NOT NULL, "
+            "max_defense FLOAT NOT NULL, "
+            "charge INTEGER NOT NULL, "
+            "max_charge INTEGER NOT NULL, "
+            "is_active BOOLEAN DEFAULT FALSE, "
+            "is_for_sale BOOLEAN NOT NULL, "
+            "sale_price_diamonds INTEGER, "
+            "sale_channel_message_id BIGINT, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+            "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, "
+            "FOREIGN KEY(owner_user_id) REFERENCES users (id)"
+            ")"
+        )
+    )
+    await conn.execute(
+        text(
+            "INSERT INTO heroes_new ("
+            "id, owner_user_id, name, points, level, current_defense, max_defense, "
+            "charge, max_charge, is_active, is_for_sale, sale_price_diamonds, "
+            "sale_channel_message_id, created_at, updated_at"
+            ") "
+            "SELECT id, owner_user_id, name, points, level, current_defense, max_defense, "
+            "charge, max_charge, COALESCE(is_active, FALSE), is_for_sale, sale_price_diamonds, "
+            "sale_channel_message_id, created_at, updated_at FROM heroes"
+        )
+    )
+    await conn.execute(text("DROP TABLE heroes"))
+    await conn.execute(text("ALTER TABLE heroes_new RENAME TO heroes"))
+    await conn.execute(text("PRAGMA foreign_keys=ON"))
