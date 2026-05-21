@@ -7549,6 +7549,46 @@ class GameEngine:
             )
         return "\n".join(lines)
 
+    async def owner_dollar_top_text(self, limit: int = 30) -> str:
+        safe_limit = max(1, min(int(limit or 30), 50))
+        async with self.session_factory() as session:
+            users = (
+                await session.execute(
+                    select(User)
+                    .where(User.telegram_id > 0, User.dollar > 0)
+                    .order_by(User.dollar.desc(), User.updated_at.desc(), User.id.asc())
+                    .limit(safe_limit)
+                )
+            ).scalars().all()
+            total_users = await session.scalar(
+                select(func.count(User.id)).where(User.telegram_id > 0, User.dollar > 0)
+            )
+            total_dollars = await session.scalar(
+                select(func.coalesce(func.sum(User.dollar), 0)).where(User.telegram_id > 0)
+            )
+
+        if not users:
+            return (
+                "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> <b>TOP 30 dollar balansi</b>\n\n"
+                "Hozircha dollar balansi bor user topilmadi."
+            )
+
+        lines = [
+            "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> <b>TOP 30 dollar balansi</b>",
+            "",
+            f"👥 Dollarli userlar: <b>{int(total_users or 0)}</b>",
+            f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Jami user dollarlari: <b>{int(total_dollars or 0)}</b>",
+            "",
+        ]
+        for idx, user in enumerate(users, 1):
+            mention = self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))
+            lines.append(
+                f"{idx}. {mention} — "
+                f"<b>{int(user.dollar or 0)}</b> <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> | "
+                f"ID: <code>{user.telegram_id}</code>"
+            )
+        return "\n".join(lines)
+
     @staticmethod
     def _diamond_action_label(action: str) -> str:
         labels = {

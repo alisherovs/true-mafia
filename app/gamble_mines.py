@@ -1,63 +1,37 @@
 from __future__ import annotations
 
-import json
 import asyncio
-import random
+import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import escape
-from math import floor
 from typing import Optional
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from sqlalchemy import desc, func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from sqlalchemy import desc, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import DollarTransaction, GambleMinesGame, GambleUserStats, User
 
 
 GRID_SIZE = 36
 GRID_WIDTH = 6
+PICKS_PER_PLAYER = 3
+DUEL_MINE_COUNT = 6
+HOUSE_COMMISSION_RATE = 0.10
 MIN_BET = 10
 DAILY_WIN_LIMIT = 50_000
 COOLDOWN_SECONDS = 20
-MAX_PAYOUT = DAILY_WIN_LIMIT
-HOUSE_PAYOUT_FACTOR = 0.92
-_GAME_LOCKS: dict[int, asyncio.Lock] = {}
-RICH_TAX_TIERS = (
-    (1_000_000, 0.20),
-    (250_000, 0.12),
-    (100_000, 0.07),
-)
 MONEY_EMOJI_ID = "5409048419211682843"
-DIAMOND_EMOJI_ID = "5427168083074628963"
-MINE_EMOJI_ID = "5469654973308476699"
 GIFT_EMOJI_ID = "5199749070830197566"
 BANK_EMOJI_ID = "5264895611517300926"
+MINE_EMOJI_ID = "5469654973308476699"
+_GAME_LOCKS: dict[int, asyncio.Lock] = {}
 
 
 def _ce(symbol: str, emoji_id: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
-
-VISIBLE_MULTIPLIERS = {
-    0: 1.00,
-    1: 1.08,
-    2: 1.18,
-    3: 1.35,
-    4: 1.55,
-    5: 1.80,
-    6: 2.25,
-    7: 2.80,
-    8: 3.50,
-    9: 4.30,
-    10: 5.00,
-    11: 6.70,
-    12: 8.80,
-    13: 11.00,
-    14: 13.00,
-    15: 15.00,
-}
 
 
 @dataclass(frozen=True)
@@ -121,114 +95,116 @@ class MinesEconomyService:
         )
 
 
-class MinesMath:
-    @staticmethod
-    def visible_multiplier(opened_count: int) -> float:
-        if opened_count <= 15:
-            return VISIBLE_MULTIPLIERS.get(opened_count, 15.0)
-        extra = min(opened_count - 15, 6)
-        return min(15.0, 15.0 + extra * 0.0)
-
-    @staticmethod
-    def rich_tax(balance_after_bet: int) -> float:
-        for threshold, tax in RICH_TAX_TIERS:
-            if balance_after_bet >= threshold:
-                return tax
-        return 0.0
-
-    @staticmethod
-    def streak_bonus_rate(streak: int, opened_count: int, bet: int) -> float:
-        if streak <= 0 or opened_count < 3 or bet < 50:
-            return 0.0
-        return min(0.03, streak * 0.005)
-
-    @classmethod
-    def payout(cls, bet: int, opened_count: int, balance_after_bet: int, streak: int) -> int:
-        if opened_count <= 0:
-            return 0
-        multiplier = cls.visible_multiplier(opened_count)
-        base = bet * multiplier * HOUSE_PAYOUT_FACTOR
-        base *= 1 - cls.rich_tax(balance_after_bet)
-        base *= 1 + cls.streak_bonus_rate(streak, opened_count, bet)
-        payout = floor(base)
-        if opened_count == 1:
-            payout = max(payout, bet)
-        return max(0, min(MAX_PAYOUT, payout))
-
-
 class MinesRenderer:
     @staticmethod
-    def keyboard(game: GambleMinesGame, reveal: bool = False) -> InlineKeyboardMarkup:
-        mines = _loads_int_set(game.mines_json)
-        opened = _loads_int_set(game.opened_json)
+    def keyboard(game: GambleMinesGame) -> InlineKeyboardMarkup | None:
+        if game.status == "waiting":
+            return InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🎮 Qimorga qo'shilish", callback_data=f"gm:j:{game.id}:{game.token}")]
+                ]
+            )
+        if game.status != "active":
+            return None
+
+        state = _state(game)
+        picks = _picks(game)
+        picked_cells = _picked_cells(picks)
         rows: list[list[InlineKeyboardButton]] = []
         for row_idx in range(GRID_WIDTH):
             row: list[InlineKeyboardButton] = []
             for col_idx in range(GRID_WIDTH):
                 cell = row_idx * GRID_WIDTH + col_idx
-                if cell in opened:
-                    text = "💎"
-                    callback = f"gm:noop:{game.id}:{game.token}:{cell}"
-                elif reveal and cell in mines:
-                    text = "💣"
-                    callback = f"gm:noop:{game.id}:{game.token}:{cell}"
-                elif reveal:
-                    text = "▫️"
+                opened = picked_cells.get(cell)
+                if opened is not None:
+                    text = "💣" if opened.get("mine") else f"{int(opened.get('value') or 0):02d}"
                     callback = f"gm:noop:{game.id}:{game.token}:{cell}"
                 else:
                     text = "⬜"
-                    callback = f"gm:o:{game.id}:{game.token}:{cell}"
+                    callback = f"gm:p:{game.id}:{game.token}:{cell}"
                 row.append(InlineKeyboardButton(text=text, callback_data=callback))
             rows.append(row)
-        if game.status == "active":
-            rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"gm:c:{game.id}:{game.token}")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod
-    def text(game: GambleMinesGame, *, balance: int = 0, streak: int = 0, result: str = "") -> str:
-        opened_count = len(_loads_int_set(game.opened_json))
-        multiplier = MinesMath.visible_multiplier(opened_count)
-        potential = int(game.payout or 0)
-        mine_hint = max(1, int(game.mine_count or 5))
-        bonus_rate = MinesMath.streak_bonus_rate(streak, opened_count, int(game.bet))
-        rich_tax = MinesMath.rich_tax(balance)
-        economy_line = ""
-        if bonus_rate > 0:
-            economy_line += f"{_ce('🎁', GIFT_EMOJI_ID)} Streak bonus: <b>+{bonus_rate * 100:.1f}%</b>\n"
-        if rich_tax > 0:
-            economy_line += f"{_ce('🏦', BANK_EMOJI_ID)} Rich tax: <b>-{rich_tax * 100:.0f}%</b>\n"
-        status_line = {
-            "active": "🎲 <b>Qimor: Mines</b>",
-            "lost": "💥 <b>Mina portladi!</b>",
-            "cashed": "✅ <b>Pul olindi!</b>",
-        }.get(game.status, "🎲 <b>Qimor: Mines</b>")
-        footer = result or (
-            "Katak tanlang yoki yutuqni vaqtida oling."
-            if opened_count
-            else "36 ta katakdan birini tanlang. Mina tushsa stavka kuyadi."
-        )
+    def text(game: GambleMinesGame, *, result: str = "") -> str:
+        state = _state(game)
+        picks = _picks(game)
+        players = _players(game, state)
+        creator_id = players[0] if players else int(game.user_telegram_id)
+        opponent_id = players[1] if len(players) > 1 else int(game.opponent_telegram_id or 0)
+        creator_name = _name(state, creator_id)
+        opponent_name = _name(state, opponent_id) if opponent_id else "Ikkinchi o'yinchi"
+        creator_link = _user_link(creator_id, creator_name)
+        opponent_link = _user_link(opponent_id, opponent_name) if opponent_id else escape(opponent_name)
+        creator_sum = _score(picks, creator_id)
+        opponent_sum = _score(picks, opponent_id) if opponent_id else 0
+        creator_count = len(_player_picks(picks, creator_id))
+        opponent_count = len(_player_picks(picks, opponent_id)) if opponent_id else 0
+        creator_mined = _player_mined(picks, creator_id)
+        opponent_mined = _player_mined(picks, opponent_id) if opponent_id else False
+
+        if game.status == "waiting":
+            return (
+                f"🎲 <b>2 kishilik Qimor</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} Stavka: <b>{int(game.bet)}</b> dollar\n"
+                f"👤 Yaratuvchi: {creator_link}\n"
+                "👥 Kerak: <b>2 ta o'yinchi</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                "Ikkinchi o'yinchi qo'shilsa, o'yin avtomatik boshlanadi."
+            )
+
+        if game.status == "cashed":
+            winner_id = int(game.winner_telegram_id or 0)
+            winner_name = _name(state, winner_id)
+            winner = _user_link(winner_id, winner_name) if winner_id else "G'olib"
+            pot = int(game.bet) * 2
+            commission = max(0, pot - int(game.payout or 0))
+            return (
+                f"🏆 <b>Qimor yakunlandi</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"🥇 G'olib: {winner}\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} Yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
+                f"🏦 Komissiya: <b>{commission}</b> dollar\n"
+                f"🔢 Hisob: <b>{creator_sum}</b> : <b>{opponent_sum}</b>\n"
+                "━━━━━━━━━━━━━━━"
+            )
+
+        if game.status == "draw":
+            return (
+                "🤝 <b>Qimor durrang tugadi</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"{creator_link}: <b>{creator_sum}</b>\n"
+                f"{opponent_link}: <b>{opponent_sum}</b>\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} Stavkalar qaytarildi.\n"
+                "━━━━━━━━━━━━━━━"
+            )
+
+        if game.status == "lost":
+            return (
+                f"{_ce('💣', MINE_EMOJI_ID)} <b>Qimor yakunlandi</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                "Ikkala ishtirokchi ham minani ochdi.\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} Bank: <b>{int(game.bet) * 2}</b> dollar kuyib ketdi.\n"
+                "━━━━━━━━━━━━━━━"
+            )
+
+        turn_id = int(state.get("turn") or creator_id)
+        turn_name = _name(state, turn_id)
+        footer = result or "Navbatdagi o'yinchi bitta katak tanlaydi."
         return (
-            f"{status_line}\n"
+            f"🎲 <b>2 kishilik Qimor</b>\n"
             "━━━━━━━━━━━━━━━\n"
             f"{_ce('💵', MONEY_EMOJI_ID)} Stavka: <b>{int(game.bet)}</b> dollar\n"
-            f"📈 Multiplier: <b>x{multiplier:.2f}</b>\n"
-            f"{_ce('💵', MONEY_EMOJI_ID)} Hozirgi yutuq: <b>{potential}</b> dollar\n"
-            f"{_ce('💎', DIAMOND_EMOJI_ID)} Ochilgan safe: <b>{opened_count}</b> ta\n"
-            f"{_ce('💣', MINE_EMOJI_ID)} Qolgan mina taxmini: <b>{mine_hint}</b> ta\n"
-            f"🔥 Streak: <b>{int(streak)}</b>\n"
-            f"{economy_line}"
-            f"{_ce('🏦', BANK_EMOJI_ID)} Balans: <b>{int(balance)}</b> dollar\n"
+            f"🏦 Bank: <b>{int(game.bet) * 2}</b> dollar\n"
+            f"{_ce('💣', MINE_EMOJI_ID)} Mina: <b>yashirin</b>\n"
+            f"🔵 {creator_link}: <b>{creator_sum}</b> ({creator_count}/{PICKS_PER_PLAYER}){' 💣' if creator_mined else ''}\n"
+            f"🔴 {opponent_link}: <b>{opponent_sum}</b> ({opponent_count}/{PICKS_PER_PLAYER}){' 💣' if opponent_mined else ''}\n"
+            f"👉 Navbat: {_user_link(turn_id, turn_name)}\n"
             "━━━━━━━━━━━━━━━\n"
             f"{footer}"
         )
-
-    @staticmethod
-    def final_text(game: GambleMinesGame) -> str:
-        if game.status == "cashed":
-            return f"{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.payout or 0)}</b> dollar yutdingiz!"
-        if game.status == "lost":
-            return f"{_ce('💣', MINE_EMOJI_ID)} Mina portladi!\n{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.bet or 0)}</b> dollar kuyib ketdi."
-        return MinesRenderer.text(game)
 
 
 class MinesEngine:
@@ -239,16 +215,16 @@ class MinesEngine:
         async with self.session_factory() as session:
             user = await self._ensure_user(session, tg_user)
             active = await self._active_game(session, tg_user.id)
-            stats = await self._stats(session, tg_user.id)
+            if active is not None and not _is_duel_game(active):
+                await self._refund_legacy_game(session, active)
+                active = None
+
             if active is not None:
                 active.chat_id = chat_id
-                active.payout = MinesMath.payout(
-                    int(active.bet), len(_loads_int_set(active.opened_json)), int(user.dollar or 0), int(stats.win_streak or 0)
-                )
                 active.last_action_at = _utcnow()
                 await session.commit()
                 return MinesView(
-                    MinesRenderer.text(active, balance=int(user.dollar or 0), streak=int(stats.win_streak or 0), result="Davom etayotgan o'yiningiz tiklandi."),
+                    MinesRenderer.text(active, result="Davom etayotgan qimoringiz tiklandi."),
                     MinesRenderer.keyboard(active),
                     "Davom etayotgan o'yin ochildi.",
                     False,
@@ -260,6 +236,7 @@ class MinesEngine:
             if not ok:
                 return MinesView(error, None, error, True)
 
+            stats = await self._stats(session, tg_user.id)
             now = _utcnow()
             if stats.last_started_at and _ensure_aware(stats.last_started_at) + timedelta(seconds=COOLDOWN_SECONDS) > now:
                 wait = int((_ensure_aware(stats.last_started_at) + timedelta(seconds=COOLDOWN_SECONDS) - now).total_seconds())
@@ -271,16 +248,18 @@ class MinesEngine:
             user.dollar = int(user.dollar or 0) - bet
             stats.last_started_at = now
             stats.total_bet = int(stats.total_bet or 0) + bet
-            mine_count = random.choices([4, 5, 6], weights=[20, 40, 40], k=1)[0]
-            mines = sorted(secrets.SystemRandom().sample(range(GRID_SIZE), mine_count))
+            state = _new_state(tg_user.id, getattr(tg_user, "full_name", None) or user.display_name or "User")
             game = GambleMinesGame(
                 user_telegram_id=tg_user.id,
+                opponent_telegram_id=None,
+                winner_telegram_id=None,
                 chat_id=chat_id,
                 bet=bet,
-                mine_count=mine_count,
-                mines_json=json.dumps(mines),
-                opened_json="[]",
-                status="active",
+                mine_count=0,
+                mines_json=json.dumps(state, ensure_ascii=False),
+                opened_json=json.dumps({"picks": {}, "order": []}, ensure_ascii=False),
+                status="waiting",
+                game_kind="duel",
                 multiplier=1.0,
                 payout=0,
                 token=secrets.token_hex(5),
@@ -292,13 +271,13 @@ class MinesEngine:
                 session,
                 user,
                 -bet,
-                "gamble_mines_bet",
-                note=f"Mines stavka #{game.id}",
+                "gamble_duel_bet",
+                note=f"Qimor duel stavka #{game.id}",
                 chat_id=chat_id,
             )
             await session.commit()
             return MinesView(
-                MinesRenderer.text(game, balance=int(user.dollar or 0), streak=int(stats.win_streak or 0)),
+                MinesRenderer.text(game),
                 MinesRenderer.keyboard(game),
                 game_id=int(game.id),
                 token=game.token,
@@ -311,12 +290,62 @@ class MinesEngine:
                     select(GambleMinesGame).where(GambleMinesGame.id == game_id, GambleMinesGame.token == token)
                 )
             ).scalar_one_or_none()
-            if game and game.message_id is None:
+            if game and game.message_id != message_id:
                 game.message_id = message_id
                 await session.commit()
-            elif game and game.message_id != message_id:
-                game.message_id = message_id
+
+    async def join(self, tg_user, game_id: int, token: str) -> MinesView:
+        lock = _game_lock(game_id)
+        await lock.acquire()
+        try:
+            async with self.session_factory() as session:
+                game = await self._game_for_update(session, game_id, token)
+                if game is None or not _is_duel_game(game):
+                    return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
+                if game.status != "waiting":
+                    return MinesView(MinesRenderer.text(game), MinesRenderer.keyboard(game), "Bu o'yin allaqachon boshlangan.", True)
+                if int(game.user_telegram_id) == int(tg_user.id):
+                    return MinesView("", None, "O'z o'yiningizga ikkinchi o'yinchi bo'lib kira olmaysiz.", True)
+                active = await self._active_game(session, tg_user.id)
+                if active is not None and int(active.id) != int(game.id):
+                    return MinesView("", None, "Sizda boshqa davom etayotgan qimor bor.", True)
+
+                user = await self._ensure_user(session, tg_user)
+                if int(user.dollar or 0) < int(game.bet):
+                    return MinesView("", None, "Balans yetarli emas.", True)
+
+                now = _utcnow()
+                stats = await self._stats(session, tg_user.id)
+                user.dollar = int(user.dollar or 0) - int(game.bet)
+                stats.total_bet = int(stats.total_bet or 0) + int(game.bet)
+                state = _state(game)
+                state["players"] = [int(game.user_telegram_id), int(tg_user.id)]
+                state["turn"] = int(game.user_telegram_id)
+                state["values"] = [secrets.randbelow(99) + 1 for _ in range(GRID_SIZE)]
+                state["mines"] = sorted(secrets.SystemRandom().sample(range(GRID_SIZE), DUEL_MINE_COUNT))
+                state["mine_pending"] = 0
+                state.setdefault("names", {})[str(tg_user.id)] = (getattr(tg_user, "full_name", None) or user.display_name or "User")[:255]
+                game.opponent_telegram_id = int(tg_user.id)
+                game.status = "active"
+                game.mines_json = json.dumps(state, ensure_ascii=False)
+                game.last_action_at = now
+                MinesEconomyService.record_dollar(
+                    session,
+                    user,
+                    -int(game.bet),
+                    "gamble_duel_bet",
+                    note=f"Qimor duelga qo'shildi #{game.id}",
+                    chat_id=game.chat_id,
+                )
                 await session.commit()
+                return MinesView(
+                    MinesRenderer.text(game, result="O'yin boshlandi. Har bir o'yinchi 3 tadan katak tanlaydi."),
+                    MinesRenderer.keyboard(game),
+                    "O'yin boshlandi.",
+                    False,
+                )
+        finally:
+            lock.release()
 
     async def open_cell(self, tg_user_id: int, game_id: int, token: str, cell: int) -> MinesView:
         if cell < 0 or cell >= GRID_SIZE:
@@ -326,123 +355,96 @@ class MinesEngine:
         try:
             async with self.session_factory() as session:
                 game = await self._game_for_update(session, game_id, token)
-                if game is None:
+                if game is None or not _is_duel_game(game):
                     return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
-                if game.user_telegram_id != tg_user_id:
-                    return MinesView("", None, "Bu boshqa o'yinchining qimori.", True)
-                user = await self._user(session, tg_user_id)
-                stats = await self._stats(session, tg_user_id)
+                if game.status == "waiting":
+                    return MinesView("", None, "Ikkinchi o'yinchi qo'shilmagan.", True)
                 if game.status != "active":
-                    return MinesView(
-                        MinesRenderer.final_text(game),
-                        None,
-                        "Bu o'yin yakunlangan.",
-                        True,
-                    )
-                mines = _loads_int_set(game.mines_json)
-                opened = _loads_int_set(game.opened_json)
-                if cell in opened:
-                    return MinesView("", None, "Bu katak allaqachon ochilgan.", True)
+                    return MinesView(MinesRenderer.text(game), None, "Bu o'yin yakunlangan.", True)
+
+                state = _state(game)
+                picks = _picks(game)
+                players = _players(game, state)
+                if int(tg_user_id) not in players:
+                    return MinesView("", None, "Bu boshqa o'yinchilarning qimori.", True)
+                if int(state.get("turn") or 0) != int(tg_user_id):
+                    return MinesView("", None, "Hozir sizning navbatingiz emas.", True)
+                if cell in _picked_cells(picks):
+                    return MinesView("", None, "Bu katak allaqachon tanlangan.", True)
+                pending_mine_user = int(state.get("mine_pending") or 0)
+                is_mine_response = pending_mine_user and pending_mine_user != int(tg_user_id)
+                if len(_player_picks(picks, tg_user_id)) >= PICKS_PER_PLAYER and not is_mine_response:
+                    return MinesView("", None, "Siz 3 ta imkoniyatdan foydalandingiz.", True)
+
+                values = state.get("values")
+                if not isinstance(values, list) or len(values) < GRID_SIZE:
+                    state["values"] = [secrets.randbelow(99) + 1 for _ in range(GRID_SIZE)]
+                    values = state["values"]
+                mines = _mine_cells(state)
+                is_mine = cell in mines
+                value = 0 if is_mine else int(values[cell])
+                player_key = str(tg_user_id)
+                picks.setdefault("picks", {}).setdefault(player_key, []).append({"cell": cell, "value": value, "mine": is_mine})
+                picks.setdefault("order", []).append({"user": int(tg_user_id), "cell": cell, "value": value, "mine": is_mine})
 
                 now = _utcnow()
+                game.opened_json = json.dumps(picks, ensure_ascii=False)
                 game.last_action_at = now
-                if cell in mines:
-                    game.status = "lost"
-                    game.ended_at = now
-                    game.payout = 0
-                    stats.win_streak = 0
+                if is_mine and pending_mine_user and pending_mine_user != int(tg_user_id):
+                    state["mine_pending"] = 0
+                    await self._finish_duel(session, game, players, state, picks, now)
+                    await session.commit()
+                    return MinesView(MinesRenderer.text(game), None, "Ikkala o'yinchi ham mina ochdi.", True)
+                if is_mine:
+                    next_player = _other_player(players, tg_user_id)
+                    if len(_player_picks(picks, next_player)) >= PICKS_PER_PLAYER:
+                        state["mine_pending"] = 0
+                        await self._finish_duel(session, game, players, state, picks, now)
+                        await session.commit()
+                        return MinesView(MinesRenderer.text(game), None, "Mina ochildi. O'yin yakunlandi.", True)
+                    state["mine_pending"] = int(tg_user_id)
+                    state["turn"] = next_player
+                    game.mines_json = json.dumps(state, ensure_ascii=False)
                     await session.commit()
                     return MinesView(
-                        MinesRenderer.final_text(game),
-                        None,
-                        "💣 Mina! Stavka kuyib ketdi.",
+                        MinesRenderer.text(game, result="💣 Mina ochildi. Endi raqib bitta katak tanlaydi."),
+                        MinesRenderer.keyboard(game),
+                        "💣 Mina! Raqibga navbat berildi.",
                         True,
                     )
+                if pending_mine_user and pending_mine_user != int(tg_user_id):
+                    state["mine_pending"] = 0
+                    await self._finish_duel(session, game, players, state, picks, now)
+                    await session.commit()
+                    return MinesView(MinesRenderer.text(game), None, "Safe ochildi. O'yin yakunlandi.", True)
 
-                opened.add(cell)
-                opened_count = len(opened)
-                game.opened_json = json.dumps(sorted(opened))
-                game.multiplier = MinesMath.visible_multiplier(opened_count)
-                game.payout = MinesMath.payout(int(game.bet), opened_count, int(user.dollar if user else 0), int(stats.win_streak or 0))
+                finished = all(len(_player_picks(picks, player_id)) >= PICKS_PER_PLAYER for player_id in players)
+                result = f"Katak ochildi: <b>{value}</b>."
+                if finished:
+                    await self._finish_duel(session, game, players, state, picks, now)
+                    await session.commit()
+                    return MinesView(MinesRenderer.text(game), None, "O'yin yakunlandi.", True)
+
+                next_player = _next_player(players, picks, tg_user_id)
+                state["turn"] = next_player
+                game.mines_json = json.dumps(state, ensure_ascii=False)
                 await session.commit()
-                balance = int(user.dollar if user else 0)
-                return MinesView(
-                    MinesRenderer.text(game, balance=balance, streak=int(stats.win_streak or 0), result="Safe ochildi. Davom etish yoki pulni olish sizning qo'lingizda."),
-                    MinesRenderer.keyboard(game),
-                    "💎 Safe!",
-                    False,
-                )
+                return MinesView(MinesRenderer.text(game, result=result), MinesRenderer.keyboard(game), f"Katak: {value}", False)
         finally:
             lock.release()
 
     async def cashout(self, tg_user_id: int, game_id: int, token: str) -> MinesView:
-        lock = _game_lock(game_id)
-        await lock.acquire()
-        try:
-            async with self.session_factory() as session:
-                game = await self._game_for_update(session, game_id, token)
-                if game is None:
-                    return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
-                if game.user_telegram_id != tg_user_id:
-                    return MinesView("", None, "Bu boshqa o'yinchining qimori.", True)
-                user = await self._user(session, tg_user_id)
-                stats = await self._stats(session, tg_user_id)
-                if user is None:
-                    return MinesView("", None, "Foydalanuvchi topilmadi.", True)
-                if game.status != "active":
-                    return MinesView(
-                        MinesRenderer.final_text(game),
-                        None,
-                        "Bu o'yin yakunlangan.",
-                        True,
-                    )
-                opened_count = len(_loads_int_set(game.opened_json))
-                if opened_count <= 0:
-                    return MinesView("", None, "Avval kamida bitta safe katak oching.", True)
-                payout = MinesMath.payout(int(game.bet), opened_count, int(user.dollar or 0), int(stats.win_streak or 0))
-                if payout <= 0:
-                    return MinesView("", None, "Yutuq mavjud emas.", True)
-                now = _utcnow()
-                today_won = await self._today_won(session, tg_user_id, now)
-                if today_won >= DAILY_WIN_LIMIT:
-                    return MinesView("", None, "Kunlik yutuq limiti tugagan: 50000 dollar.", True)
-                if today_won + payout > DAILY_WIN_LIMIT:
-                    payout = DAILY_WIN_LIMIT - today_won
-                    if payout <= 0:
-                        return MinesView("", None, "Kunlik yutuq limiti tugagan: 50000 dollar.", True)
-                user.dollar = int(user.dollar or 0) + payout
-                game.status = "cashed"
-                game.payout = payout
-                game.ended_at = now
-                game.last_action_at = now
-                stats.win_streak = int(stats.win_streak or 0) + 1
-                stats.total_payout = int(stats.total_payout or 0) + payout
-                MinesEconomyService.record_dollar(
-                    session,
-                    user,
-                    payout,
-                    "gamble_mines_cashout",
-                    note=f"Mines cashout #{game.id}: {opened_count} safe, x{game.multiplier:.2f}",
-                    chat_id=game.chat_id,
-                )
-                await session.commit()
-                return MinesView(
-                    MinesRenderer.final_text(game),
-                    None,
-                    f"💰 {payout} dollar olindi!",
-                    True,
-                )
-        finally:
-            lock.release()
+        return MinesView("", None, "Yangi qimorda pulni olish tugmasi ishlatilmaydi.", True)
 
     async def weekly_top_text(self, limit: int = 10) -> str:
         now = _utcnow()
         since = now - timedelta(days=7)
+        winner_expr = func.coalesce(GambleMinesGame.winner_telegram_id, GambleMinesGame.user_telegram_id).label("winner_id")
         async with self.session_factory() as session:
             rows = (
                 await session.execute(
                     select(
-                        GambleMinesGame.user_telegram_id,
+                        winner_expr,
                         func.coalesce(func.sum(GambleMinesGame.payout), 0).label("total_won"),
                         func.count(GambleMinesGame.id).label("games_count"),
                         func.coalesce(func.max(GambleMinesGame.payout), 0).label("best_win"),
@@ -453,14 +455,14 @@ class MinesEngine:
                         GambleMinesGame.ended_at.is_not(None),
                         GambleMinesGame.ended_at >= since,
                     )
-                    .group_by(GambleMinesGame.user_telegram_id)
+                    .group_by(winner_expr)
                     .order_by(desc("total_won"), desc("best_win"))
                     .limit(max(1, min(30, int(limit))))
                 )
             ).all()
             users = {}
             if rows:
-                user_ids = [int(row.user_telegram_id) for row in rows]
+                user_ids = [int(row.winner_id) for row in rows]
                 users = {
                     user.telegram_id: user
                     for user in (
@@ -472,13 +474,12 @@ class MinesEngine:
             return (
                 "🏆 <b>Haftalik qimorvozlar TOP</b>\n"
                 "━━━━━━━━━━━━━━━\n"
-                "Hali bu haftada yutuq olgan qimorvoz yo'q.\n\n"
-                f"Faqat safe katak ochib, <b>{_ce('💵', MONEY_EMOJI_ID)} Pulni olish</b> orqali cashout qilingan yutuqlar statistikaga kiradi."
+                "Hali bu haftada yutuq olgan qimorvoz yo'q."
             )
 
         lines: list[str] = []
         for idx, row in enumerate(rows, 1):
-            telegram_id = int(row.user_telegram_id)
+            telegram_id = int(row.winner_id)
             user = users.get(telegram_id)
             name = user.display_name if user else str(telegram_id)
             total_won = int(row.total_won or 0)
@@ -486,7 +487,7 @@ class MinesEngine:
             best_win = int(row.best_win or 0)
             lines.append(
                 f"{idx}. {_user_link(telegram_id, name)} — <b>{total_won}</b> {_ce('💵', MONEY_EMOJI_ID)}\n"
-                f"   🎮 Cashout: <b>{games_count}</b> | 🔥 Eng katta: <b>{best_win}</b>"
+                f"   🎮 G'alaba: <b>{games_count}</b> | 🔥 Eng katta: <b>{best_win}</b>"
             )
 
         return (
@@ -494,9 +495,143 @@ class MinesEngine:
             "━━━━━━━━━━━━━━━\n"
             + "\n".join(lines)
             + "\n━━━━━━━━━━━━━━━\n"
-            "📌 Hisob: oxirgi 7 kun ichida cashout qilingan umumiy yutuq.\n"
-            "⚠️ Katak ochilmasdan bosilgan pul olish statistikaga kirmaydi."
+            "📌 Hisob: oxirgi 7 kun ichida 2 kishilik qimorda yutilgan umumiy pul."
         )
+
+    async def _finish_duel(
+        self,
+        session: AsyncSession,
+        game: GambleMinesGame,
+        players: list[int],
+        state: dict,
+        picks: dict,
+        now: datetime,
+    ) -> None:
+        first_id, second_id = players[0], players[1]
+        first_score = _score(picks, first_id)
+        second_score = _score(picks, second_id)
+        first_mined = _player_mined(picks, first_id)
+        second_mined = _player_mined(picks, second_id)
+        first_user = await self._user(session, first_id)
+        second_user = await self._user(session, second_id)
+        first_stats = await self._stats(session, first_id)
+        second_stats = await self._stats(session, second_id)
+        game.ended_at = now
+        game.last_action_at = now
+        game.mines_json = json.dumps(state, ensure_ascii=False)
+        game.opened_json = json.dumps(picks, ensure_ascii=False)
+
+        if first_mined and second_mined:
+            game.status = "lost"
+            game.payout = 0
+            game.winner_telegram_id = None
+            first_stats.win_streak = 0
+            second_stats.win_streak = 0
+            return
+
+        if first_mined != second_mined:
+            winner_id = second_id if first_mined else first_id
+            loser_id = first_id if first_mined else second_id
+            await self._apply_duel_winner(
+                session,
+                game,
+                winner_id,
+                loser_id,
+                first_user,
+                second_user,
+                first_stats,
+                second_stats,
+                now,
+            )
+            return
+
+        if first_score == second_score:
+            game.status = "draw"
+            game.payout = 0
+            for user in (first_user, second_user):
+                if user is None:
+                    continue
+                user.dollar = int(user.dollar or 0) + int(game.bet)
+                MinesEconomyService.record_dollar(
+                    session,
+                    user,
+                    int(game.bet),
+                    "gamble_duel_refund",
+                    note=f"Qimor duel durrang #{game.id}",
+                    chat_id=game.chat_id,
+                )
+            return
+
+        winner_id = first_id if first_score > second_score else second_id
+        loser_id = second_id if winner_id == first_id else first_id
+        await self._apply_duel_winner(
+            session,
+            game,
+            winner_id,
+            loser_id,
+            first_user,
+            second_user,
+            first_stats,
+            second_stats,
+            now,
+        )
+
+    async def _apply_duel_winner(
+        self,
+        session: AsyncSession,
+        game: GambleMinesGame,
+        winner_id: int,
+        loser_id: int,
+        first_user: Optional[User],
+        second_user: Optional[User],
+        first_stats: GambleUserStats,
+        second_stats: GambleUserStats,
+        now: datetime,
+    ) -> None:
+        first_id = int(game.user_telegram_id)
+        second_id = int(game.opponent_telegram_id or 0)
+        winner = first_user if winner_id == first_id else second_user
+        winner_stats = first_stats if winner_id == first_id else second_stats
+        loser_stats = second_stats if loser_id == second_id else first_stats
+        pot = int(game.bet) * 2
+        payout = int(pot * (1 - HOUSE_COMMISSION_RATE))
+        today_won = await self._today_won(session, winner_id, now)
+        if today_won + payout > DAILY_WIN_LIMIT:
+            payout = max(0, DAILY_WIN_LIMIT - today_won)
+
+        game.status = "cashed"
+        game.winner_telegram_id = winner_id
+        game.payout = payout
+        winner_stats.win_streak = int(winner_stats.win_streak or 0) + 1
+        winner_stats.total_payout = int(winner_stats.total_payout or 0) + payout
+        loser_stats.win_streak = 0
+        if winner is not None and payout > 0:
+            winner.dollar = int(winner.dollar or 0) + payout
+            MinesEconomyService.record_dollar(
+                session,
+                winner,
+                payout,
+                "gamble_duel_win",
+                note=f"Qimor duel g'alaba #{game.id}: bank {pot}, komissiya {pot - payout}",
+                chat_id=game.chat_id,
+            )
+
+    async def _refund_legacy_game(self, session: AsyncSession, game: GambleMinesGame) -> None:
+        user = await self._user(session, int(game.user_telegram_id))
+        if user is not None and game.status == "active":
+            user.dollar = int(user.dollar or 0) + int(game.bet or 0)
+            MinesEconomyService.record_dollar(
+                session,
+                user,
+                int(game.bet or 0),
+                "gamble_legacy_refund",
+                note=f"Eski mines qimori qaytarildi #{game.id}",
+                chat_id=game.chat_id,
+            )
+        game.status = "draw"
+        game.ended_at = _utcnow()
+        game.last_action_at = _utcnow()
+        await session.commit()
 
     async def _ensure_user(self, session: AsyncSession, tg_user) -> User:
         user = (await session.execute(select(User).where(User.telegram_id == tg_user.id))).scalar_one_or_none()
@@ -531,7 +666,13 @@ class MinesEngine:
         return (
             await session.execute(
                 select(GambleMinesGame)
-                .where(GambleMinesGame.user_telegram_id == telegram_id, GambleMinesGame.status == "active")
+                .where(
+                    GambleMinesGame.status.in_(("waiting", "active")),
+                    or_(
+                        GambleMinesGame.user_telegram_id == telegram_id,
+                        GambleMinesGame.opponent_telegram_id == telegram_id,
+                    ),
+                )
                 .order_by(GambleMinesGame.id.desc())
                 .limit(1)
             )
@@ -550,7 +691,7 @@ class MinesEngine:
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         value = await session.scalar(
             select(func.coalesce(func.sum(GambleMinesGame.payout), 0)).where(
-                GambleMinesGame.user_telegram_id == telegram_id,
+                func.coalesce(GambleMinesGame.winner_telegram_id, GambleMinesGame.user_telegram_id) == telegram_id,
                 GambleMinesGame.status == "cashed",
                 GambleMinesGame.ended_at.is_not(None),
                 GambleMinesGame.ended_at >= start,
@@ -559,15 +700,99 @@ class MinesEngine:
         return int(value or 0)
 
 
-def _loads_int_set(raw: str) -> set[int]:
+def _new_state(creator_id: int, creator_name: str) -> dict:
+    return {
+        "players": [int(creator_id)],
+        "turn": int(creator_id),
+        "values": [],
+        "mines": [],
+        "mine_pending": 0,
+        "names": {str(creator_id): creator_name[:255]},
+    }
+
+
+def _state(game: GambleMinesGame) -> dict:
     try:
-        parsed = json.loads(raw or "[]")
+        parsed = json.loads(game.mines_json or "{}")
     except (TypeError, json.JSONDecodeError):
-        return set()
-    if not isinstance(parsed, list):
-        return set()
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    parsed.setdefault("players", [int(game.user_telegram_id)])
+    parsed.setdefault("turn", int(game.user_telegram_id))
+    parsed.setdefault("values", [])
+    parsed.setdefault("mines", [])
+    parsed.setdefault("mine_pending", 0)
+    parsed.setdefault("names", {})
+    return parsed
+
+
+def _picks(game: GambleMinesGame) -> dict:
+    try:
+        parsed = json.loads(game.opened_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        parsed = {}
+    if not isinstance(parsed, dict):
+        parsed = {}
+    parsed.setdefault("picks", {})
+    parsed.setdefault("order", [])
+    return parsed
+
+
+def _players(game: GambleMinesGame, state: dict) -> list[int]:
+    raw_players = state.get("players")
+    players: list[int] = []
+    if isinstance(raw_players, list):
+        for item in raw_players[:2]:
+            try:
+                players.append(int(item))
+            except (TypeError, ValueError):
+                continue
+    if not players:
+        players.append(int(game.user_telegram_id))
+    if game.opponent_telegram_id and int(game.opponent_telegram_id) not in players:
+        players.append(int(game.opponent_telegram_id))
+    return players[:2]
+
+
+def _name(state: dict, user_id: int) -> str:
+    if not user_id:
+        return "O'yinchi"
+    names = state.get("names") if isinstance(state.get("names"), dict) else {}
+    return str(names.get(str(user_id)) or user_id)
+
+
+def _player_picks(picks: dict, user_id: int) -> list[dict]:
+    if not user_id:
+        return []
+    values = picks.get("picks", {}).get(str(user_id), [])
+    return values if isinstance(values, list) else []
+
+
+def _score(picks: dict, user_id: int) -> int:
+    total = 0
+    for item in _player_picks(picks, user_id):
+        if not isinstance(item, dict):
+            continue
+        if item.get("mine"):
+            continue
+        try:
+            total += int(item.get("value") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _player_mined(picks: dict, user_id: int) -> bool:
+    return any(bool(item.get("mine")) for item in _player_picks(picks, user_id) if isinstance(item, dict))
+
+
+def _mine_cells(state: dict) -> set[int]:
+    raw = state.get("mines")
     result: set[int] = set()
-    for item in parsed:
+    if not isinstance(raw, list):
+        return result
+    for item in raw:
         try:
             value = int(item)
         except (TypeError, ValueError):
@@ -577,7 +802,59 @@ def _loads_int_set(raw: str) -> set[int]:
     return result
 
 
+def _picked_cells(picks: dict) -> dict[int, dict]:
+    result: dict[int, dict] = {}
+    for values in (picks.get("picks") or {}).values():
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            try:
+                cell = int(item.get("cell"))
+                result[cell] = {"value": int(item.get("value") or 0), "mine": bool(item.get("mine"))}
+            except (TypeError, ValueError):
+                continue
+    return result
+
+
+def _other_player(players: list[int], current_id: int) -> int:
+    for player_id in players:
+        if int(player_id) != int(current_id):
+            return int(player_id)
+    return int(current_id)
+
+
+def _next_player(players: list[int], picks: dict, current_id: int) -> int:
+    for player_id in players:
+        if player_id != int(current_id) and len(_player_picks(picks, player_id)) < PICKS_PER_PLAYER:
+            return player_id
+    for player_id in players:
+        if len(_player_picks(picks, player_id)) < PICKS_PER_PLAYER:
+            return player_id
+    return int(current_id)
+
+
+def _is_duel_game(game: GambleMinesGame) -> bool:
+    try:
+        parsed = json.loads(game.mines_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    players = parsed.get("players")
+    names = parsed.get("names")
+    return (
+        getattr(game, "game_kind", None) == "duel"
+        and isinstance(players, list)
+        and len(players) >= 1
+        and isinstance(names, dict)
+    )
+
+
 def _user_link(user_id: int, name: str) -> str:
+    if not user_id:
+        return escape(name or "O'yinchi")
     return f'<a href="tg://user?id={user_id}">{escape(name or str(user_id))}</a>'
 
 

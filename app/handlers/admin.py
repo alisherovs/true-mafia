@@ -15,6 +15,7 @@ from app.keyboards import (
     owner_channel_gifts_keyboard,
     owner_diamond_audit_keyboard,
     owner_diamond_top_keyboard,
+    owner_dollar_top_keyboard,
     owner_hero_market_keyboard,
     owner_invoice_after_keyboard,
     owner_invoice_delivery_keyboard,
@@ -164,6 +165,16 @@ async def owner_diamond_top_callback(callback: CallbackQuery, engine: GameEngine
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     await _safe_edit(callback, await engine.owner_diamond_top_text(limit=30), reply_markup=owner_diamond_top_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:dollar_top")
+async def owner_dollar_top_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    await _safe_edit(callback, await engine.owner_dollar_top_text(limit=30), reply_markup=owner_dollar_top_keyboard())
     await callback.answer()
 
 

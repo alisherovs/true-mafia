@@ -167,6 +167,14 @@ async def _ensure_lightweight_columns(conn) -> None:
             "left_game": "BOOLEAN DEFAULT FALSE",
         },
     )
+    await add_missing_columns(
+        "gamble_mines_games",
+        {
+            "opponent_telegram_id": "BIGINT",
+            "winner_telegram_id": "BIGINT",
+            "game_kind": "VARCHAR(16) DEFAULT 'duel'",
+        },
+    )
 
     def missing_columns(sync_conn) -> set[str]:
         inspector = inspect(sync_conn)
@@ -234,6 +242,12 @@ async def _ensure_lightweight_columns(conn) -> None:
     )
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_activity_score_user_created ON activity_score_events(user_telegram_id, created_at)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_gamble_mines_opponent_status ON gamble_mines_games(opponent_telegram_id, status)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_gamble_mines_winner_created ON gamble_mines_games(winner_telegram_id, ended_at)")
     )
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_couple_chat_active ON couple_relationships(chat_id, active)"))
     await conn.execute(

@@ -892,6 +892,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
             [diamond_icon_button("TOP 30 almaz", callback_data="owner:diamond_top")],
+            [dollar_icon_button("TOP 30 dollar", callback_data="owner:dollar_top")],
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
@@ -945,7 +946,18 @@ def owner_diamond_top_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:diamond_top")],
+            [dollar_icon_button("TOP 30 dollar", callback_data="owner:dollar_top")],
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
+        ]
+    )
+
+
+def owner_dollar_top_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:dollar_top")],
+            [diamond_icon_button("TOP 30 almaz", callback_data="owner:diamond_top")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )

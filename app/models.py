@@ -368,10 +368,14 @@ class GambleMinesGame(Base):
     __table_args__ = (
         Index("ix_gamble_mines_user_status", "user_telegram_id", "status"),
         Index("ix_gamble_mines_user_created", "user_telegram_id", "created_at"),
+        Index("ix_gamble_mines_opponent_status", "opponent_telegram_id", "status"),
+        Index("ix_gamble_mines_winner_created", "winner_telegram_id", "ended_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    opponent_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
+    winner_telegram_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     bet: Mapped[int] = mapped_column(Integer)
@@ -379,6 +383,7 @@ class GambleMinesGame(Base):
     mines_json: Mapped[str] = mapped_column(Text, default="[]")
     opened_json: Mapped[str] = mapped_column(Text, default="[]")
     status: Mapped[str] = mapped_column(String(16), default="active")
+    game_kind: Mapped[str] = mapped_column(String(16), default="duel")
     multiplier: Mapped[float] = mapped_column(Float, default=1.0)
     payout: Mapped[int] = mapped_column(Integer, default=0)
     token: Mapped[str] = mapped_column(String(32), index=True)

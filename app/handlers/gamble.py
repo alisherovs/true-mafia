@@ -44,7 +44,9 @@ async def gamble_mines_callback(callback: CallbackQuery) -> None:
         return
 
     mines = MinesEngine(SessionLocal)
-    if action == "o":
+    if action == "j":
+        view = await mines.join(callback.from_user, game_id, token)
+    elif action in {"o", "p"}:
         if cell is None:
             await callback.answer("Katak noto'g'ri.", show_alert=True)
             return
