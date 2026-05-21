@@ -161,6 +161,7 @@ class MinesRenderer:
             winner = _user_link(winner_id, winner_name) if winner_id else "G'olib"
             pot = int(game.bet) * 2
             commission = max(0, pot - int(game.payout or 0))
+            reason = escape(str(state.get("finish_reason") or "G'olib aniqlandi."))
             return (
                 f"🏆 <b>Qimor yakunlandi</b>\n"
                 "━━━━━━━━━━━━━━━\n"
@@ -168,24 +169,28 @@ class MinesRenderer:
                 f"{_ce('💵', MONEY_EMOJI_ID)} Yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
                 f"🏦 Komissiya: <b>{commission}</b> dollar\n"
                 f"🔢 Hisob: <b>{creator_sum}</b> : <b>{opponent_sum}</b>\n"
+                f"📌 Sabab: <b>{reason}</b>\n"
                 "━━━━━━━━━━━━━━━"
             )
 
         if game.status == "draw":
+            reason = escape(str(state.get("finish_reason") or "Hisob teng chiqdi."))
             return (
                 "🤝 <b>Qimor durrang tugadi</b>\n"
                 "━━━━━━━━━━━━━━━\n"
                 f"{creator_link}: <b>{creator_sum}</b>\n"
                 f"{opponent_link}: <b>{opponent_sum}</b>\n"
+                f"📌 Sabab: <b>{reason}</b>\n"
                 f"{_ce('💵', MONEY_EMOJI_ID)} Stavkalar qaytarildi.\n"
                 "━━━━━━━━━━━━━━━"
             )
 
         if game.status == "lost":
+            reason = escape(str(state.get("finish_reason") or "Ikkala ishtirokchi ham minani ochdi."))
             return (
                 f"{_ce('💣', MINE_EMOJI_ID)} <b>Qimor yakunlandi</b>\n"
                 "━━━━━━━━━━━━━━━\n"
-                "Ikkala ishtirokchi ham minani ochdi.\n"
+                f"📌 Sabab: <b>{reason}</b>\n"
                 f"{_ce('💵', MONEY_EMOJI_ID)} Bank: <b>{int(game.bet) * 2}</b> dollar kuyib ketdi.\n"
                 "━━━━━━━━━━━━━━━"
             )
@@ -371,9 +376,7 @@ class MinesEngine:
                     return MinesView("", None, "Hozir sizning navbatingiz emas.", True)
                 if cell in _picked_cells(picks):
                     return MinesView("", None, "Bu katak allaqachon tanlangan.", True)
-                pending_mine_user = int(state.get("mine_pending") or 0)
-                is_mine_response = pending_mine_user and pending_mine_user != int(tg_user_id)
-                if len(_player_picks(picks, tg_user_id)) >= PICKS_PER_PLAYER and not is_mine_response:
+                if len(_player_picks(picks, tg_user_id)) >= PICKS_PER_PLAYER:
                     return MinesView("", None, "Siz 3 ta imkoniyatdan foydalandingiz.", True)
 
                 values = state.get("values")
@@ -390,36 +393,8 @@ class MinesEngine:
                 now = _utcnow()
                 game.opened_json = json.dumps(picks, ensure_ascii=False)
                 game.last_action_at = now
-                if is_mine and pending_mine_user and pending_mine_user != int(tg_user_id):
-                    state["mine_pending"] = 0
-                    await self._finish_duel(session, game, players, state, picks, now)
-                    await session.commit()
-                    return MinesView(MinesRenderer.text(game), None, "Ikkala o'yinchi ham mina ochdi.", True)
-                if is_mine:
-                    next_player = _other_player(players, tg_user_id)
-                    if len(_player_picks(picks, next_player)) >= PICKS_PER_PLAYER:
-                        state["mine_pending"] = 0
-                        await self._finish_duel(session, game, players, state, picks, now)
-                        await session.commit()
-                        return MinesView(MinesRenderer.text(game), None, "Mina ochildi. O'yin yakunlandi.", True)
-                    state["mine_pending"] = int(tg_user_id)
-                    state["turn"] = next_player
-                    game.mines_json = json.dumps(state, ensure_ascii=False)
-                    await session.commit()
-                    return MinesView(
-                        MinesRenderer.text(game, result="💣 Mina ochildi. Endi raqib bitta katak tanlaydi."),
-                        MinesRenderer.keyboard(game),
-                        "💣 Mina! Raqibga navbat berildi.",
-                        True,
-                    )
-                if pending_mine_user and pending_mine_user != int(tg_user_id):
-                    state["mine_pending"] = 0
-                    await self._finish_duel(session, game, players, state, picks, now)
-                    await session.commit()
-                    return MinesView(MinesRenderer.text(game), None, "Safe ochildi. O'yin yakunlandi.", True)
-
                 finished = all(len(_player_picks(picks, player_id)) >= PICKS_PER_PLAYER for player_id in players)
-                result = f"Katak ochildi: <b>{value}</b>."
+                result = "💣 Mina portladi, lekin o'yin davom etadi. Har ikki o'yinchi 3 tadan imkoniyat oladi." if is_mine else f"Katak ochildi: <b>{value}</b>."
                 if finished:
                     await self._finish_duel(session, game, players, state, picks, now)
                     await session.commit()
@@ -512,16 +487,19 @@ class MinesEngine:
         second_score = _score(picks, second_id)
         first_mined = _player_mined(picks, first_id)
         second_mined = _player_mined(picks, second_id)
+        first_name = _name(state, first_id)
+        second_name = _name(state, second_id)
         first_user = await self._user(session, first_id)
         second_user = await self._user(session, second_id)
         first_stats = await self._stats(session, first_id)
         second_stats = await self._stats(session, second_id)
         game.ended_at = now
         game.last_action_at = now
-        game.mines_json = json.dumps(state, ensure_ascii=False)
         game.opened_json = json.dumps(picks, ensure_ascii=False)
 
         if first_mined and second_mined:
+            state["finish_reason"] = f"{first_name} va {second_name} minani ochdi."
+            game.mines_json = json.dumps(state, ensure_ascii=False)
             game.status = "lost"
             game.payout = 0
             game.winner_telegram_id = None
@@ -532,6 +510,10 @@ class MinesEngine:
         if first_mined != second_mined:
             winner_id = second_id if first_mined else first_id
             loser_id = first_id if first_mined else second_id
+            mined_name = first_name if first_mined else second_name
+            winner_name = second_name if first_mined else first_name
+            state["finish_reason"] = f"{mined_name} mina ochdi, {winner_name} esa mina ochmadi."
+            game.mines_json = json.dumps(state, ensure_ascii=False)
             await self._apply_duel_winner(
                 session,
                 game,
@@ -546,6 +528,8 @@ class MinesEngine:
             return
 
         if first_score == second_score:
+            state["finish_reason"] = "Ikkala o'yinchining hisobi teng chiqdi."
+            game.mines_json = json.dumps(state, ensure_ascii=False)
             game.status = "draw"
             game.payout = 0
             for user in (first_user, second_user):
@@ -564,6 +548,9 @@ class MinesEngine:
 
         winner_id = first_id if first_score > second_score else second_id
         loser_id = second_id if winner_id == first_id else first_id
+        winner_name = first_name if winner_id == first_id else second_name
+        state["finish_reason"] = f"{winner_name}ning tanlagan raqamlari yig'indisi kattaroq chiqdi."
+        game.mines_json = json.dumps(state, ensure_ascii=False)
         await self._apply_duel_winner(
             session,
             game,
