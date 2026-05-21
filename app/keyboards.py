@@ -848,11 +848,15 @@ def role_shop_keyboard() -> InlineKeyboardMarkup:
 
 def my_roles_keyboard(roles: list[str], selected_role: str | None = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    for role_value in roles:
+    counts: dict[str, int] = {}
+    for rv in roles:
+        counts[rv] = counts.get(rv, 0) + 1
+    for role_value, count in counts.items():
         mark = "✅ " if selected_role == role_value else ""
+        count_tag = f" ×{count}" if count > 1 else ""
         rows.append([
             InlineKeyboardButton(
-                text=f"{mark}{role_label(role_value)}",
+                text=f"{mark}{role_label(role_value)}{count_tag}",
                 callback_data=f"shop:my_role:{role_value}",
             )
         ])

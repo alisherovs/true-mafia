@@ -1938,37 +1938,36 @@ class GameEngine:
                     continue
                 desired: Optional[Role] = None
                 selected_manually = bool(user.next_game_role)
+                cursor_idx_to_consume: Optional[int] = None
+
+                # Load owned roles upfront — needed for both manual and cursor paths
+                owned_row = owned_by_key.get(self._owned_roles_key(player.telegram_id))
+                cursor_row = owned_by_key.get(self._owned_roles_cursor_key(player.telegram_id))
+                try:
+                    raw_roles = json.loads(owned_row.value) if owned_row and owned_row.value else []
+                except (TypeError, ValueError):
+                    raw_roles = []
+                owned_roles: list[Role] = []
+                for value in raw_roles if isinstance(raw_roles, list) else []:
+                    try:
+                        owned_roles.append(Role(str(value)))
+                    except ValueError:
+                        continue
+
                 if user.next_game_role:
                     try:
                         desired = Role(user.next_game_role)
                     except ValueError:
                         user.next_game_role = None
                         desired = None
-                else:
-                    owned_row = owned_by_key.get(self._owned_roles_key(player.telegram_id))
-                    cursor_row = owned_by_key.get(self._owned_roles_cursor_key(player.telegram_id))
-                    try:
-                        raw_roles = json.loads(owned_row.value) if owned_row and owned_row.value else []
-                    except (TypeError, ValueError):
-                        raw_roles = []
-                    owned_roles: list[Role] = []
-                    for value in raw_roles if isinstance(raw_roles, list) else []:
-                        try:
-                            owned_roles.append(Role(str(value)))
-                        except ValueError:
-                            continue
-                    if owned_roles:
-                        cursor = 0
-                        if cursor_row and cursor_row.value and cursor_row.value.lstrip("-").isdigit():
-                            cursor = max(0, int(cursor_row.value))
-                        desired = owned_roles[cursor % len(owned_roles)]
-                        next_cursor = (cursor + 1) % len(owned_roles)
-                        if cursor_row is None:
-                            cursor_row = BotSetting(key=self._owned_roles_cursor_key(player.telegram_id), value=str(next_cursor))
-                            session.add(cursor_row)
-                            owned_by_key[cursor_row.key] = cursor_row
-                        else:
-                            cursor_row.value = str(next_cursor)
+                elif owned_roles:
+                    cursor = 0
+                    if cursor_row and cursor_row.value and cursor_row.value.lstrip("-").isdigit():
+                        cursor = max(0, int(cursor_row.value))
+                    idx = cursor % len(owned_roles)
+                    desired = owned_roles[idx]
+                    cursor_idx_to_consume = idx
+
                 if desired is None:
                     continue
                 if desired in disabled_roles or not self._role_player_count_ok(desired, role_preset, len(players)):
@@ -1985,8 +1984,24 @@ class GameEngine:
                 if holder is not None and holder.telegram_id != player.telegram_id:
                     assigned[holder.telegram_id] = assigned[player.telegram_id]
                 assigned[player.telegram_id] = desired
+
+                # ── Consume the role from inventory ──
                 if selected_manually:
                     user.next_game_role = None
+                    # Also remove one copy from owned_roles (the role was purchased and now used)
+                    if desired in owned_roles and owned_row is not None:
+                        owned_roles.remove(desired)  # removes first occurrence
+                        owned_row.value = json.dumps([r.value for r in owned_roles], ensure_ascii=True)
+                elif cursor_idx_to_consume is not None and owned_row is not None:
+                    # Cursor path: remove the used slot and reset cursor
+                    owned_roles.pop(cursor_idx_to_consume)
+                    owned_row.value = json.dumps([r.value for r in owned_roles], ensure_ascii=True)
+                    if cursor_row is None:
+                        cursor_row = BotSetting(key=self._owned_roles_cursor_key(player.telegram_id), value="0")
+                        session.add(cursor_row)
+                        owned_by_key[cursor_row.key] = cursor_row
+                    else:
+                        cursor_row.value = "0"
 
             for player, role in zip(players, roles):
                 user = users.get(player.telegram_id)
@@ -7577,15 +7592,17 @@ class GameEngine:
                         normalized_owned.append(Role(str(rv)).value)
                     except ValueError:
                         continue
-                if shop_role.role.value not in normalized_owned:
-                    normalized_owned.append(shop_role.role.value)
+                # Allow multiple copies — each purchase is one single-use token
+                normalized_owned.append(shop_role.role.value)
                 raw_owned.value = json.dumps(normalized_owned, ensure_ascii=True)
+                count = normalized_owned.count(shop_role.role.value)
                 if not user.next_game_role:
                     user.next_game_role = shop_role.role.value
                 await session.commit()
             return True, (
-                f"✅ {role_label(shop_role.role)} roli sotib olindi va ro'yxatingizga qo'shildi.\n"
-                "Keyingi o'yinlarda rollaringiz avtomatik tartibda ishlatiladi."
+                f"✅ {role_label(shop_role.role)} roli sotib olindi!\n"
+                f"Sumkangizda bu roldan: <b>{count} ta</b>\n"
+                "Ro'yxatdagi rollar o'yinda ishlatilgandan keyin sumkadan o'chiriladi."
             )
 
         if item_key.startswith("disable_role:"):

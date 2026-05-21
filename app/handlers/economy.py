@@ -378,8 +378,11 @@ async def shop_my_roles_callback(callback: CallbackQuery, engine: GameEngine) ->
     if not owned_roles:
         await callback.answer("Sizda hali sotib olingan rollar yo'q.", show_alert=True)
         return
+    total = len(owned_roles)
     await callback.message.edit_text(
-        "🎒 <b>Mening rollarim</b>\n\n"
+        f"🎒 <b>Mening rollarim</b> ({total} ta)\n\n"
+        "Har bir sotib olingan rol — <b>bir martalik</b>.\n"
+        "O'yinda ishlatilgandan so'ng sumkadan o'chiriladi.\n\n"
         "Quyidan rol tanlasangiz, keyingi o'yinda shu rol birinchi navbatda qo'llanadi.",
         reply_markup=my_roles_keyboard(owned_roles, selected_role),
     )
