@@ -146,6 +146,7 @@ CHANNEL_GIFTS_ENABLED_PREFIX = "channel_gifts_enabled:"
 ADMIN_GROUP_ID_KEY = "admin_group_id"
 TOURNAMENT_GAME_PREFIX = "tournament_game:"
 TEAM_GAME_PREFIX = "team_game:"
+HERO_INFO_HIDDEN_PREFIX = "hero_info_hidden:"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -6251,6 +6252,77 @@ class GameEngine:
             f"🖋 <b>Nomni o'zgartirish</b> - {money} <b>{fmt(HERO_RENAME_PRICE_DOLLAR)}</b>\n"
             "━━━━━━━━━━━━━━━"
         )
+
+    @staticmethod
+    def _hero_info_hidden_key(telegram_id: int) -> str:
+        return f"{HERO_INFO_HIDDEN_PREFIX}{telegram_id}"
+
+    async def _is_hero_info_hidden(self, session: AsyncSession, telegram_id: int) -> bool:
+        value = (
+            await session.execute(
+                select(BotSetting.value).where(BotSetting.key == self._hero_info_hidden_key(telegram_id))
+            )
+        ).scalar_one_or_none()
+        return value == "1"
+
+    async def set_hero_info_hidden(self, telegram_id: int, hidden: bool) -> str:
+        async with self.session_factory() as session:
+            key = self._hero_info_hidden_key(telegram_id)
+            row = (await session.execute(select(BotSetting).where(BotSetting.key == key))).scalar_one_or_none()
+            if row is None:
+                session.add(BotSetting(key=key, value="1" if hidden else "0"))
+            else:
+                row.value = "1" if hidden else "0"
+            await session.commit()
+        if hidden:
+            return "🥷 Geroy ma'lumotlari yashirildi. Endi admin /geroyinfo qilsa ham geroy ko'rinmaydi."
+        return "🥷 Geroy ma'lumotlari qayta ochildi. Endi admin /geroyinfo orqali ko'ra oladi."
+
+    def _admin_hero_info_text(self, user: User, hero: Hero) -> str:
+        self._sync_hero_level(hero)
+        info = hero_level_for_points(int(hero.points or 0))
+        fmt = lambda value: f"{int(value or 0):,}".replace(",", " ")
+        diamond = f'<tg-emoji emoji-id="{DIAMOND_EMOJI_ID}">💎</tg-emoji>'
+        sword = f'<tg-emoji emoji-id="{SWORD_EMOJI_ID}">⚔️</tg-emoji>'
+        owner = self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))
+        power_text = "MAX" if info.max_hit else info.power_text
+        next_text = (
+            f"{info.next_level}-daraja uchun {fmt(info.next_points)} ball"
+            if info.next_level and info.next_points is not None
+            else "Maksimal daraja"
+        )
+        sale_text = (
+            f"\n🏷 <b>Sotuvda:</b> {diamond} <b>{fmt(hero.sale_price_diamonds)}</b>"
+            if hero.is_for_sale
+            else ""
+        )
+        active_text = "✅ Aktiv" if hero.is_active else "▫️ Aktiv emas"
+        return (
+            "🥷 <b>GEROY MA'LUMOTI</b>\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"👤 <b>Egasi:</b> {owner}\n"
+            f"🥷 <b>Geroy:</b> <b>{safe_hero_name(hero.name)}</b>\n"
+            f"⭐️ <b>Daraja:</b> <b>{info.level}</b>\n"
+            f"🏆 <b>Jami ball:</b> <b>{fmt(hero.points)}</b>\n"
+            f"📌 <b>Holat:</b> <b>{active_text}</b>\n\n"
+            f"{sword} <b>Kuch:</b> <b>{power_text}</b>\n"
+            f"🛡 <b>Himoya:</b> <b>{int(hero.current_defense or 0)}% / {HERO_FULL_DEFENSE_PERCENT}%</b>\n"
+            f"🩸 <b>Zaryad:</b> <b>{int(hero.charge or 0)} / {HERO_MAX_CHARGE}</b>\n"
+            f"🚀 <b>Keyingi daraja:</b> <b>{next_text}</b>"
+            f"{sale_text}\n\n"
+            "━━━━━━━━━━━━━━━"
+        )
+
+    async def admin_hero_info_text(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            if await self._is_hero_info_hidden(session, telegram_id):
+                return False, "❌ Bu userda hali geroy sotib olinmagan."
+            user, hero = await self._hero_owner_row(session, telegram_id)
+            if user is None or hero is None:
+                return False, "❌ Bu userda hali geroy sotib olinmagan."
+            text = self._admin_hero_info_text(user, hero)
+            await session.commit()
+            return True, text
 
     async def hero_panel_data(self, telegram_id: int) -> tuple[bool, str, bool]:
         async with self.session_factory() as session:

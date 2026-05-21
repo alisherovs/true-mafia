@@ -258,7 +258,40 @@ async def hero_game_hp_callback(callback: CallbackQuery, engine: GameEngine) -> 
 async def hero_info_command(message: Message, engine: GameEngine) -> None:
     if message.from_user is None:
         return
-    ok, text = await engine.hero_info_text(message.from_user.id)
+    if message.chat.type == "private":
+        await message.answer("Bu buyruq faqat guruhda adminlar uchun ishlaydi.")
+        return
+    if not await engine.is_admin_or_creator(message.bot, message.chat.id, message.from_user.id):
+        await message.reply("❌ Bu buyruq faqat guruh adminlari uchun.")
+        return
+    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+        await message.reply("🥷 Qaysi user geroyini tekshirish kerak bo'lsa, o'sha xabarga reply qilib /geroyinfo yozing.")
+        return
+    target = message.reply_to_message.from_user
+    if target.is_bot:
+        await message.reply("Botlarda geroy bo'lmaydi.")
+        return
+    _, text = await engine.admin_hero_info_text(target.id)
+    await message.reply(text)
+
+
+@router.message(Command("hidegeroy"))
+async def hero_hide_command(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type != "private":
+        return
+    text = await engine.set_hero_info_hidden(message.from_user.id, True)
+    await message.answer(text)
+
+
+@router.message(Command("opengeroy"))
+async def hero_open_command(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type != "private":
+        return
+    text = await engine.set_hero_info_hidden(message.from_user.id, False)
     await message.answer(text)
 
 
