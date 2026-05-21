@@ -17,6 +17,7 @@ async def _start_game_with_mode(
     mode: str | None = None,
     *,
     tournament: bool = False,
+    teamgame: bool = False,
     regular: bool = False,
 ) -> None:
     if message.from_user is None:
@@ -51,6 +52,7 @@ async def _start_game_with_mode(
         chat_title=message.chat.title or "Group",
         creator_id=message.from_user.id,
         tournament=tournament,
+        teamgame=teamgame,
         regular=regular,
         role_preset=mode,
     )
@@ -60,6 +62,8 @@ async def _start_game_with_mode(
         await message.answer(f"✅ Mode tanlandi: <b>{mode}</b>")
     elif tournament:
         await message.answer("🏆 Turnir ro'yxatdan o'tishi boshlandi.")
+    elif teamgame:
+        await message.answer("🔵🔴 Jamoaviy o'yin ro'yxatdan o'tishi boshlandi.")
 
 
 @router.message(Command("game"))
@@ -174,8 +178,12 @@ async def cmd_stop(message: Message, engine: GameEngine) -> None:
 async def cmd_teamgame(message: Message, engine: GameEngine) -> None:
     if message.from_user is None:
         return
-    lang = await (engine.get_user_language(message.from_user.id) if message.chat.type == "private" else engine.get_group_language(message.chat.id))
-    await message.answer(t(lang, "teamgame_stub"))
+    if message.chat.type != "private":
+        ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "game")
+        if not ok:
+            await message.reply(err)
+            return
+    await _start_game_with_mode(message, engine, teamgame=True)
 
 
 @router.message(Command("lastwords"))

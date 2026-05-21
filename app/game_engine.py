@@ -145,6 +145,7 @@ DIAMOND_LOG_LAST_SENT_ID_KEY = "diamond_log_last_sent_id"
 CHANNEL_GIFTS_ENABLED_PREFIX = "channel_gifts_enabled:"
 ADMIN_GROUP_ID_KEY = "admin_group_id"
 TOURNAMENT_GAME_PREFIX = "tournament_game:"
+TEAM_GAME_PREFIX = "team_game:"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -1002,10 +1003,22 @@ class GameEngine:
     def _tournament_game_key(game_id: int) -> str:
         return f"{TOURNAMENT_GAME_PREFIX}{game_id}"
 
+    @staticmethod
+    def _team_game_key(game_id: int) -> str:
+        return f"{TEAM_GAME_PREFIX}{game_id}"
+
     async def _is_tournament_game_in_session(self, session: AsyncSession, game_id: int) -> bool:
         value = (
             await session.execute(
                 select(BotSetting.value).where(BotSetting.key == self._tournament_game_key(game_id))
+            )
+        ).scalar_one_or_none()
+        return value == "1"
+
+    async def _is_team_game_in_session(self, session: AsyncSession, game_id: int) -> bool:
+        value = (
+            await session.execute(
+                select(BotSetting.value).where(BotSetting.key == self._team_game_key(game_id))
             )
         ).scalar_one_or_none()
         return value == "1"
@@ -1020,9 +1033,31 @@ class GameEngine:
         else:
             row.value = "1"
 
+    async def _set_team_game_in_session(self, session: AsyncSession, game_id: int) -> None:
+        key = self._team_game_key(game_id)
+        row = (
+            await session.execute(select(BotSetting).where(BotSetting.key == key))
+        ).scalar_one_or_none()
+        if row is None:
+            session.add(BotSetting(key=key, value="1"))
+        else:
+            row.value = "1"
+
     async def _clear_tournament_game_in_session(self, session: AsyncSession, game_id: int) -> None:
         row = (
             await session.execute(select(BotSetting).where(BotSetting.key == self._tournament_game_key(game_id)))
+        ).scalar_one_or_none()
+        if row is not None:
+            await session.delete(row)
+        await session.execute(
+            update(GamePlayer)
+            .where(GamePlayer.game_id == game_id)
+            .values(transformed_to_team=None)
+        )
+
+    async def _clear_team_game_in_session(self, session: AsyncSession, game_id: int) -> None:
+        row = (
+            await session.execute(select(BotSetting).where(BotSetting.key == self._team_game_key(game_id)))
         ).scalar_one_or_none()
         if row is not None:
             await session.delete(row)
@@ -1095,6 +1130,7 @@ class GameEngine:
         creator_id: int,
         *,
         tournament: bool = False,
+        teamgame: bool = False,
         regular: bool = False,
         role_preset: Optional[str] = None,
     ) -> tuple[bool, str]:
@@ -1107,22 +1143,41 @@ class GameEngine:
                     if current_end < self._now_utc():
                         current_end = self._now_utc()
                     existing_is_tournament = await self._is_tournament_game_in_session(session, active.id)
+                    existing_is_teamgame = await self._is_team_game_in_session(session, active.id)
                     if tournament and not existing_is_tournament:
                         players_count = await session.scalar(
                             select(func.count(GamePlayer.id)).where(GamePlayer.game_id == active.id)
                         )
                         if players_count:
                             return False, "Avvalgi oddiy ro'yxatda o'yinchilar bor. Turnir boshlash uchun o'yinni /stop qilib, /turnir ni qayta bering."
+                    if teamgame and not existing_is_teamgame:
+                        players_count = await session.scalar(
+                            select(func.count(GamePlayer.id)).where(GamePlayer.game_id == active.id)
+                        )
+                        if players_count:
+                            return False, "Avvalgi ro'yxatda o'yinchilar bor. Jamoaviy o'yin boshlash uchun o'yinni /stop qilib, /teamgame ni qayta bering."
                     if regular and existing_is_tournament:
                         await self._clear_tournament_game_in_session(session, active.id)
                         existing_is_tournament = False
+                    if regular and existing_is_teamgame:
+                        await self._clear_team_game_in_session(session, active.id)
+                        existing_is_teamgame = False
                     active.registration_ends_at = current_end + timedelta(seconds=30)
                     active.creator_telegram_id = creator_id
                     if role_preset:
                         active.role_preset = role_preset
                     if tournament:
+                        if existing_is_teamgame:
+                            await self._clear_team_game_in_session(session, active.id)
+                            existing_is_teamgame = False
                         await self._set_tournament_game_in_session(session, active.id)
+                    if teamgame:
+                        if existing_is_tournament:
+                            await self._clear_tournament_game_in_session(session, active.id)
+                            existing_is_tournament = False
+                        await self._set_team_game_in_session(session, active.id)
                     is_tournament = tournament or existing_is_tournament
+                    is_teamgame = teamgame or existing_is_teamgame
                     self._add_game_log(
                         session,
                         active,
@@ -1130,6 +1185,7 @@ class GameEngine:
                         seconds=30,
                         registration_ends_at=active.registration_ends_at.isoformat(),
                         tournament=is_tournament,
+                        teamgame=is_teamgame,
                         role_preset=active.role_preset,
                     )
                     old_msg_id = active.lobby_message_id
@@ -1138,7 +1194,14 @@ class GameEngine:
                             await bot.delete_message(chat_id, old_msg_id)
                         except (TelegramBadRequest, TelegramForbiddenError):
                             pass
-                    text = await self._build_lobby_text(session, active.id, lang, ended=False, tournament=is_tournament)
+                    text = await self._build_lobby_text(
+                        session,
+                        active.id,
+                        lang,
+                        ended=False,
+                        tournament=is_tournament,
+                        teamgame=is_teamgame,
+                    )
                     msg = await bot.send_message(
                         chat_id,
                         text,
@@ -1149,6 +1212,7 @@ class GameEngine:
                             chat_id=chat_id,
                             active=True,
                             tournament=is_tournament,
+                            teamgame=is_teamgame,
                         ),
                     )
                     active.lobby_message_id = msg.message_id
@@ -1203,8 +1267,17 @@ class GameEngine:
                 return False, t(lang, "active_game_exists")
             if tournament:
                 await self._set_tournament_game_in_session(session, game.id)
+            if teamgame:
+                await self._set_team_game_in_session(session, game.id)
 
-            text = await self._build_lobby_text(session, game.id, lang, ended=False, tournament=tournament)
+            text = await self._build_lobby_text(
+                session,
+                game.id,
+                lang,
+                ended=False,
+                tournament=tournament,
+                teamgame=teamgame,
+            )
             msg = await bot.send_message(
                 chat_id,
                 text,
@@ -1215,6 +1288,7 @@ class GameEngine:
                     chat_id=chat_id,
                     active=True,
                     tournament=tournament,
+                    teamgame=teamgame,
                 ),
             )
             game.lobby_message_id = msg.message_id
@@ -1226,6 +1300,7 @@ class GameEngine:
                 registration_timeout=timeout,
                 registration_ends_at=ends_at.isoformat(),
                 tournament=tournament,
+                teamgame=teamgame,
             )
             await session.commit()
 
@@ -1266,6 +1341,113 @@ class GameEngine:
 
         return f"{team_block('blue')}\n\n{team_block('red')}"
 
+    async def _format_couple_tournament_lobby_players(
+        self,
+        session: AsyncSession,
+        chat_id: int,
+        players: list[GamePlayer],
+    ) -> str:
+        if not players:
+            return "-"
+
+        couples = (
+            await session.execute(
+                select(CoupleRelationship)
+                .where(
+                    CoupleRelationship.chat_id == chat_id,
+                    CoupleRelationship.active.is_(True),
+                )
+                .order_by(CoupleRelationship.created_at.asc())
+            )
+        ).scalars().all()
+        player_ids = {player.telegram_id for player in players}
+        player_by_id = {player.telegram_id: player for player in players}
+        seen: set[int] = set()
+        lines: list[str] = []
+
+        for player in players:
+            if player.telegram_id in seen:
+                continue
+            couple = next(
+                (
+                    item
+                    for item in couples
+                    if player.telegram_id in {item.user_one_telegram_id, item.user_two_telegram_id}
+                ),
+                None,
+            )
+            if couple is None:
+                lines.append(f"{len(lines) + 1}. {self._tg_mention(player.telegram_id, player.display_name)} — 💔 para topilmadi")
+                seen.add(player.telegram_id)
+                continue
+
+            first_id = couple.user_one_telegram_id
+            second_id = couple.user_two_telegram_id
+            first_name = player_by_id[first_id].display_name if first_id in player_by_id else couple.user_one_name
+            second_name = player_by_id[second_id].display_name if second_id in player_by_id else couple.user_two_name
+            first = self._tg_mention(first_id, first_name)
+            second = self._tg_mention(second_id, second_name)
+            if first_id in player_ids and second_id in player_ids:
+                lines.append(f"{len(lines) + 1}. {first} + {second} ✅")
+            else:
+                waiting_id = second_id if first_id in player_ids else first_id
+                waiting_name = second_name if waiting_id == second_id else first_name
+                waiting = self._tg_mention(waiting_id, waiting_name)
+                lines.append(f"{len(lines) + 1}. {first} + {second} ⏳ {waiting} kutilmoqda")
+            seen.update({first_id, second_id})
+
+        return "\n".join(lines) if lines else "-"
+
+    async def _tournament_incomplete_couple_lines(
+        self,
+        session: AsyncSession,
+        chat_id: int,
+        players: list[GamePlayer],
+    ) -> list[str]:
+        if not players:
+            return []
+
+        couples = (
+            await session.execute(
+                select(CoupleRelationship).where(
+                    CoupleRelationship.chat_id == chat_id,
+                    CoupleRelationship.active.is_(True),
+                )
+            )
+        ).scalars().all()
+        couple_by_user: dict[int, CoupleRelationship] = {}
+        for couple in couples:
+            couple_by_user[couple.user_one_telegram_id] = couple
+            couple_by_user[couple.user_two_telegram_id] = couple
+
+        player_ids = {player.telegram_id for player in players}
+        player_by_id = {player.telegram_id: player for player in players}
+        missing_lines: list[str] = []
+        seen_pairs: set[int] = set()
+        for player in players:
+            couple = couple_by_user.get(player.telegram_id)
+            if couple is None:
+                missing_lines.append(f"• {self._tg_mention(player.telegram_id, player.display_name)} — para topilmadi")
+                continue
+            if couple.id in seen_pairs:
+                continue
+            seen_pairs.add(couple.id)
+            first_joined = couple.user_one_telegram_id in player_ids
+            second_joined = couple.user_two_telegram_id in player_ids
+            if first_joined and second_joined:
+                continue
+            missing_id = couple.user_two_telegram_id if first_joined else couple.user_one_telegram_id
+            missing_name = couple.user_two_name if missing_id == couple.user_two_telegram_id else couple.user_one_name
+            present_id = couple.user_one_telegram_id if first_joined else couple.user_two_telegram_id
+            present_name = player_by_id[present_id].display_name if present_id in player_by_id else (
+                couple.user_one_name if present_id == couple.user_one_telegram_id else couple.user_two_name
+            )
+            missing_lines.append(
+                f"• {self._tg_mention(present_id, present_name)} sherigi "
+                f"{self._tg_mention(missing_id, missing_name)} kutilmoqda"
+            )
+        return missing_lines
+
     async def _build_lobby_text(
         self,
         session: AsyncSession,
@@ -1273,6 +1455,7 @@ class GameEngine:
         lang: str,
         ended: bool,
         tournament: bool = False,
+        teamgame: bool = False,
     ) -> str:
         players = (
             await session.execute(
@@ -1286,8 +1469,12 @@ class GameEngine:
         else:
             return t(lang, "lobby_started_title")
 
-        if players and tournament:
+        if players and teamgame:
             names = self._format_tournament_lobby_players(players)
+        elif players and tournament:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            chat_id = game.chat_id if game is not None else 0
+            names = await self._format_couple_tournament_lobby_players(session, chat_id, players)
         elif players:
             names = ", ".join(
                 self._tg_mention(p.telegram_id, p.display_name)
@@ -1295,7 +1482,12 @@ class GameEngine:
             )
         else:
             names = t(lang, "lobby_empty")
-        tournament_note = "💞 Turnirga faqat aktiv parasi borlar qo'shila oladi.\n" if tournament else ""
+        tournament_note = (
+            "💞 Turnirga faqat aktiv parasi borlar qo'shila oladi.\n"
+            "Har bir paraning ikki a'zosi ham qo'shilmaguncha o'yin boshlanmaydi.\n"
+            if tournament
+            else ""
+        )
         return (
             f"{title}\n"
             f"{t(lang, 'lobby_registered')}\n\n"
@@ -1311,7 +1503,15 @@ class GameEngine:
                 return
             lang = await self.get_group_language(game.chat_id)
             is_tournament = await self._is_tournament_game_in_session(session, game.id)
-            text = await self._build_lobby_text(session, game.id, lang, ended, tournament=is_tournament)
+            is_teamgame = await self._is_team_game_in_session(session, game.id)
+            text = await self._build_lobby_text(
+                session,
+                game.id,
+                lang,
+                ended,
+                tournament=is_tournament,
+                teamgame=is_teamgame,
+            )
             kb = lobby_keyboard(
                 lang=lang,
                 game_id=game.id,
@@ -1319,6 +1519,7 @@ class GameEngine:
                 chat_id=game.chat_id,
                 active=(not ended),
                 tournament=is_tournament,
+                teamgame=is_teamgame,
             )
 
         try:
@@ -1416,8 +1617,11 @@ class GameEngine:
             if game.status != GameStatus.REGISTRATION.value:
                 return False, t(lang, "registration_closed_cb")
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
-            if tournament_team is not None and not is_tournament:
+            is_teamgame = await self._is_team_game_in_session(session, game_id)
+            if tournament_team is not None and not (is_tournament or is_teamgame):
                 return False, "Bu oddiy ro'yxatdan o'tish. Turnir komandasi tanlanmaydi."
+            if is_teamgame and tournament_team is None:
+                return False, "Jamoaviy o'yinda 🔵 yoki 🔴 komandadan birini tanlang."
             if is_tournament:
                 couple = await self._active_couple_for_user(session, game.chat_id, tg_user.id)
                 if couple is None:
@@ -1437,7 +1641,7 @@ class GameEngine:
                 )
             ).scalar_one_or_none()
             if exists is not None:
-                if is_tournament and tournament_team and exists.transformed_to_team != tournament_team:
+                if (is_tournament or is_teamgame) and tournament_team and exists.transformed_to_team != tournament_team:
                     exists.transformed_to_team = tournament_team
                     self._add_game_log(
                         session,
@@ -1459,7 +1663,7 @@ class GameEngine:
                 user_id=user.id,
                 telegram_id=tg_user.id,
                 display_name=user.display_name,
-                transformed_to_team=tournament_team if is_tournament else None,
+                transformed_to_team=tournament_team if (is_tournament or is_teamgame) else None,
             )
             session.add(player)
             try:
@@ -1469,7 +1673,7 @@ class GameEngine:
                     game,
                     "player_joined",
                     actor=player,
-                    tournament_team=tournament_team if is_tournament else None,
+                    tournament_team=tournament_team if (is_tournament or is_teamgame) else None,
                 )
                 chat_id = game.chat_id
                 await session.commit()
@@ -1808,6 +2012,27 @@ class GameEngine:
                         "💞 Turnirga parasi yo'q o'yinchilar ro'yxatdan chiqarildi:\n"
                         + "\n".join(removed_unpaired_names),
                     )
+                incomplete_couples = await self._tournament_incomplete_couple_lines(session, game.chat_id, players)
+                if incomplete_couples:
+                    if game.registration_ends_at is not None:
+                        game.registration_ends_at = None
+                    self._add_game_log(
+                        session,
+                        game,
+                        "tournament_waiting_complete_couples",
+                        missing=incomplete_couples,
+                    )
+                    await session.commit()
+                    self._invalidate_game_cache(game.chat_id)
+                    self._cleanup_jobs(game_id)
+                    await self.update_lobby(bot, game_id)
+                    await self._safe_send_message(
+                        bot,
+                        game.chat_id,
+                        "💞 Turnirni boshlash uchun barcha paralar to'liq ro'yxatdan o'tishi kerak.\n\n"
+                        + "\n".join(incomplete_couples),
+                    )
+                    return
             gsm = GroupSettingsManager(self.session_factory)
             admin_start_confirm = await gsm.get_extra_enabled(game.chat_id, "admin_start_confirm")
 
@@ -2321,7 +2546,8 @@ class GameEngine:
             lang = await self.get_group_language(chat_id)
             alive_players = await self._alive_players(session, game_id)
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
-            alive_status = self._build_alive_status_text(alive_players, game, tournament=is_tournament)
+            is_teamgame = await self._is_team_game_in_session(session, game_id)
+            alive_status = self._build_alive_status_text(alive_players, game, tournament=(is_tournament or is_teamgame))
             self._add_game_log(
                 session,
                 game,
@@ -4097,7 +4323,8 @@ class GameEngine:
             dead_players = [player_map[player_id] for player_id in dead if player_id in player_map]
             day_caption = self._build_day_intro_text(game.day_number)
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
-            alive_status = self._build_alive_status_text(alive_after_night, game, tournament=is_tournament)
+            is_teamgame = await self._is_team_game_in_session(session, game_id)
+            alive_status = self._build_alive_status_text(alive_after_night, game, tournament=(is_tournament or is_teamgame))
             story_messages = self._build_night_story_messages(
                 dead_players=dead_players,
                 transformed=transformed,
@@ -5635,6 +5862,7 @@ class GameEngine:
             reward_by_user: dict[int, tuple[int, int, bool]] = {}
             news_bonus_ids = await self.news_bonus_subscriber_ids(bot, [p.telegram_id for p in players])
             is_tournament = await self._is_tournament_game_in_session(session, game_id)
+            is_teamgame = await self._is_team_game_in_session(session, game_id)
             arsonist_forced_win = any(
                 Role(p.role) == Role.ARSONIST and bool(p.won)
                 for p in players
@@ -5656,6 +5884,13 @@ class GameEngine:
                 return is_win
 
             tournament_couple_winner_ids: set[int] = set()
+            teamgame_winner_keys: set[str] = set()
+            if is_teamgame:
+                teamgame_winner_keys = {
+                    player.transformed_to_team
+                    for player in players
+                    if player.transformed_to_team in {"blue", "red"} and base_winner(player)
+                }
             if is_tournament:
                 player_ids = {player.telegram_id for player in players}
                 base_winner_ids = {
@@ -5686,6 +5921,12 @@ class GameEngine:
                 if (
                     is_tournament
                     and p.telegram_id in tournament_couple_winner_ids
+                    and not p.left_game
+                ):
+                    is_winner = True
+                if (
+                    is_teamgame
+                    and p.transformed_to_team in teamgame_winner_keys
                     and not p.left_game
                 ):
                     is_winner = True
@@ -5774,7 +6015,7 @@ class GameEngine:
         self._invalidate_game_cache(chat_id)
 
         def result_player_line(idx: int, player: GamePlayer) -> str:
-            team_emoji = self._tournament_team_emoji(player.transformed_to_team) if is_tournament else ""
+            team_emoji = self._tournament_team_emoji(player.transformed_to_team) if (is_tournament or is_teamgame) else ""
             name = self._tg_mention(player.telegram_id, player.display_name)
             if team_emoji:
                 name = f"{team_emoji} {name}"
