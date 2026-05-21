@@ -188,9 +188,11 @@ class GameEngine:
         self._group_return_url_cache: dict[int, tuple[float, str]] = {}
         self._active_participants_cache: dict[int, tuple[float, Optional[int], frozenset[int]]] = {}
         self._chat_permission_cache: dict[tuple[int, str], tuple[float, str]] = {}
+        self._blocked_users_cache: dict[int, tuple[float, bool]] = {}
         self._cache_ttl_seconds = 10.0
         self._return_url_cache_ttl_seconds = 3600.0
         self._chat_permission_cache_ttl = 5.0
+        self._blocked_users_cache_ttl = 30.0
         self._cache_limit = 20000
         self._inactive_elimination_rounds = 2
         self._night_inactivity_exempt_roles = {
@@ -8585,6 +8587,7 @@ class GameEngine:
                 row.reason = reason
                 row.blocked_by = blocked_by
             await session.commit()
+        self.invalidate_blocked_user_cache(telegram_id)
         return True, f"🚫 User bloklandi: {self._tg_mention(telegram_id, display_name)}"
 
     async def unblock_premium_user(self, raw: str) -> tuple[bool, str]:
@@ -8603,14 +8606,27 @@ class GameEngine:
                 return False, "Bu user bloklanganlar ro'yxatida yo'q."
             await session.delete(row)
             await session.commit()
+        self.invalidate_blocked_user_cache(telegram_id)
         return True, f"✅ User blokdan chiqarildi: <code>{telegram_id}</code>"
 
     async def is_premium_user_blocked(self, telegram_id: int) -> bool:
+        now = self._monotonic()
+        cached = self._blocked_users_cache.get(telegram_id)
+        if cached is not None:
+            expire_time, result = cached
+            if expire_time > now:
+                return result
         async with self.session_factory() as session:
             row = (
                 await session.execute(select(PremiumBlockedUser.telegram_id).where(PremiumBlockedUser.telegram_id == telegram_id))
             ).scalar_one_or_none()
-            return row is not None
+        is_blocked = row is not None
+        self._blocked_users_cache[telegram_id] = (now + self._blocked_users_cache_ttl, is_blocked)
+        self._prune_cache_if_needed(self._blocked_users_cache)  # type: ignore[arg-type]
+        return is_blocked
+
+    def invalidate_blocked_user_cache(self, telegram_id: int) -> None:
+        self._blocked_users_cache.pop(telegram_id, None)
 
     async def contribute_premium_group(
         self,

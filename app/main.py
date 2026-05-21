@@ -24,6 +24,41 @@ from app.models import CreditBlockedUser
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
 
+class PremiumBlockMessageMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.from_user:
+            engine: GameEngine = data["engine"]
+            if await engine.is_premium_user_blocked(event.from_user.id):
+                try:
+                    await event.answer(
+                        "🚫 Siz botdan bloklangansiz. Murojaat uchun adminga yozing.",
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    pass
+                return None
+        return await handler(event, data)
+
+
+class PremiumBlockCallbackMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[CallbackQuery, dict[str, Any]], Awaitable[Any]],
+        event: CallbackQuery,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.from_user:
+            engine: GameEngine = data["engine"]
+            if await engine.is_premium_user_blocked(event.from_user.id):
+                await event.answer("🚫 Siz botdan bloklangansiz.", show_alert=True)
+                return None
+        return await handler(event, data)
+
+
 class CreditBlockMessageMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -192,6 +227,8 @@ async def main() -> None:
         settings.bot_username = me.username
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
+    dp.message.middleware(PremiumBlockMessageMiddleware())
+    dp.callback_query.middleware(PremiumBlockCallbackMiddleware())
     dp.message.middleware(CreditBlockMessageMiddleware())
     dp.callback_query.middleware(CreditBlockCallbackMiddleware())
     dp.message.middleware(DeleteGroupCommandMiddleware())
