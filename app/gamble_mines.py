@@ -220,6 +220,7 @@ class MinesRenderer:
                 "━━━━━━━━━━━━━━━\n"
                 f"🥇 {winner} g'olib bo'ldi!\n"
                 f"{_ce('💵', MONEY_EMOJI_ID)} Yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
+                f"🔢 Hisob: <b>{creator_sum}</b> : <b>{opponent_sum}</b>\n"
                 "━━━━━━━━━━━━━━━"
             )
 
