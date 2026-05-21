@@ -44,17 +44,19 @@ async def gamble_mines_callback(callback: CallbackQuery) -> None:
         return
 
     mines = MinesEngine(SessionLocal)
-    if action == "j":
+    if action in {"j", "join"}:
         view = await mines.join(callback.from_user, game_id, token)
-    elif action in {"o", "p"}:
+    elif action in {"s", "solo", "start", "start_solo"}:
+        view = await mines.start_solo(callback.from_user.id, game_id, token)
+    elif action in {"o", "p", "open"}:
         if cell is None:
             await callback.answer("Katak noto'g'ri.", show_alert=True)
             return
         view = await mines.open_cell(callback.from_user.id, game_id, token, cell)
-    elif action == "c":
+    elif action in {"c", "cashout"}:
         view = await mines.cashout(callback.from_user.id, game_id, token)
     else:
-        await callback.answer("Action noto'g'ri.", show_alert=True)
+        await callback.answer("Bu tugma eskirgan. /qimor bilan qayta oching.", show_alert=True)
         return
 
     if view.text:
