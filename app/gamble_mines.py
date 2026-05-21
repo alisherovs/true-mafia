@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from html import escape
+from math import floor
 from typing import Optional
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -20,6 +22,7 @@ GRID_WIDTH = 6
 PICKS_PER_PLAYER = 3
 DUEL_MINE_COUNT = 6
 HOUSE_COMMISSION_RATE = 0.10
+HOUSE_PAYOUT_FACTOR = 0.92
 MIN_BET = 10
 DAILY_WIN_LIMIT = 50_000
 COOLDOWN_SECONDS = 20
@@ -28,6 +31,25 @@ GIFT_EMOJI_ID = "5199749070830197566"
 BANK_EMOJI_ID = "5264895611517300926"
 MINE_EMOJI_ID = "5469654973308476699"
 _GAME_LOCKS: dict[int, asyncio.Lock] = {}
+
+VISIBLE_MULTIPLIERS = {
+    0: 1.00,
+    1: 1.08,
+    2: 1.18,
+    3: 1.35,
+    4: 1.55,
+    5: 1.80,
+    6: 2.25,
+    7: 2.80,
+    8: 3.50,
+    9: 4.30,
+    10: 5.00,
+    11: 6.70,
+    12: 8.80,
+    13: 11.00,
+    14: 13.00,
+    15: 15.00,
+}
 
 
 def _ce(symbol: str, emoji_id: str) -> str:
@@ -101,11 +123,14 @@ class MinesRenderer:
         if game.status == "waiting":
             return InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🎮 Qimorga qo'shilish", callback_data=f"gm:j:{game.id}:{game.token}")]
+                    [InlineKeyboardButton(text="👥 2 kishilik qo'shilish", callback_data=f"gm:j:{game.id}:{game.token}")],
+                    [InlineKeyboardButton(text="🎮 1 kishilik boshlash", callback_data=f"gm:s:{game.id}:{game.token}")],
                 ]
             )
         if game.status != "active":
             return None
+        if _is_solo_game(game):
+            return MinesRenderer.solo_keyboard(game)
 
         state = _state(game)
         picks = _picks(game)
@@ -127,7 +152,37 @@ class MinesRenderer:
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod
+    def solo_keyboard(game: GambleMinesGame, reveal: bool = False) -> InlineKeyboardMarkup:
+        state = _state(game)
+        opened = _solo_opened(state)
+        mines = _mine_cells(state)
+        rows: list[list[InlineKeyboardButton]] = []
+        for row_idx in range(GRID_WIDTH):
+            row: list[InlineKeyboardButton] = []
+            for col_idx in range(GRID_WIDTH):
+                cell = row_idx * GRID_WIDTH + col_idx
+                if cell in opened:
+                    text = "💎"
+                    callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                elif reveal and cell in mines:
+                    text = "💣"
+                    callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                elif reveal:
+                    text = "▫️"
+                    callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                else:
+                    text = "⬜"
+                    callback = f"gm:p:{game.id}:{game.token}:{cell}"
+                row.append(InlineKeyboardButton(text=text, callback_data=callback))
+            rows.append(row)
+        rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"gm:c:{game.id}:{game.token}")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @staticmethod
     def text(game: GambleMinesGame, *, result: str = "") -> str:
+        if _is_solo_game(game):
+            return MinesRenderer.solo_text(game, result=result)
+
         state = _state(game)
         picks = _picks(game)
         players = _players(game, state)
@@ -152,7 +207,8 @@ class MinesRenderer:
                 f"👤 Yaratuvchi: {creator_link}\n"
                 "👥 Kerak: <b>2 ta o'yinchi</b>\n"
                 "━━━━━━━━━━━━━━━\n"
-                "Ikkinchi o'yinchi qo'shilsa, o'yin avtomatik boshlanadi."
+                "Ikkinchi o'yinchi qo'shilsa duel boshlanadi.\n"
+                "Yoki pastdagi tugma bilan 1 kishilik mines o'ynang."
             )
 
         if game.status == "cashed":
@@ -203,6 +259,38 @@ class MinesRenderer:
             f"{footer}"
         )
 
+    @staticmethod
+    def solo_text(game: GambleMinesGame, *, result: str = "") -> str:
+        state = _state(game)
+        opened_count = len(_solo_opened(state))
+        multiplier = _solo_multiplier(opened_count)
+        if game.status == "cashed":
+            return (
+                f"🏆 <b>Qimor yakunlandi</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} Yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
+                "━━━━━━━━━━━━━━━"
+            )
+        if game.status == "lost":
+            return (
+                f"{_ce('💣', MINE_EMOJI_ID)} <b>Mina portladi!</b>\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.bet or 0)}</b> dollar kuyib ketdi.\n"
+                "━━━━━━━━━━━━━━━"
+            )
+        footer = result or "Katak tanlang yoki yutuqni vaqtida oling."
+        return (
+            "🎲 <b>1 kishilik Qimor: Mines</b>\n"
+            "━━━━━━━━━━━━━━━\n"
+            f"{_ce('💵', MONEY_EMOJI_ID)} Stavka: <b>{int(game.bet)}</b> dollar\n"
+            f"📈 Multiplier: <b>x{multiplier:.2f}</b>\n"
+            f"{_ce('💵', MONEY_EMOJI_ID)} Hozirgi yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
+            f"💎 Ochilgan safe: <b>{opened_count}</b> ta\n"
+            f"{_ce('💣', MINE_EMOJI_ID)} Mina: <b>{int(game.mine_count or 0)}</b> ta\n"
+            "━━━━━━━━━━━━━━━\n"
+            f"{footer}"
+        )
+
 
 class MinesEngine:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -212,7 +300,7 @@ class MinesEngine:
         async with self.session_factory() as session:
             user = await self._ensure_user(session, tg_user)
             active = await self._active_game(session, tg_user.id)
-            if active is not None and not _is_duel_game(active):
+            if active is not None and not _is_supported_game(active):
                 await self._refund_legacy_game(session, active)
                 active = None
 
@@ -279,6 +367,47 @@ class MinesEngine:
                 game_id=int(game.id),
                 token=game.token,
             )
+
+    async def start_solo(self, tg_user_id: int, game_id: int, token: str) -> MinesView:
+        lock = _game_lock(game_id)
+        await lock.acquire()
+        try:
+            async with self.session_factory() as session:
+                game = await self._game_for_update(session, game_id, token)
+                if game is None or not _is_duel_game(game):
+                    return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
+                if int(game.user_telegram_id) != int(tg_user_id):
+                    return MinesView("", None, "1 kishilik o'yinni faqat yaratuvchi boshlaydi.", True)
+                if game.status != "waiting":
+                    return MinesView(MinesRenderer.text(game), MinesRenderer.keyboard(game), "Bu o'yin allaqachon boshlangan.", True)
+
+                now = _utcnow()
+                mine_count = random.choices([4, 5, 6], weights=[20, 40, 40], k=1)[0]
+                state = _state(game)
+                state["mode"] = "solo"
+                state["players"] = [int(game.user_telegram_id)]
+                state["turn"] = int(game.user_telegram_id)
+                state["mines"] = sorted(secrets.SystemRandom().sample(range(GRID_SIZE), mine_count))
+                state["solo_opened"] = []
+                game.game_kind = "solo"
+                game.status = "active"
+                game.mine_count = mine_count
+                game.payout = 0
+                game.multiplier = 1.0
+                game.mines_json = json.dumps(state, ensure_ascii=False)
+                game.opened_json = json.dumps({"picks": {}, "order": []}, ensure_ascii=False)
+                game.last_action_at = now
+                await session.commit()
+                return MinesView(
+                    MinesRenderer.text(game, result="1 kishilik mines boshlandi. Mina tushsa stavka kuyadi."),
+                    MinesRenderer.keyboard(game),
+                    "1 kishilik o'yin boshlandi.",
+                    False,
+                    int(game.id),
+                    game.token,
+                )
+        finally:
+            lock.release()
 
     async def set_message_id(self, game_id: int, token: str, message_id: int) -> None:
         async with self.session_factory() as session:
@@ -352,8 +481,10 @@ class MinesEngine:
         try:
             async with self.session_factory() as session:
                 game = await self._game_for_update(session, game_id, token)
-                if game is None or not _is_duel_game(game):
+                if game is None or not _is_supported_game(game):
                     return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
+                if _is_solo_game(game):
+                    return await self._open_solo_cell(session, game, tg_user_id, cell)
                 if game.status == "waiting":
                     return MinesView("", None, "Ikkinchi o'yinchi qo'shilmagan.", True)
                 if game.status != "active":
@@ -400,8 +531,90 @@ class MinesEngine:
         finally:
             lock.release()
 
+    async def _open_solo_cell(
+        self,
+        session: AsyncSession,
+        game: GambleMinesGame,
+        tg_user_id: int,
+        cell: int,
+    ) -> MinesView:
+        if int(game.user_telegram_id) != int(tg_user_id):
+            return MinesView("", None, "Bu boshqa o'yinchining qimori.", True)
+        if game.status != "active":
+            return MinesView(MinesRenderer.text(game), None, "Bu o'yin yakunlangan.", True)
+
+        state = _state(game)
+        mines = _mine_cells(state)
+        opened = _solo_opened(state)
+        if cell in opened:
+            return MinesView("", None, "Bu katak allaqachon ochilgan.", True)
+
+        now = _utcnow()
+        game.last_action_at = now
+        if cell in mines:
+            game.status = "lost"
+            game.payout = 0
+            game.ended_at = now
+            stats = await self._stats(session, tg_user_id)
+            stats.win_streak = 0
+            await session.commit()
+            return MinesView(MinesRenderer.text(game), None, "💣 Mina! Stavka kuyib ketdi.", True)
+
+        opened.add(cell)
+        state["solo_opened"] = sorted(opened)
+        opened_count = len(opened)
+        game.multiplier = _solo_multiplier(opened_count)
+        game.payout = _solo_payout(int(game.bet), opened_count)
+        game.mines_json = json.dumps(state, ensure_ascii=False)
+        await session.commit()
+        return MinesView(
+            MinesRenderer.text(game, result="Safe ochildi. Davom etish yoki pulni olish mumkin."),
+            MinesRenderer.keyboard(game),
+            "💎 Safe!",
+            False,
+        )
+
     async def cashout(self, tg_user_id: int, game_id: int, token: str) -> MinesView:
-        return MinesView("", None, "Yangi qimorda pulni olish tugmasi ishlatilmaydi.", True)
+        lock = _game_lock(game_id)
+        await lock.acquire()
+        try:
+            async with self.session_factory() as session:
+                game = await self._game_for_update(session, game_id, token)
+                if game is None or not _is_supported_game(game):
+                    return MinesView("", None, "O'yin topilmadi yoki eskirgan.", True)
+                if not _is_solo_game(game):
+                    return MinesView("", None, "2 kishilik qimorda pulni olish tugmasi ishlatilmaydi.", True)
+                if game.status != "active":
+                    return MinesView(MinesRenderer.text(game), None, "Bu o'yin yakunlangan.", True)
+                if int(game.user_telegram_id) != int(tg_user_id):
+                    return MinesView("", None, "Bu boshqa o'yinchining qimori.", True)
+                user = await self._user(session, tg_user_id)
+                stats = await self._stats(session, tg_user_id)
+                if user is None:
+                    return MinesView("", None, "Foydalanuvchi topilmadi.", True)
+                opened_count = len(_solo_opened(_state(game)))
+                if opened_count <= 0:
+                    return MinesView("", None, "Avval kamida bitta safe katak oching.", True)
+                payout = _solo_payout(int(game.bet), opened_count)
+                user.dollar = int(user.dollar or 0) + payout
+                game.status = "cashed"
+                game.payout = payout
+                game.ended_at = _utcnow()
+                game.last_action_at = _utcnow()
+                stats.win_streak = int(stats.win_streak or 0) + 1
+                stats.total_payout = int(stats.total_payout or 0) + payout
+                MinesEconomyService.record_dollar(
+                    session,
+                    user,
+                    payout,
+                    "gamble_mines_cashout",
+                    note=f"Mines cashout #{game.id}: {opened_count} safe",
+                    chat_id=game.chat_id,
+                )
+                await session.commit()
+                return MinesView(MinesRenderer.text(game), None, f"💰 {payout} dollar olindi!", True)
+        finally:
+            lock.release()
 
     async def weekly_top_text(self, limit: int = 10) -> str:
         now = _utcnow()
@@ -778,6 +991,36 @@ def _mine_cells(state: dict) -> set[int]:
     return result
 
 
+def _solo_opened(state: dict) -> set[int]:
+    raw = state.get("solo_opened")
+    result: set[int] = set()
+    if not isinstance(raw, list):
+        return result
+    for item in raw:
+        try:
+            value = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= value < GRID_SIZE:
+            result.add(value)
+    return result
+
+
+def _solo_multiplier(opened_count: int) -> float:
+    if opened_count <= 15:
+        return VISIBLE_MULTIPLIERS.get(opened_count, 15.0)
+    return 15.0
+
+
+def _solo_payout(bet: int, opened_count: int) -> int:
+    if opened_count <= 0:
+        return 0
+    payout = floor(bet * _solo_multiplier(opened_count) * HOUSE_PAYOUT_FACTOR)
+    if opened_count == 1:
+        payout = max(payout, bet)
+    return max(0, payout)
+
+
 def _picked_cells(picks: dict) -> dict[int, dict]:
     result: dict[int, dict] = {}
     for values in (picks.get("picks") or {}).values():
@@ -826,6 +1069,14 @@ def _is_duel_game(game: GambleMinesGame) -> bool:
         and len(players) >= 1
         and isinstance(names, dict)
     )
+
+
+def _is_solo_game(game: GambleMinesGame) -> bool:
+    return getattr(game, "game_kind", None) == "solo"
+
+
+def _is_supported_game(game: GambleMinesGame) -> bool:
+    return _is_duel_game(game) or _is_solo_game(game)
 
 
 def _user_link(user_id: int, name: str) -> str:
