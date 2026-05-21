@@ -8,7 +8,7 @@ from html import escape
 from typing import Optional
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.formatting import CustomEmoji, Text, TextLink
 from sqlalchemy import select
@@ -506,6 +506,7 @@ async def _burn_user_balance(
     settings: Settings,
     field: str,
     label: str,
+    command_example: str,
 ) -> None:
     if message.from_user is None or message.from_user.id not in settings.admin_ids:
         return
@@ -513,18 +514,27 @@ async def _burn_user_balance(
     raw_args = (command.args or "").strip()
     target_id: int | None = None
     target_fallback_name: str | None = None
+    reason = ""
 
     if raw_args:
-        first_arg = raw_args.split(maxsplit=1)[0].strip()
-        if not first_arg.lstrip("-").isdigit():
+        parts = raw_args.split(maxsplit=1)
+        first_arg = parts[0].strip()
+        if first_arg.lstrip("-").isdigit():
+            target_id = int(first_arg)
+            target_fallback_name = str(target_id)
+            reason = parts[1].strip() if len(parts) > 1 else ""
+        elif message.reply_to_message and message.reply_to_message.from_user:
+            target_tg = message.reply_to_message.from_user
+            target_id = target_tg.id
+            target_fallback_name = target_tg.full_name or str(target_tg.id)
+            reason = raw_args
+        else:
             await message.reply(
                 "Format noto'g'ri.\n"
-                "ID bilan: <code>/bust1 7044905076</code>\n"
-                "Yoki user xabariga reply qilib: <code>/bust1</code>"
+                f"ID bilan: <code>{command_example} 7044905076 spam sababli</code>\n"
+                f"Yoki user xabariga reply qilib: <code>{command_example} sabab matni</code>"
             )
             return
-        target_id = int(first_arg)
-        target_fallback_name = str(target_id)
     elif message.reply_to_message and message.reply_to_message.from_user:
         target_tg = message.reply_to_message.from_user
         target_id = target_tg.id
@@ -532,10 +542,12 @@ async def _burn_user_balance(
     else:
         await message.reply(
             "Bu buyruqni ID bilan yoki player xabariga reply qilib ishlating.\n"
-            "Masalan: <code>/bust1 7044905076</code>"
+            f"Masalan: <code>{command_example} 7044905076 sabab matni</code>"
         )
         return
 
+    reason = " ".join(reason.split())[:600]
+    reason_text = reason or "Admin qarori"
     async with SessionLocal() as session:
         user = (
             await session.execute(select(User).where(User.telegram_id == target_id))
@@ -552,7 +564,7 @@ async def _burn_user_balance(
                 user,
                 -burned,
                 "admin_bust",
-                note=f"Admin tomonidan olmoslar 0 qilindi: admin={message.from_user.id}",
+                note=f"Admin tomonidan olmoslar 0 qilindi: admin={message.from_user.id}; sabab={reason_text}",
                 chat_id=message.chat.id,
             )
         elif field == "dollar":
@@ -561,13 +573,33 @@ async def _burn_user_balance(
                 user,
                 -burned,
                 "admin_bust",
-                note=f"Admin tomonidan dollarlar 0 qilindi: admin={message.from_user.id}",
+                note=f"Admin tomonidan dollarlar 0 qilindi: admin={message.from_user.id}; sabab={reason_text}",
                 chat_id=message.chat.id,
             )
         await session.commit()
 
     target_name = _user_link(user.telegram_id, user.display_name or target_fallback_name or str(user.telegram_id))
-    await message.reply(f"🔥 {target_name} balansidagi {label} kuyib ketdi.\nMiqdor: <b>{burned}</b>")
+    escaped_reason = escape(reason_text)
+    private_text = (
+        "⚠️ <b>Hisobingiz yangilandi</b>\n"
+        "━━━━━━━━━━━━━━━\n"
+        f"Hisobingizdagi {label} 0 ga tenglashtirildi.\n"
+        f"O'chirilgan miqdor: <b>{burned}</b>\n"
+        f"📝 Sabab: <b>{escaped_reason}</b>\n"
+        "━━━━━━━━━━━━━━━"
+    )
+    dm_status = "✅ Userga xabar yuborildi."
+    try:
+        await message.bot.send_message(user.telegram_id, private_text)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        dm_status = "⚠️ Userga private xabar yuborilmadi."
+
+    await message.reply(
+        f"🔥 {target_name} balansidagi {label} 0 ga tenglashtirildi.\n"
+        f"Miqdor: <b>{burned}</b>\n"
+        f"📝 Sabab: <b>{escaped_reason}</b>\n"
+        f"{dm_status}"
+    )
 
 
 @router.message(Command("bust1"))
@@ -578,6 +610,7 @@ async def cmd_bust_diamonds(message: Message, command: CommandObject, settings: 
         settings,
         "diamonds",
         "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> olmoslar",
+        "/bust1",
     )
 
 
@@ -589,6 +622,7 @@ async def cmd_bust_dollars(message: Message, command: CommandObject, settings: S
         settings,
         "dollar",
         "<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> dollarlar",
+        "/bust2",
     )
 
 
