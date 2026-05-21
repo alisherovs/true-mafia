@@ -159,17 +159,11 @@ class MinesRenderer:
             winner_id = int(game.winner_telegram_id or 0)
             winner_name = _name(state, winner_id)
             winner = _user_link(winner_id, winner_name) if winner_id else "G'olib"
-            pot = int(game.bet) * 2
-            commission = max(0, pot - int(game.payout or 0))
-            reason = escape(str(state.get("finish_reason") or "G'olib aniqlandi."))
             return (
                 f"🏆 <b>Qimor yakunlandi</b>\n"
                 "━━━━━━━━━━━━━━━\n"
-                f"🥇 G'olib: {winner}\n"
+                f"🥇 {winner} g'olib bo'ldi!\n"
                 f"{_ce('💵', MONEY_EMOJI_ID)} Yutuq: <b>{int(game.payout or 0)}</b> dollar\n"
-                f"🏦 Komissiya: <b>{commission}</b> dollar\n"
-                f"🔢 Hisob: <b>{creator_sum}</b> : <b>{opponent_sum}</b>\n"
-                f"📌 Sabab: <b>{reason}</b>\n"
                 "━━━━━━━━━━━━━━━"
             )
 
@@ -186,12 +180,10 @@ class MinesRenderer:
             )
 
         if game.status == "lost":
-            reason = escape(str(state.get("finish_reason") or "Ikkala ishtirokchi ham minani ochdi."))
             return (
-                f"{_ce('💣', MINE_EMOJI_ID)} <b>Qimor yakunlandi</b>\n"
+                f"{_ce('💣', MINE_EMOJI_ID)} <b>Mina portladi!</b>\n"
                 "━━━━━━━━━━━━━━━\n"
-                f"📌 Sabab: <b>{reason}</b>\n"
-                f"{_ce('💵', MONEY_EMOJI_ID)} Bank: <b>{int(game.bet) * 2}</b> dollar kuyib ketdi.\n"
+                f"{_ce('💵', MONEY_EMOJI_ID)} <b>{int(game.bet) * 2}</b> dollar kuyib ketdi.\n"
                 "━━━━━━━━━━━━━━━"
             )
 
@@ -582,9 +574,6 @@ class MinesEngine:
         loser_stats = second_stats if loser_id == second_id else first_stats
         pot = int(game.bet) * 2
         payout = int(pot * (1 - HOUSE_COMMISSION_RATE))
-        today_won = await self._today_won(session, winner_id, now)
-        if today_won + payout > DAILY_WIN_LIMIT:
-            payout = max(0, DAILY_WIN_LIMIT - today_won)
 
         game.status = "cashed"
         game.winner_telegram_id = winner_id
