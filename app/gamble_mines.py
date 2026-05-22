@@ -64,6 +64,7 @@ class MinesView:
     show_alert: bool = False
     game_id: Optional[int] = None
     token: str = ""
+    loss_voice: bool = False
 
 
 class MinesAntiCheatValidator:
@@ -522,7 +523,13 @@ class MinesEngine:
                 if finished:
                     await self._finish_duel(session, game, players, state, picks, now)
                     await session.commit()
-                    return MinesView(MinesRenderer.text(game), None, "O'yin yakunlandi.", True)
+                    return MinesView(
+                        MinesRenderer.text(game),
+                        None,
+                        "O'yin yakunlandi.",
+                        True,
+                        loss_voice=game.status == "lost",
+                    )
 
                 next_player = _next_player(players, picks, tg_user_id)
                 state["turn"] = next_player
@@ -559,7 +566,7 @@ class MinesEngine:
             stats = await self._stats(session, tg_user_id)
             stats.win_streak = 0
             await session.commit()
-            return MinesView(MinesRenderer.text(game), None, "💣 Mina! Stavka kuyib ketdi.", True)
+            return MinesView(MinesRenderer.text(game), None, "💣 Mina! Stavka kuyib ketdi.", True, loss_voice=True)
 
         opened.add(cell)
         state["solo_opened"] = sorted(opened)

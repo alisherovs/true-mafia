@@ -148,6 +148,7 @@ TOURNAMENT_GAME_PREFIX = "tournament_game:"
 TEAM_GAME_PREFIX = "team_game:"
 HERO_INFO_HIDDEN_PREFIX = "hero_info_hidden:"
 GAMBLE_ENABLED_KEY = "gamble_enabled"
+GAMBLE_LOSS_VOICE_FILE_ID_KEY = "gamble_loss_voice_file_id"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -423,16 +424,39 @@ class GameEngine:
             await self._set_bot_setting_value(session, GAMBLE_ENABLED_KEY, "1" if enabled else "0")
             await session.commit()
 
-    async def gamble_settings_text(self) -> tuple[str, bool]:
+    async def get_gamble_loss_voice_file_id(self) -> str:
+        async with self.session_factory() as session:
+            return await self._get_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, "")
+
+    async def set_gamble_loss_voice_file_id(self, file_id: str) -> tuple[bool, str]:
+        file_id = (file_id or "").strip()
+        if not file_id:
+            return False, "Voice file_id topilmadi. Ovozli xabar yuboring."
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, file_id)
+            await session.commit()
+        return True, "✅ Qimorda pul kuyganda yuboriladigan ovozli xabar saqlandi."
+
+    async def clear_gamble_loss_voice_file_id(self) -> str:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, "")
+            await session.commit()
+        return "🗑 Qimor voice xabari o'chirildi."
+
+    async def gamble_settings_text(self) -> tuple[str, bool, bool]:
         enabled = await self.is_gamble_enabled()
+        voice_file_id = await self.get_gamble_loss_voice_file_id()
+        has_voice = bool(voice_file_id)
         status = "🟢 <b>YOQILGAN</b>" if enabled else "🔴 <b>O'CHIRILGAN</b>"
+        voice_status = "✅ <b>Yuklangan</b>" if has_voice else "❌ <b>Yuklanmagan</b>"
         text = (
             "🎰 <b>Qimor sozlamalari</b>\n"
             "━━━━━━━━━━━━━━━\n\n"
             f"Holat: {status}\n\n"
+            f"💣 Pul kuyganda voice: {voice_status}\n\n"
             "O'chirilsa userlar /qimor buyrug'ini ishlata olmaydi va eski qimor tugmalari ham to'xtaydi."
         )
-        return text, enabled
+        return text, enabled, has_voice
 
     @staticmethod
     def _format_minutes(minutes: int) -> str:
@@ -5789,15 +5813,16 @@ class GameEngine:
 
     async def check_winner(self, game_id: int) -> Optional[Team]:
         """
-        Oyin xulosasini tekshiradi - kim yutdi?
-        
+        O'yin xulosasini tekshiradi - kim yutdi?
+
         Qoida:
         1. Mafia nol qolsa → CITY wins
         2. Qotil o'z qolsa → KILLER wins
         3. Suidsid o'ldirilib ketsa → NEUTRAL wins
         4. 2 kishi qolsa va 1 ta mafia bo'lsa → MAFIA wins (final duel)
         5. Mafia soni ≥ non-mafia soni bo'lsa → MAFIA wins
-        6. Boshqa holda oyni davom ettir
+        6. Faqat singletonlar qolsa → tirik singletonlar yutadi
+        7. Boshqa holda o'yin davom etadi
         """
         async with self.session_factory() as session:
             alive = (
@@ -5816,14 +5841,21 @@ class GameEngine:
             passive_survivor_count = sum(
                 1
                 for p in alive
-                if p.role == Role.HOJIAKA.value
+                if p.role in {Role.HOJIAKA.value, Role.MINER.value}
             )
             
             singleton_count = killer_count + neutral_count
             blocking_singleton_count = max(0, singleton_count - passive_survivor_count)
 
-            # Hojiaka kabi passiv singletonlar o'yinni cho'zmaydi; tirik qolsa yakunda baribir g'olib bo'ladi.
-            if mafia_count == 0 and (blocking_singleton_count == 0 or city_count >= 2):
+            # Oxirida faqat singleton rollar qolsa, o'yin shu yerda tugaydi.
+            # finish_game() bunday finalda tirik qolgan barcha singletonlarni g'olib qiladi,
+            # shuning uchun bu yerda faqat qaysi umumiy winner_team bilan yopishni tanlaymiz.
+            if city_count == 0 and mafia_count == 0 and singleton_count > 0:
+                return Team.KILLER if neutral_count == 0 else Team.NEUTRAL
+
+            # Hojiaka/Konchi kabi survival singletonlar o'yinni cho'zmaydi;
+            # faol singletonlar bor ekan, mafia yo'q bo'lsa ham o'yin davom etadi.
+            if mafia_count == 0 and blocking_singleton_count == 0:
                 return Team.CITY
             
             # Qotil o'z qolsa → Qotil yutadi
@@ -5891,9 +5923,18 @@ class GameEngine:
                 for p in players
                 if p.role is not None
             )
+            singleton_final = any(
+                p.alive and p.team in {Team.KILLER.value, Team.NEUTRAL.value}
+                for p in players
+            ) and not any(
+                p.alive and p.team in {Team.CITY.value, Team.MAFIA.value}
+                for p in players
+            )
 
             def base_winner(player: GamePlayer) -> bool:
                 is_win = bool(player.won) or (player.team == winner_team.value and player.alive)
+                if singleton_final and player.alive and player.team in {Team.KILLER.value, Team.NEUTRAL.value}:
+                    is_win = True
                 if player.role == Role.MINER.value and player.alive:
                     is_win = True
                 if player.role == Role.HOJIAKA.value and player.alive:

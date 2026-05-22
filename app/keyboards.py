@@ -954,11 +954,15 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def owner_gamble_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+def owner_gamble_keyboard(enabled: bool, has_voice: bool = False) -> InlineKeyboardMarkup:
     toggle_text = "🔴 Qimorni o'chirish" if enabled else "🟢 Qimorni yoqish"
+    voice_rows = [[InlineKeyboardButton(text="🎙 Pul kuyganda voice yuklash", callback_data="owner:gamble:voice")]]
+    if has_voice:
+        voice_rows.append([InlineKeyboardButton(text="🗑 Voice xabarni o'chirish", callback_data="owner:gamble:voice:clear")])
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=toggle_text, callback_data="owner:gamble:toggle")],
+            *voice_rows,
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )

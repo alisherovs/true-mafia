@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
@@ -10,6 +10,18 @@ from app.game_engine import GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine
 
 router = Router()
+
+
+async def _send_loss_voice_if_needed(message: Message, engine: GameEngine, loss_voice: bool) -> None:
+    if not loss_voice:
+        return
+    file_id = await engine.get_gamble_loss_voice_file_id()
+    if not file_id:
+        return
+    try:
+        await message.bot.send_voice(message.chat.id, file_id)
+    except (TelegramBadRequest, TelegramForbiddenError):
+        return
 
 
 @router.message(Command("qimor"))
@@ -24,6 +36,7 @@ async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine
     sent = await message.answer(view.text, reply_markup=view.keyboard)
     if view.game_id and view.token:
         await mines.set_message_id(view.game_id, view.token, sent.message_id)
+    await _send_loss_voice_if_needed(message, engine, view.loss_voice)
 
 
 @router.message(Command("topq"))
@@ -72,4 +85,5 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
         except TelegramBadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
+    await _send_loss_voice_if_needed(callback.message, engine, view.loss_voice)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)

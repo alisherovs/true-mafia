@@ -156,8 +156,8 @@ async def owner_gamble_callback(callback: CallbackQuery, engine: GameEngine, set
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    text, enabled = await engine.gamble_settings_text()
-    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(enabled))
+    text, enabled, has_voice = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(enabled, has_voice))
     await callback.answer()
 
 
@@ -166,11 +166,38 @@ async def owner_gamble_toggle_callback(callback: CallbackQuery, engine: GameEngi
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    _, enabled = await engine.gamble_settings_text()
+    _, enabled, _ = await engine.gamble_settings_text()
     await engine.set_gamble_enabled(not enabled)
-    text, new_enabled = await engine.gamble_settings_text()
-    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled))
+    text, new_enabled, has_voice = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled, has_voice))
     await callback.answer("Qimor yoqildi." if new_enabled else "Qimor o'chirildi.", show_alert=True)
+
+
+@router.callback_query(F.data == "owner:gamble:voice")
+async def owner_gamble_voice_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "gamble_loss_voice"
+    await _safe_edit(
+        callback,
+        "🎙 <b>Qimor voice xabari</b>\n\n"
+        "Qimorda pul kuyib ketganda guruhga yuboriladigan ovozli xabarni yuboring.\n\n"
+        "Faqat Telegram <b>voice</b> xabar qabul qilinadi.",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:gamble:voice:clear")
+async def owner_gamble_voice_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    text = await engine.clear_gamble_loss_voice_file_id()
+    settings_text, enabled, has_voice = await engine.gamble_settings_text()
+    await _safe_edit(callback, f"{text}\n\n{settings_text}", reply_markup=owner_gamble_keyboard(enabled, has_voice))
+    await callback.answer("O'chirildi.", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:diamond_audit")
@@ -900,6 +927,21 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_panel_keyboard())
+        return True
+
+    if action == "gamble_loss_voice":
+        if message.voice is None:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "gamble_loss_voice"
+            await message.answer("Voice xabar yuboring. Oddiy matn/audio qabul qilinmaydi.", reply_markup=owner_wait_keyboard())
+            return True
+        ok, text = await engine.set_gamble_loss_voice_file_id(message.voice.file_id)
+        settings_text, enabled, has_voice = await engine.gamble_settings_text()
+        await message.answer(
+            f"{text}\n\n{settings_text}" if ok else text,
+            reply_markup=owner_gamble_keyboard(enabled, has_voice) if ok else owner_wait_keyboard(),
+        )
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "gamble_loss_voice"
         return True
 
     if action == "news_channel_url":
