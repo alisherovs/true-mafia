@@ -7,21 +7,27 @@ from aiogram.types import CallbackQuery, Message
 
 from app.database import SessionLocal
 from app.game_engine import GameEngine
-from app.gamble_mines import MinesAntiCheatValidator, MinesEngine
+from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
 
 router = Router()
 
 
-async def _send_loss_voice_if_needed(message: Message, engine: GameEngine, loss_voice: bool) -> None:
-    if not loss_voice:
-        return
-    file_id = await engine.get_gamble_loss_voice_file_id()
+async def _voice_file_id_for_view(engine: GameEngine, view: MinesView) -> str:
+    if view.win_voice:
+        return await engine.get_gamble_win_voice_file_id()
+    if view.loss_voice:
+        return await engine.get_gamble_loss_voice_file_id()
+    return ""
+
+
+async def _send_voice_result(message: Message, file_id: str, caption: str) -> bool:
     if not file_id:
-        return
+        return False
     try:
-        await message.bot.send_voice(message.chat.id, file_id)
+        await message.bot.send_voice(message.chat.id, file_id, caption=caption)
+        return True
     except (TelegramBadRequest, TelegramForbiddenError):
-        return
+        return False
 
 
 @router.message(Command("qimor"))
@@ -33,10 +39,12 @@ async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine
         return
     mines = MinesEngine(SessionLocal)
     view = await mines.start_or_resume(message.from_user, message.chat.id, command.args)
+    file_id = await _voice_file_id_for_view(engine, view)
+    if file_id and await _send_voice_result(message, file_id, view.text):
+        return
     sent = await message.answer(view.text, reply_markup=view.keyboard)
     if view.game_id and view.token:
         await mines.set_message_id(view.game_id, view.token, sent.message_id)
-    await _send_loss_voice_if_needed(message, engine, view.loss_voice)
 
 
 @router.message(Command("topq"))
@@ -79,11 +87,24 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
         await callback.answer("Bu tugma eskirgan. /qimor bilan qayta oching.", show_alert=True)
         return
 
+    voice_file_id = await _voice_file_id_for_view(engine, view)
+    if view.text and voice_file_id:
+        sent = await _send_voice_result(callback.message, voice_file_id, view.text)
+        if sent:
+            try:
+                await callback.message.delete()
+            except TelegramBadRequest:
+                try:
+                    await callback.message.edit_reply_markup(reply_markup=None)
+                except TelegramBadRequest:
+                    pass
+            await callback.answer(view.alert or "OK", show_alert=view.show_alert)
+            return
+
     if view.text:
         try:
             await callback.message.edit_text(view.text, reply_markup=view.keyboard)
         except TelegramBadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
-    await _send_loss_voice_if_needed(callback.message, engine, view.loss_voice)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)

@@ -149,6 +149,7 @@ TEAM_GAME_PREFIX = "team_game:"
 HERO_INFO_HIDDEN_PREFIX = "hero_info_hidden:"
 GAMBLE_ENABLED_KEY = "gamble_enabled"
 GAMBLE_LOSS_VOICE_FILE_ID_KEY = "gamble_loss_voice_file_id"
+GAMBLE_WIN_VOICE_FILE_ID_KEY = "gamble_win_voice_file_id"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -428,6 +429,10 @@ class GameEngine:
         async with self.session_factory() as session:
             return await self._get_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, "")
 
+    async def get_gamble_win_voice_file_id(self) -> str:
+        async with self.session_factory() as session:
+            return await self._get_bot_setting_value(session, GAMBLE_WIN_VOICE_FILE_ID_KEY, "")
+
     async def set_gamble_loss_voice_file_id(self, file_id: str) -> tuple[bool, str]:
         file_id = (file_id or "").strip()
         if not file_id:
@@ -437,26 +442,45 @@ class GameEngine:
             await session.commit()
         return True, "✅ Qimorda pul kuyganda yuboriladigan ovozli xabar saqlandi."
 
+    async def set_gamble_win_voice_file_id(self, file_id: str) -> tuple[bool, str]:
+        file_id = (file_id or "").strip()
+        if not file_id:
+            return False, "Voice file_id topilmadi. Ovozli xabar yuboring."
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_WIN_VOICE_FILE_ID_KEY, file_id)
+            await session.commit()
+        return True, "✅ Qimorda yutuq bo'lganda yuboriladigan ovozli xabar saqlandi."
+
     async def clear_gamble_loss_voice_file_id(self) -> str:
         async with self.session_factory() as session:
             await self._set_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, "")
             await session.commit()
-        return "🗑 Qimor voice xabari o'chirildi."
+        return "🗑 Qimorda pul kuyganda chiqadigan voice xabari o'chirildi."
 
-    async def gamble_settings_text(self) -> tuple[str, bool, bool]:
+    async def clear_gamble_win_voice_file_id(self) -> str:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_WIN_VOICE_FILE_ID_KEY, "")
+            await session.commit()
+        return "🗑 Qimorda yutuq bo'lganda chiqadigan voice xabari o'chirildi."
+
+    async def gamble_settings_text(self) -> tuple[str, bool, bool, bool]:
         enabled = await self.is_gamble_enabled()
-        voice_file_id = await self.get_gamble_loss_voice_file_id()
-        has_voice = bool(voice_file_id)
+        loss_voice_file_id = await self.get_gamble_loss_voice_file_id()
+        win_voice_file_id = await self.get_gamble_win_voice_file_id()
+        has_loss_voice = bool(loss_voice_file_id)
+        has_win_voice = bool(win_voice_file_id)
         status = "🟢 <b>YOQILGAN</b>" if enabled else "🔴 <b>O'CHIRILGAN</b>"
-        voice_status = "✅ <b>Yuklangan</b>" if has_voice else "❌ <b>Yuklanmagan</b>"
+        loss_voice_status = "✅ <b>Yuklangan</b>" if has_loss_voice else "❌ <b>Yuklanmagan</b>"
+        win_voice_status = "✅ <b>Yuklangan</b>" if has_win_voice else "❌ <b>Yuklanmagan</b>"
         text = (
             "🎰 <b>Qimor sozlamalari</b>\n"
             "━━━━━━━━━━━━━━━\n\n"
             f"Holat: {status}\n\n"
-            f"💣 Pul kuyganda voice: {voice_status}\n\n"
+            f"💣 Pul kuyganda voice: {loss_voice_status}\n"
+            f"🏆 Yutuq bo'lganda voice: {win_voice_status}\n\n"
             "O'chirilsa userlar /qimor buyrug'ini ishlata olmaydi va eski qimor tugmalari ham to'xtaydi."
         )
-        return text, enabled, has_voice
+        return text, enabled, has_loss_voice, has_win_voice
 
     @staticmethod
     def _format_minutes(minutes: int) -> str:

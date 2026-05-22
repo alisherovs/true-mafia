@@ -65,6 +65,7 @@ class MinesView:
     game_id: Optional[int] = None
     token: str = ""
     loss_voice: bool = False
+    win_voice: bool = False
 
 
 class MinesAntiCheatValidator:
@@ -529,6 +530,7 @@ class MinesEngine:
                         "O'yin yakunlandi.",
                         True,
                         loss_voice=game.status == "lost",
+                        win_voice=game.status == "cashed",
                     )
 
                 next_player = _next_player(players, picks, tg_user_id)
@@ -620,7 +622,7 @@ class MinesEngine:
                     chat_id=game.chat_id,
                 )
                 await session.commit()
-                return MinesView(MinesRenderer.text(game), None, f"💰 {payout} dollar olindi!", True)
+                return MinesView(MinesRenderer.text(game), None, f"💰 {payout} dollar olindi!", True, win_voice=True)
         finally:
             lock.release()
 
