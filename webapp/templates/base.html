@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>{% block title %}Qimor{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gold: '#facc15',
+            dark: '#0f172a',
+            darker: '#020617',
+            card: '#1e293b',
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="/static/style.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-darker text-white min-h-screen flex flex-col">
+  <nav class="bg-dark border-b border-gray-800 px-4 py-3 sticky top-0 z-50">
+    <div class="max-w-lg mx-auto flex items-center justify-between">
+      <a href="/dashboard" class="flex items-center gap-2">
+        <span class="text-2xl">💎</span>
+        <span class="font-bold text-gold text-lg tracking-wide">MINES</span>
+      </a>
+      <div class="flex items-center gap-3">
+        {% if request.session.get('user_id') %}
+          <a href="/mines" class="text-sm bg-gold text-black px-3 py-1.5 rounded-lg font-bold hover:bg-yellow-300 transition">O'yin</a>
+          <a href="/logout" class="text-sm text-gray-400 hover:text-white transition">Chiqish</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="flex-1 max-w-lg mx-auto w-full px-4 py-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="bg-dark border-t border-gray-800 py-3 text-center text-xs text-gray-500">
+    © Qimor Sayti
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

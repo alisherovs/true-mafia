@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Kirish - Qimor{% endblock %}
+{% block content %}
+<div class="mt-12">
+  <div class="text-center mb-8">
+    <div class="text-6xl mb-4">💣</div>
+    <h1 class="text-2xl font-bold text-gold mb-1">Mines</h1>
+    <p class="text-gray-400 text-sm">Telegram akkauntingiz bilan kiring</p>
+  </div>
+
+  <form method="post" action="/login" class="bg-card rounded-2xl p-6 space-y-4 border border-gray-800">
+    <div>
+      <label class="block text-sm font-medium text-gray-300 mb-1.5">Telegram ID</label>
+      <input
+        type="number"
+        name="telegram_id"
+        required
+        placeholder="Masalan: 123456789"
+        class="w-full bg-darker border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold transition"
+      >
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-300 mb-1.5">Ismingiz</label>
+      <input
+        type="text"
+        name="name"
+        placeholder="Foydalanuvchi nomi"
+        class="w-full bg-darker border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-gold focus:ring-1 focus:ring-gold transition"
+      >
+    </div>
+    <button
+      type="submit"
+      class="w-full bg-gradient-to-r from-gold to-yellow-500 text-black font-bold py-3 rounded-xl hover:from-yellow-300 hover:to-gold transition shadow-lg shadow-yellow-500/20"
+    >
+      Kirish
+    </button>
+  </form>
+
+  <p class="text-center text-xs text-gray-500 mt-6">
+    Telegram ID ni @userinfobot dan olishingiz mumkin
+  </p>
+</div>
+{% endblock %}

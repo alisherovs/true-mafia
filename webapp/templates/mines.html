@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Mines - Qimor{% endblock %}
+{% block content %}
+<!-- Balance Bar -->
+<div class="bg-card rounded-2xl p-4 border border-gray-800 mb-4 flex items-center justify-between">
+  <div>
+    <div class="text-xs text-gray-400">Balans</div>
+    <div class="text-xl font-bold text-gold" id="balance">{{ user.dollar or 0 }} $</div>
+  </div>
+  <a href="/dashboard" class="text-sm text-gray-400 hover:text-white">← Orqaga</a>
+</div>
+
+<!-- Game Controls -->
+<div id="controls" class="bg-card rounded-2xl p-5 border border-gray-800 mb-5">
+  <div class="flex gap-3 mb-4">
+    <div class="flex-1">
+      <label class="block text-xs text-gray-400 mb-1">Stavka ($)</label>
+      <input
+        type="number"
+        id="betInput"
+        value="100"
+        min="{{ min_bet }}"
+        class="w-full bg-darker border border-gray-700 rounded-xl px-4 py-3 text-white text-center font-bold focus:outline-none focus:border-gold transition"
+      >
+    </div>
+    <div class="flex-1">
+      <label class="block text-xs text-gray-400 mb-1">Mina</label>
+      <div class="w-full bg-darker border border-gray-700 rounded-xl px-4 py-3 text-center font-bold text-red-400">8</div>
+    </div>
+  </div>
+  <button
+    id="startBtn"
+    onclick="startGame()"
+    class="w-full bg-gradient-to-r from-gold to-yellow-500 text-black font-bold py-3 rounded-xl hover:from-yellow-300 transition shadow-lg shadow-yellow-500/20"
+  >
+    🚀 O'yinni boshlash
+  </button>
+  <button
+    id="cashoutBtn"
+    onclick="cashout()"
+    class="hidden w-full bg-gradient-to-r from-green-500 to-green-400 text-black font-bold py-3 rounded-xl hover:from-green-400 transition shadow-lg shadow-green-500/20"
+  >
+    💰 Pulni olish — <span id="cashoutAmount">0</span>$ (x<span id="multiplier">1.00</span>)
+  </button>
+</div>
+
+<!-- Info Bar -->
+<div id="infoBar" class="hidden text-center mb-3">
+  <span class="text-sm text-gray-400">Ochilgan: <span id="openedCount" class="text-gold font-bold">0</span></span>
+  <span class="mx-2 text-gray-600">|</span>
+  <span class="text-sm text-gray-400">Koef: <span id="currentMult" class="text-gold font-bold">1.00</span>x</span>
+</div>
+
+<!-- Grid -->
+<div id="grid" class="grid grid-cols-6 gap-2 mb-5"></div>
+
+<!-- Message -->
+<div id="message" class="text-center text-sm min-h-[1.5rem]"></div>
+
+{% if game %}
+<div id="gameState" data-state="{{ game | tojson | forceescape }}" style="display:none"></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/mines.js"></script>
+{% if game %}
+<script>
+  const raw = document.getElementById('gameState').dataset.state;
+  const g = JSON.parse(raw);
+  resumeGame(g.id, g.bet, g.opened_count, g.multiplier, g.payout, g.cells);
+</script>
+{% endif %}
+{% endblock %}
