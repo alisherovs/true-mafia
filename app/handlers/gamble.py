@@ -6,14 +6,18 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, Message
 
 from app.database import SessionLocal
+from app.game_engine import GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine
 
 router = Router()
 
 
 @router.message(Command("qimor"))
-async def cmd_qimor(message: Message, command: CommandObject) -> None:
+async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine) -> None:
     if message.from_user is None:
+        return
+    if not await engine.is_gamble_enabled():
+        await message.answer("🚫 Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.")
         return
     mines = MinesEngine(SessionLocal)
     view = await mines.start_or_resume(message.from_user, message.chat.id, command.args)
@@ -29,9 +33,12 @@ async def cmd_topq(message: Message) -> None:
 
 
 @router.callback_query(F.data.startswith("gm:"))
-async def gamble_mines_callback(callback: CallbackQuery) -> None:
+async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
         return
     try:
         action, game_id, token, cell = MinesAntiCheatValidator.decode_callback(callback.data or "")

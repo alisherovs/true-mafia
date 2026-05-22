@@ -147,6 +147,7 @@ ADMIN_GROUP_ID_KEY = "admin_group_id"
 TOURNAMENT_GAME_PREFIX = "tournament_game:"
 TEAM_GAME_PREFIX = "team_game:"
 HERO_INFO_HIDDEN_PREFIX = "hero_info_hidden:"
+GAMBLE_ENABLED_KEY = "gamble_enabled"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -411,6 +412,27 @@ class GameEngine:
             session.add(BotSetting(key=key, value=value))
         else:
             setting.value = value
+
+    async def is_gamble_enabled(self) -> bool:
+        async with self.session_factory() as session:
+            value = await self._get_bot_setting_value(session, GAMBLE_ENABLED_KEY, "1")
+        return value != "0"
+
+    async def set_gamble_enabled(self, enabled: bool) -> None:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_ENABLED_KEY, "1" if enabled else "0")
+            await session.commit()
+
+    async def gamble_settings_text(self) -> tuple[str, bool]:
+        enabled = await self.is_gamble_enabled()
+        status = "🟢 <b>YOQILGAN</b>" if enabled else "🔴 <b>O'CHIRILGAN</b>"
+        text = (
+            "🎰 <b>Qimor sozlamalari</b>\n"
+            "━━━━━━━━━━━━━━━\n\n"
+            f"Holat: {status}\n\n"
+            "O'chirilsa userlar /qimor buyrug'ini ishlata olmaydi va eski qimor tugmalari ham to'xtaydi."
+        )
+        return text, enabled
 
     @staticmethod
     def _format_minutes(minutes: int) -> str:

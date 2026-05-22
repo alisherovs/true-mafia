@@ -16,6 +16,7 @@ from app.keyboards import (
     owner_diamond_audit_keyboard,
     owner_diamond_top_keyboard,
     owner_dollar_top_keyboard,
+    owner_gamble_keyboard,
     owner_hero_market_keyboard,
     owner_invoice_after_keyboard,
     owner_invoice_delivery_keyboard,
@@ -93,6 +94,7 @@ OWNER_COMMANDS_TEXT = (
     "/gbust - bot admin bo'lgan guruhni premium ro'yxatdan bankrot qilish\n\n"
     "🧩 <b>Admin panel tugmalari</b>\n"
     "📊 Statistika - bot statistikasi\n"
+    "🎰 Qimor sozlamalari - /qimor xizmatini yoqish yoki o'chirish\n"
     "💎 TOP 30 almaz - eng ko'p almazga ega userlar ro'yxati\n"
     "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
     "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
@@ -146,6 +148,29 @@ async def owner_stats_callback(callback: CallbackQuery, engine: GameEngine, sett
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
     await _safe_edit(callback, await engine.owner_stats(), reply_markup=owner_panel_keyboard())
     await callback.answer()
+
+
+@router.callback_query(F.data == "owner:gamble")
+async def owner_gamble_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    text, enabled = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(enabled))
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:gamble:toggle")
+async def owner_gamble_toggle_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    _, enabled = await engine.gamble_settings_text()
+    await engine.set_gamble_enabled(not enabled)
+    text, new_enabled = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled))
+    await callback.answer("Qimor yoqildi." if new_enabled else "Qimor o'chirildi.", show_alert=True)
 
 
 @router.callback_query(F.data == "owner:diamond_audit")
@@ -630,6 +655,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
         await callback.message.edit_text(
             "🧾 <b>Admin panel yordam</b>\n\n"
             "📊 Statistika - bot raqamlarini ko'rsatadi.\n"
+            "🎰 Qimor sozlamalari - /qimor xizmatini vaqtincha yoqadi yoki o'chiradi.\n"
             "💎 Almaz loglari - almaz kirim-chiqimi, sarf sabablari va oxirgi amallarni ko'rsatadi.\n"
             "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulaydi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"

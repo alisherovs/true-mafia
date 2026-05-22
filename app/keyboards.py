@@ -932,6 +932,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
+            [InlineKeyboardButton(text="🎰 Qimor sozlamalari", callback_data="owner:gamble")],
             [diamond_icon_button("TOP 30 almaz", callback_data="owner:diamond_top")],
             [dollar_icon_button("TOP 30 dollar", callback_data="owner:dollar_top")],
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
@@ -951,6 +952,17 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="◀️ User panel", callback_data="start:back")],
         ]
     )
+
+
+def owner_gamble_keyboard(enabled: bool) -> InlineKeyboardMarkup:
+    toggle_text = "🔴 Qimorni o'chirish" if enabled else "🟢 Qimorni yoqish"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="owner:gamble:toggle")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
+        ]
+    )
+
 
 def owner_channel_gifts_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
