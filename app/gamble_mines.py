@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -21,6 +20,7 @@ GRID_SIZE = 36
 GRID_WIDTH = 6
 PICKS_PER_PLAYER = 3
 DUEL_MINE_COUNT = 6
+SOLO_MINE_COUNT = 8
 HOUSE_COMMISSION_RATE = 0.10
 HOUSE_PAYOUT_FACTOR = 0.92
 MIN_BET = 10
@@ -34,20 +34,20 @@ _GAME_LOCKS: dict[int, asyncio.Lock] = {}
 
 VISIBLE_MULTIPLIERS = {
     0: 1.00,
-    1: 1.08,
-    2: 1.18,
-    3: 1.35,
-    4: 1.55,
-    5: 1.80,
-    6: 2.25,
-    7: 2.80,
-    8: 3.50,
-    9: 4.30,
-    10: 5.00,
-    11: 6.70,
-    12: 8.80,
-    13: 11.00,
-    14: 13.00,
+    1: 1.04,
+    2: 1.12,
+    3: 1.28,
+    4: 1.65,
+    5: 2.20,
+    6: 3.00,
+    7: 4.10,
+    8: 5.40,
+    9: 7.00,
+    10: 9.00,
+    11: 11.00,
+    12: 12.50,
+    13: 13.50,
+    14: 14.20,
     15: 15.00,
 }
 
@@ -385,7 +385,7 @@ class MinesEngine:
                     return MinesView(MinesRenderer.text(game), MinesRenderer.keyboard(game), "Bu o'yin allaqachon boshlangan.", True)
 
                 now = _utcnow()
-                mine_count = random.choices([4, 5, 6], weights=[20, 40, 40], k=1)[0]
+                mine_count = SOLO_MINE_COUNT
                 state = _state(game)
                 state["mode"] = "solo"
                 state["players"] = [int(game.user_telegram_id)]
