@@ -961,16 +961,13 @@ def owner_gamble_keyboard(
 ) -> InlineKeyboardMarkup:
     toggle_text = "🔴 Qimorni o'chirish" if enabled else "🟢 Qimorni yoqish"
     voice_rows = [
-        [InlineKeyboardButton(text="💣 Kuyganda voice yuklash", callback_data="owner:gamble:voice:loss")],
-        [InlineKeyboardButton(text="🏆 Yutuqda voice yuklash", callback_data="owner:gamble:voice:win")],
+        [InlineKeyboardButton(text="💣 Kuyganda voice qo'shish", callback_data="owner:gamble:voice:loss")],
     ]
-    clear_row: list[InlineKeyboardButton] = []
     if has_loss_voice:
-        clear_row.append(InlineKeyboardButton(text="🗑 Kuygan voice", callback_data="owner:gamble:voice:clear:loss"))
+        voice_rows.append([InlineKeyboardButton(text="🗑 Kuygan voices o'chirish", callback_data="owner:gamble:voice:clear:loss")])
+    voice_rows.append([InlineKeyboardButton(text="🏆 Yutuqda voice qo'shish", callback_data="owner:gamble:voice:win")])
     if has_win_voice:
-        clear_row.append(InlineKeyboardButton(text="🗑 Yutuq voice", callback_data="owner:gamble:voice:clear:win"))
-    if clear_row:
-        voice_rows.append(clear_row)
+        voice_rows.append([InlineKeyboardButton(text="🗑 Yutuq voices o'chirish", callback_data="owner:gamble:voice:clear:win")])
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=toggle_text, callback_data="owner:gamble:toggle")],

@@ -184,7 +184,8 @@ async def owner_gamble_voice_callback(callback: CallbackQuery, settings: Setting
     await _safe_edit(
         callback,
         "🎙 <b>Qimor voice xabari</b>\n\n"
-        f"Qimorda {title} guruhga yuboriladigan ovozli xabarni yuboring.\n\n"
+        f"Qimorda {title} guruhga yuboriladigan ovozli xabarni yuboring.\n"
+        "Har yuborgan voice ro'yxatga qo'shiladi va bot o'yin yakunida bittasini random tanlaydi.\n\n"
         "Faqat Telegram <b>voice</b> xabar qabul qilinadi.",
         reply_markup=owner_wait_keyboard(),
     )

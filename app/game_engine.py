@@ -426,30 +426,62 @@ class GameEngine:
             await session.commit()
 
     async def get_gamble_loss_voice_file_id(self) -> str:
-        async with self.session_factory() as session:
-            return await self._get_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, "")
+        voices = await self.get_gamble_loss_voice_file_ids()
+        return random.choice(voices) if voices else ""
 
     async def get_gamble_win_voice_file_id(self) -> str:
+        voices = await self.get_gamble_win_voice_file_ids()
+        return random.choice(voices) if voices else ""
+
+    @staticmethod
+    def _parse_voice_file_ids(raw: str) -> list[str]:
+        raw = (raw or "").strip()
+        if not raw:
+            return []
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return [raw]
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        if isinstance(parsed, str) and parsed.strip():
+            return [parsed.strip()]
+        return []
+
+    async def _get_gamble_voice_file_ids(self, key: str) -> list[str]:
         async with self.session_factory() as session:
-            return await self._get_bot_setting_value(session, GAMBLE_WIN_VOICE_FILE_ID_KEY, "")
+            raw = await self._get_bot_setting_value(session, key, "")
+        return self._parse_voice_file_ids(raw)
+
+    async def get_gamble_loss_voice_file_ids(self) -> list[str]:
+        return await self._get_gamble_voice_file_ids(GAMBLE_LOSS_VOICE_FILE_ID_KEY)
+
+    async def get_gamble_win_voice_file_ids(self) -> list[str]:
+        return await self._get_gamble_voice_file_ids(GAMBLE_WIN_VOICE_FILE_ID_KEY)
+
+    async def _add_gamble_voice_file_id(self, key: str, file_id: str) -> int:
+        async with self.session_factory() as session:
+            raw = await self._get_bot_setting_value(session, key, "")
+            voices = self._parse_voice_file_ids(raw)
+            if file_id not in voices:
+                voices.append(file_id)
+            await self._set_bot_setting_value(session, key, json.dumps(voices, ensure_ascii=False))
+            await session.commit()
+            return len(voices)
 
     async def set_gamble_loss_voice_file_id(self, file_id: str) -> tuple[bool, str]:
         file_id = (file_id or "").strip()
         if not file_id:
             return False, "Voice file_id topilmadi. Ovozli xabar yuboring."
-        async with self.session_factory() as session:
-            await self._set_bot_setting_value(session, GAMBLE_LOSS_VOICE_FILE_ID_KEY, file_id)
-            await session.commit()
-        return True, "✅ Qimorda pul kuyganda yuboriladigan ovozli xabar saqlandi."
+        count = await self._add_gamble_voice_file_id(GAMBLE_LOSS_VOICE_FILE_ID_KEY, file_id)
+        return True, f"✅ Kuyganda chiqadigan voice ro'yxatga qo'shildi. Jami: <b>{count}</b> ta."
 
     async def set_gamble_win_voice_file_id(self, file_id: str) -> tuple[bool, str]:
         file_id = (file_id or "").strip()
         if not file_id:
             return False, "Voice file_id topilmadi. Ovozli xabar yuboring."
-        async with self.session_factory() as session:
-            await self._set_bot_setting_value(session, GAMBLE_WIN_VOICE_FILE_ID_KEY, file_id)
-            await session.commit()
-        return True, "✅ Qimorda yutuq bo'lganda yuboriladigan ovozli xabar saqlandi."
+        count = await self._add_gamble_voice_file_id(GAMBLE_WIN_VOICE_FILE_ID_KEY, file_id)
+        return True, f"✅ Yutuqda chiqadigan voice ro'yxatga qo'shildi. Jami: <b>{count}</b> ta."
 
     async def clear_gamble_loss_voice_file_id(self) -> str:
         async with self.session_factory() as session:
@@ -465,13 +497,13 @@ class GameEngine:
 
     async def gamble_settings_text(self) -> tuple[str, bool, bool, bool]:
         enabled = await self.is_gamble_enabled()
-        loss_voice_file_id = await self.get_gamble_loss_voice_file_id()
-        win_voice_file_id = await self.get_gamble_win_voice_file_id()
-        has_loss_voice = bool(loss_voice_file_id)
-        has_win_voice = bool(win_voice_file_id)
+        loss_voice_file_ids = await self.get_gamble_loss_voice_file_ids()
+        win_voice_file_ids = await self.get_gamble_win_voice_file_ids()
+        has_loss_voice = bool(loss_voice_file_ids)
+        has_win_voice = bool(win_voice_file_ids)
         status = "🟢 <b>YOQILGAN</b>" if enabled else "🔴 <b>O'CHIRILGAN</b>"
-        loss_voice_status = "✅ <b>Yuklangan</b>" if has_loss_voice else "❌ <b>Yuklanmagan</b>"
-        win_voice_status = "✅ <b>Yuklangan</b>" if has_win_voice else "❌ <b>Yuklanmagan</b>"
+        loss_voice_status = f"✅ <b>{len(loss_voice_file_ids)} ta</b>" if has_loss_voice else "❌ <b>Yuklanmagan</b>"
+        win_voice_status = f"✅ <b>{len(win_voice_file_ids)} ta</b>" if has_win_voice else "❌ <b>Yuklanmagan</b>"
         text = (
             "🎰 <b>Qimor sozlamalari</b>\n"
             "━━━━━━━━━━━━━━━\n\n"
