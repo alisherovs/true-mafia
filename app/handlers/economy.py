@@ -769,7 +769,7 @@ async def cmd_money(message: Message, command: CommandObject, engine: GameEngine
     ok, status = await engine.transfer_dollars(sender.telegram_id, target_id, amount)
     if not ok:
         if "Balans" in status:
-            await message.reply(t(lang, "give_not_enough"))
+            await message.reply(t(lang, "money_not_enough"))
         else:
             await message.reply(status)
         return
