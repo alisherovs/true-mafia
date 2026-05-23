@@ -16,27 +16,35 @@ def _gamble_group_redirect_text(link: str, pay_chat_id: int | None = None) -> st
     price = GAMBLE_GROUP_WEEK_PRICE_DIAMONDS
     days = GAMBLE_GROUP_PAY_DAYS
     if pay_chat_id is not None and pay_chat_id < 0:
-        return (
+        text = (
             "🎰 <b>Qimor bu guruhda hali ochilmagan</b>\n\n"
             f"Bu guruhda qimorni ochish uchun <b>{price}</b> 💎 to'lov qiling.\n"
             f"Amal qilish muddati: <b>{days} kun</b>."
         )
+        if link:
+            text += "\n\n✨ Yoki siz maxsus qimor guruhida o'ynashingiz mumkin."
+        return text
     return "🎰 <b>Qimor bu guruhda o'chirilgan.</b>"
 
 
 def _gamble_group_keyboard(link: str, pay_chat_id: int | None = None) -> InlineKeyboardMarkup | None:
-    if pay_chat_id is None or pay_chat_id >= 0:
-        return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    rows: list[list[InlineKeyboardButton]] = []
+    if pay_chat_id is not None and pay_chat_id < 0:
+        rows.append(
             [
                 InlineKeyboardButton(
                     text=f"💎 {GAMBLE_GROUP_WEEK_PRICE_DIAMONDS} olmosga {GAMBLE_GROUP_PAY_DAYS} kunga ochish",
                     callback_data=f"gpay:{pay_chat_id}",
                 )
             ]
-        ]
-    )
+        )
+    if link:
+        rows.append(
+            [InlineKeyboardButton(text="🎰 Maxsus qimor guruhiga o'tish", url=link)]
+        )
+    if not rows:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _voice_file_id_for_view(engine: GameEngine, view: MinesView) -> str:
