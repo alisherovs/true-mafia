@@ -16,46 +16,27 @@ def _gamble_group_redirect_text(link: str, pay_chat_id: int | None = None) -> st
     price = GAMBLE_GROUP_WEEK_PRICE_DIAMONDS
     days = GAMBLE_GROUP_PAY_DAYS
     if pay_chat_id is not None and pay_chat_id < 0:
-        parts = ["🎰 <b>Qimor bu guruhda hali ochilmagan</b>\n"]
-        if link:
-            parts.append(
-                "Variantlar:\n"
-                "1) Rasmiy qimor guruhga qo'shilish\n"
-                f"2) Yoki shu guruhda <b>{price}</b> 💎 to'lab <b>{days} kunga</b> ochish"
-            )
-        else:
-            parts.append(
-                f"Bu guruhda qimorni ochish uchun <b>{price}</b> 💎 to'lov qiling. "
-                f"Amal qilish muddati: <b>{days} kun</b>."
-            )
-        if link:
-            parts.append(f"\n🔗 Rasmiy guruh: {link}")
-        return "\n".join(parts)
-    base = (
-        "🎰 <b>Qimor faqat maxsus guruhda o'ynaladi</b>\n\n"
-        "Bu guruhda qimor o'chirilgan. Iltimos, rasmiy qimor guruhiga qo'shiling."
-    )
-    if link:
-        base += f"\n\n🔗 {link}"
-    return base
+        return (
+            "🎰 <b>Qimor bu guruhda hali ochilmagan</b>\n\n"
+            f"Bu guruhda qimorni ochish uchun <b>{price}</b> 💎 to'lov qiling.\n"
+            f"Amal qilish muddati: <b>{days} kun</b>."
+        )
+    return "🎰 <b>Qimor bu guruhda o'chirilgan.</b>"
 
 
 def _gamble_group_keyboard(link: str, pay_chat_id: int | None = None) -> InlineKeyboardMarkup | None:
-    rows = []
-    if link:
-        rows.append([InlineKeyboardButton(text="🎰 Qimor guruhiga o'tish", url=link)])
-    if pay_chat_id is not None and pay_chat_id < 0:
-        rows.append(
+    if pay_chat_id is None or pay_chat_id >= 0:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text=f"💎 {GAMBLE_GROUP_WEEK_PRICE_DIAMONDS} olmosga {GAMBLE_GROUP_PAY_DAYS} kunga ochish",
                     callback_data=f"gpay:{pay_chat_id}",
                 )
             ]
-        )
-    if not rows:
-        return None
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        ]
+    )
 
 
 async def _voice_file_id_for_view(engine: GameEngine, view: MinesView) -> str:
@@ -121,10 +102,10 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
     if not await engine.is_gamble_enabled():
         await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
         return
-    allowed, link = await engine.gamble_chat_check(callback.message.chat.id)
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
     if not allowed:
         await callback.answer(
-            "🎰 Qimor faqat maxsus guruhda o'ynaladi." + (f"\n\n{link}" if link else ""),
+            "🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.",
             show_alert=True,
         )
         return
