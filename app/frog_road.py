@@ -79,47 +79,62 @@ def calculate_win_amount(bet: int, multiplier: float) -> int:
     return max(0, int(int(bet) * float(multiplier)))
 
 
-def parse_frog_callback(data: str) -> tuple[str, Optional[int], Optional[int]]:
+def parse_frog_callback(data: str) -> tuple[str, Optional[int], Optional[int], Optional[int]]:
     parts = (data or "").split(":")
     if len(parts) < 2 or parts[0] != "frog":
         raise ValueError("bad_callback")
     action = parts[1]
     if action == "custom_bet":
-        return action, None, None
+        owner_id = int(parts[2]) if len(parts) == 3 and parts[2].isdigit() else None
+        return action, None, None, owner_id
+    if action == "menu_cancel":
+        owner_id = int(parts[2]) if len(parts) == 3 and parts[2].isdigit() else None
+        return action, None, None, owner_id
     if action == "start" and len(parts) == 3 and parts[2].isdigit():
-        return action, int(parts[2]), None
+        return action, int(parts[2]), None, None
+    if action == "start" and len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
+        return action, int(parts[3]), None, int(parts[2])
     if action in {"cashout", "cancel"} and len(parts) == 3 and parts[2].isdigit():
-        return action, int(parts[2]), None
+        return action, int(parts[2]), None, None
     if action == "jump" and len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
-        return action, int(parts[2]), int(parts[3])
+        return action, int(parts[2]), int(parts[3]), None
     raise ValueError("bad_callback")
 
 
 def frog_start_text() -> str:
     return (
-        "🐸 <b>Qurbaqa Yo'li</b>\n\n"
-        "5x8 maydonda yuqoriga qarab harakat qiling.\n"
-        "Har qatorda 5 ta katak bor.\n"
-        "Har qatorda 1 ta xavfli katak yashiringan.\n"
-        "Qancha yuqoriga chiqsangiz, yutuq shuncha ko'payadi.\n\n"
-        "Stavkani tanlang:"
+        "╭── 🐸 <b>QURBAQA YO'LI</b> ──╮\n"
+        "│ 5x8 maydon • Easy rejim\n"
+        "│ Har qatorda 1 ta 💥 xavf yashirin\n"
+        "│ Yuqoriga chiqqan sari yutuq oshadi\n"
+        "╰────────────────────╯\n\n"
+        "💵 <b>Stavkani tanlang:</b>"
     )
 
 
-def build_frog_start_keyboard() -> InlineKeyboardMarkup:
+def build_frog_start_keyboard(owner_id: int | None = None) -> InlineKeyboardMarkup:
+    def cb(action: str, value: int | None = None) -> str:
+        if action == "start" and value is not None:
+            return f"frog:start:{owner_id}:{value}" if owner_id else f"frog:start:{value}"
+        if action == "custom_bet":
+            return f"frog:custom_bet:{owner_id}" if owner_id else "frog:custom_bet"
+        if action == "menu_cancel":
+            return f"frog:menu_cancel:{owner_id}" if owner_id else "frog:menu_cancel"
+        return "frog:menu_cancel"
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="100", callback_data="frog:start:100"),
-                InlineKeyboardButton(text="500", callback_data="frog:start:500"),
-                InlineKeyboardButton(text="1000", callback_data="frog:start:1000"),
+                InlineKeyboardButton(text="💵 100", callback_data=cb("start", 100)),
+                InlineKeyboardButton(text="💵 500", callback_data=cb("start", 500)),
+                InlineKeyboardButton(text="💵 1000", callback_data=cb("start", 1000)),
             ],
             [
-                InlineKeyboardButton(text="5000", callback_data="frog:start:5000"),
-                InlineKeyboardButton(text="10000", callback_data="frog:start:10000"),
+                InlineKeyboardButton(text="💵 5000", callback_data=cb("start", 5000)),
+                InlineKeyboardButton(text="💵 10000", callback_data=cb("start", 10000)),
             ],
-            [InlineKeyboardButton(text="✍️ Boshqa summa", callback_data="frog:custom_bet")],
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="frog:menu_cancel")],
+            [InlineKeyboardButton(text="✍️ Boshqa summa", callback_data=cb("custom_bet"))],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=cb("menu_cancel"))],
         ]
     )
 
@@ -130,16 +145,27 @@ def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup | None
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="1️⃣", callback_data=f"frog:jump:{session.id}:0"),
-                InlineKeyboardButton(text="2️⃣", callback_data=f"frog:jump:{session.id}:1"),
-                InlineKeyboardButton(text="3️⃣", callback_data=f"frog:jump:{session.id}:2"),
-                InlineKeyboardButton(text="4️⃣", callback_data=f"frog:jump:{session.id}:3"),
-                InlineKeyboardButton(text="5️⃣", callback_data=f"frog:jump:{session.id}:4"),
+                InlineKeyboardButton(text="⬅️ 1", callback_data=f"frog:jump:{session.id}:0"),
+                InlineKeyboardButton(text="2", callback_data=f"frog:jump:{session.id}:1"),
+                InlineKeyboardButton(text="3", callback_data=f"frog:jump:{session.id}:2"),
+                InlineKeyboardButton(text="4", callback_data=f"frog:jump:{session.id}:3"),
+                InlineKeyboardButton(text="5 ➡️", callback_data=f"frog:jump:{session.id}:4"),
             ],
             [InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")],
             [InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"frog:cancel:{session.id}")],
         ]
     )
+
+
+def _frog_progress(row: int) -> str:
+    filled = min(max(int(row), 0), FROG_ROWS)
+    return "🟩" * filled + "⬛" * (FROG_ROWS - filled)
+
+
+def _next_multiplier_text(row: int) -> str:
+    if row >= FROG_ROWS:
+        return "MAX"
+    return f"x{calculate_multiplier(row + 1):.2f}"
 
 
 def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> str:
@@ -162,7 +188,7 @@ def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> 
         except (TypeError, ValueError):
             position = None
 
-    lines: list[str] = []
+    lines: list[str] = ["<code>      1  2  3  4  5</code>"]
     for row in range(FROG_ROWS - 1, -1, -1):
         cells: list[str] = []
         for column in range(FROG_COLUMNS):
@@ -177,7 +203,8 @@ def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> 
                 cells.append("💥")
             else:
                 cells.append("⬜")
-        lines.append(" ".join(cells))
+        row_label = f"{row + 1:02d}"
+        lines.append(f"<code>{row_label}</code>  " + " ".join(cells))
     return "\n".join(lines)
 
 
@@ -185,21 +212,23 @@ def render_frog_text(session: FrogGameSession, user_balance: int, result: str = 
     current_row = int(session.current_row or 0)
     multiplier = float(session.current_multiplier or 1.0)
     current_win = calculate_win_amount(int(session.bet_amount), multiplier) if current_row > 0 else 0
+    next_win = calculate_win_amount(int(session.bet_amount), calculate_multiplier(current_row + 1)) if current_row < FROG_ROWS else current_win
     parts = [
-        "🐸 <b>Qurbaqa Yo'li</b>",
-        "",
-        f"Tikilgan: <b>{int(session.bet_amount)}</b> coin",
-        f"Qator: <b>{current_row}/{FROG_ROWS}</b>",
-        f"Multiplier: <b>x{multiplier:.2f}</b>",
-        f"Hozirgi yutuq: <b>{current_win}</b> coin",
-        f"Balans: <b>{int(user_balance)}</b> coin",
+        "╭── 🐸 <b>QURBAQA YO'LI</b> ──╮",
+        f"│ Qavat: <b>{current_row}/{FROG_ROWS}</b>  {_frog_progress(current_row)}",
+        f"│ Stavka: <b>{int(session.bet_amount)}</b> coin",
+        f"│ Multiplier: <b>x{multiplier:.2f}</b>  • Keyingi: <b>{_next_multiplier_text(current_row)}</b>",
+        f"│ Hozir olish: <b>{current_win}</b> coin",
+        f"│ Keyingi qadam: <b>{next_win}</b> coin",
+        f"│ Balans: <b>{int(user_balance)}</b> coin",
+        "╰────────────────────╯",
         "",
         render_frog_board(session, reveal_danger=session.status != FROG_ACTIVE),
     ]
     if result:
-        parts.extend(["", result])
+        parts.extend(["", f"✨ {result}"])
     elif session.status == FROG_ACTIVE:
-        parts.extend(["", "Keyingi katakni tanlang:"])
+        parts.extend(["", "🎯 <b>Keyingi qator uchun ustunni tanlang:</b>"])
     return "\n".join(parts)
 
 
@@ -316,12 +345,13 @@ class FrogRoadEngine:
                         session.add(_history(game, "lost"))
                         logger.info("frog_lost user=%s session=%s row=%s column=%s", tg_user_id, session_id, row, column)
                         text = (
-                            "💥 <b>Qurbaqa yiqildi!</b>\n\n"
-                            f"Tikilgan: <b>{int(game.bet_amount)}</b> coin\n"
-                            f"Bosib o'tilgan qator: <b>{row}/{FROG_ROWS}</b>\n"
-                            "Natija: <b>yutqazdingiz</b>\n\n"
+                            "╭── 💥 <b>QURBAQA YIQILDI</b> ──╮\n"
+                            f"│ Stavka: <b>{int(game.bet_amount)}</b> coin\n"
+                            f"│ Bosib o'tilgan qator: <b>{row}/{FROG_ROWS}</b>\n"
+                            "│ Natija: <b>yutqazdingiz</b>\n"
+                            "╰────────────────────╯\n\n"
                             f"{render_frog_board(game, reveal_danger=True)}\n\n"
-                            "Yangi o'yin boshlash uchun /qimor yozing."
+                            "🔁 Yangi o'yin boshlash uchun /qimor yozing."
                         )
                         return FrogView(text, None, "💥 Xavfli katakka tushdingiz!", True)
 
@@ -350,12 +380,14 @@ class FrogRoadEngine:
                         _record_dollar(session, user, payout, "frog_win", f"Qurbaqa Yo'li maksimal yutuq #{game.id}", int(game.chat_id))
                         logger.info("frog_won user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                         return FrogView(
-                            "🏆 <b>Tabriklaymiz!</b>\n\n"
-                            "Qurbaqa yo'lning oxirigacha yetib bordi.\n"
-                            f"Tikilgan: <b>{int(game.bet_amount)}</b> coin\n"
-                            f"Multiplier: <b>x{FROG_MULTIPLIERS[-1]:.2f}</b>\n"
-                            f"Yutuq: <b>{payout}</b> coin\n"
-                            f"Yangi balans: <b>{int(user.dollar or 0)}</b> coin",
+                            "╭── 🏆 <b>G'ALABA!</b> ──╮\n"
+                            "│ Qurbaqa oxirgi qavatgacha yetib bordi\n"
+                            f"│ Stavka: <b>{int(game.bet_amount)}</b> coin\n"
+                            f"│ Multiplier: <b>x{FROG_MULTIPLIERS[-1]:.2f}</b>\n"
+                            f"│ Yutuq: <b>{payout}</b> coin\n"
+                            f"│ Yangi balans: <b>{int(user.dollar or 0)}</b> coin\n"
+                            "╰────────────────────╯\n\n"
+                            f"{render_frog_board(game, reveal_danger=True)}",
                             None,
                             "🏆 Maksimal yutuq!",
                             True,
@@ -390,12 +422,14 @@ class FrogRoadEngine:
                     _record_dollar(session, user, payout, "frog_cashout", f"Qurbaqa Yo'li cashout #{game.id}", int(game.chat_id))
                     logger.info("frog_cashout user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                     return FrogView(
-                        "💰 <b>Yutuq olindi!</b>\n\n"
-                        f"Tikilgan: <b>{int(game.bet_amount)}</b> coin\n"
-                        f"Multiplier: <b>x{float(game.current_multiplier or 1.0):.2f}</b>\n"
-                        f"Yutuq: <b>{payout}</b> coin\n"
-                        f"Yangi balans: <b>{int(user.dollar or 0)}</b> coin\n\n"
-                        "Yangi o'yin boshlash uchun /qimor yozing.",
+                        "╭── 💰 <b>YUTUQ OLINDI</b> ──╮\n"
+                        f"│ Stavka: <b>{int(game.bet_amount)}</b> coin\n"
+                        f"│ Multiplier: <b>x{float(game.current_multiplier or 1.0):.2f}</b>\n"
+                        f"│ Yutuq: <b>{payout}</b> coin\n"
+                        f"│ Yangi balans: <b>{int(user.dollar or 0)}</b> coin\n"
+                        "╰────────────────────╯\n\n"
+                        f"{render_frog_board(game, reveal_danger=True)}\n\n"
+                        "🔁 Yangi o'yin boshlash uchun /qimor yozing.",
                         None,
                         f"💰 {payout} coin olindi!",
                         True,
@@ -421,10 +455,12 @@ class FrogRoadEngine:
                     session.add(_history(game, "cancelled"))
                     logger.info("frog_cancelled user=%s session=%s", tg_user_id, session_id)
                     return FrogView(
-                        "❌ <b>O'yin bekor qilindi.</b>\n\n"
-                        f"Tikilgan: <b>{int(game.bet_amount)}</b> coin\n"
-                        "Stavka qaytarilmaydi.\n\n"
-                        "Yangi o'yin boshlash uchun /qimor yozing.",
+                        "╭── ❌ <b>O'YIN BEKOR QILINDI</b> ──╮\n"
+                        f"│ Stavka: <b>{int(game.bet_amount)}</b> coin\n"
+                        "│ Stavka qaytarilmaydi\n"
+                        "╰────────────────────╯\n\n"
+                        f"{render_frog_board(game, reveal_danger=True)}\n\n"
+                        "🔁 Yangi o'yin boshlash uchun /qimor yozing.",
                         None,
                         "O'yin bekor qilindi.",
                         True,
