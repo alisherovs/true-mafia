@@ -273,6 +273,18 @@ async def _ensure_lightweight_columns(conn) -> None:
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_gamble_mines_winner_created ON gamble_mines_games(winner_telegram_id, ended_at)")
     )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_frog_sessions_user_status ON frog_game_sessions(user_id, status)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_frog_sessions_chat_message ON frog_game_sessions(chat_id, message_id)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_game_history_user_type_created ON game_history(user_id, game_type, created_at)")
+    )
+    await conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_game_history_type_created ON game_history(game_type, created_at)")
+    )
     await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_couple_chat_active ON couple_relationships(chat_id, active)"))
     await conn.execute(
         text("CREATE INDEX IF NOT EXISTS ix_couple_user_one_active ON couple_relationships(user_one_telegram_id, active)")

@@ -405,6 +405,48 @@ class GambleUserStats(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class FrogGameSession(Base):
+    __tablename__ = "frog_game_sessions"
+    __table_args__ = (
+        Index("ix_frog_sessions_user_status", "user_id", "status"),
+        Index("ix_frog_sessions_chat_message", "chat_id", "message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    bet_amount: Mapped[int] = mapped_column(Integer)
+    current_row: Mapped[int] = mapped_column(Integer, default=0)
+    current_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    danger_map: Mapped[str] = mapped_column(Text, default="{}")
+    opened_cells: Mapped[str] = mapped_column(Text, default="[]")
+    current_position: Mapped[str] = mapped_column(Text, default="{}")
+    win_amount: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class GameHistory(Base):
+    __tablename__ = "game_history"
+    __table_args__ = (
+        Index("ix_game_history_user_type_created", "user_id", "game_type", "created_at"),
+        Index("ix_game_history_type_created", "game_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    game_type: Mapped[str] = mapped_column(String(32), default="frog")
+    bet_amount: Mapped[int] = mapped_column(Integer, default=0)
+    result: Mapped[str] = mapped_column(String(16), default="lost")
+    multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    win_amount: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ActivityScoreEvent(Base):
     __tablename__ = "activity_score_events"
     __table_args__ = (

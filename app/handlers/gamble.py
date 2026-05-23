@@ -3,13 +3,28 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.database import SessionLocal
+from app.frog_road import (
+    FROG_MAX_BET,
+    FROG_MIN_BET,
+    FrogRoadEngine,
+    FrogView,
+    build_frog_start_keyboard,
+    frog_start_text,
+    parse_frog_callback,
+)
 from app.game_engine import GAMBLE_GROUP_PAY_DAYS, GAMBLE_GROUP_WEEK_PRICE_DIAMONDS, GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
 
 router = Router()
+
+
+class FrogBetState(StatesGroup):
+    waiting_amount = State()
 
 
 def _gamble_group_redirect_text(link: str, pay_chat_id: int | None = None) -> str:
@@ -65,28 +80,76 @@ async def _send_voice_result(message: Message, file_id: str, caption: str) -> bo
         return False
 
 
-@router.message(Command("qimor"))
-async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine) -> None:
+def _parse_frog_bet(raw: str | None) -> tuple[bool, int, str]:
+    try:
+        amount = int((raw or "").strip().split()[0])
+    except (AttributeError, IndexError, ValueError):
+        return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
+    if amount < FROG_MIN_BET or amount > FROG_MAX_BET:
+        return False, 0, f"❌ Stavka <b>{FROG_MIN_BET}</b> dan <b>{FROG_MAX_BET}</b> coin gacha bo'lishi kerak."
+    return True, amount, ""
+
+
+async def _edit_or_answer(message: Message, view: FrogView) -> None:
+    try:
+        await message.edit_text(view.text, reply_markup=view.keyboard)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            await message.answer(view.text, reply_markup=view.keyboard)
+
+
+async def _gamble_allowed_or_reply(message: Message, engine: GameEngine) -> bool:
     if message.from_user is None:
-        return
+        return False
     if not await engine.is_gamble_enabled():
         await message.answer("🚫 Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.")
-        return
+        return False
     allowed, link = await engine.gamble_chat_check(message.chat.id)
     if not allowed:
         await message.answer(
             _gamble_group_redirect_text(link, pay_chat_id=message.chat.id),
             reply_markup=_gamble_group_keyboard(link, pay_chat_id=message.chat.id),
         )
+        return False
+    return True
+
+
+@router.message(Command("qimor", "frog"))
+async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine, state: FSMContext) -> None:
+    if not await _gamble_allowed_or_reply(message, engine):
         return
-    mines = MinesEngine(SessionLocal)
-    view = await mines.start_or_resume(message.from_user, message.chat.id, command.args)
-    file_id = await _voice_file_id_for_view(engine, view)
-    if file_id and await _send_voice_result(message, file_id, view.text):
+    await state.clear()
+    frog = FrogRoadEngine(SessionLocal)
+    if command.args:
+        ok, amount, error = _parse_frog_bet(command.args)
+        if not ok:
+            await message.answer(error, reply_markup=build_frog_start_keyboard())
+            return
+        view = await frog.start_frog_game(message.from_user, message.chat.id, amount)
+        sent = await message.answer(view.text, reply_markup=view.keyboard)
+        if view.session_id:
+            await frog.set_message_id(view.session_id, sent.message_id)
         return
+    await message.answer(frog_start_text(), reply_markup=build_frog_start_keyboard())
+
+
+@router.message(FrogBetState.waiting_amount)
+async def frog_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not await _gamble_allowed_or_reply(message, engine):
+        await state.clear()
+        return
+    ok, amount, error = _parse_frog_bet(message.text)
+    if not ok:
+        await message.answer(error or "❌ To'g'ri summa kiriting. Masalan: 1000")
+        return
+    await state.clear()
+    frog = FrogRoadEngine(SessionLocal)
+    view = await frog.start_frog_game(message.from_user, message.chat.id, amount)
     sent = await message.answer(view.text, reply_markup=view.keyboard)
-    if view.game_id and view.token:
-        await mines.set_message_id(view.game_id, view.token, sent.message_id)
+    if view.session_id:
+        await frog.set_message_id(view.session_id, sent.message_id)
 
 
 @router.message(Command("topq"))
@@ -100,6 +163,73 @@ async def cmd_topq(message: Message, engine: GameEngine) -> None:
         return
     mines = MinesEngine(SessionLocal)
     await message.answer(await mines.weekly_top_text(limit=10))
+
+
+@router.callback_query(F.data.startswith("frog:"))
+async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if callback.data == "frog:menu_cancel":
+        await state.clear()
+        try:
+            await callback.message.edit_text("❌ Qurbaqa Yo'li menyusi bekor qilindi.")
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                await callback.message.answer("❌ Qurbaqa Yo'li menyusi bekor qilindi.")
+        await callback.answer("Bekor qilindi.")
+        return
+
+    try:
+        action, value, column = parse_frog_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+
+    frog = FrogRoadEngine(SessionLocal)
+    if action == "custom_bet":
+        await state.set_state(FrogBetState.waiting_amount)
+        await callback.message.answer(
+            f"✍️ Stavka summasini kiriting.\nMinimal: <b>{FROG_MIN_BET}</b> coin\nMaksimal: <b>{FROG_MAX_BET}</b> coin"
+        )
+        await callback.answer("Summani yozing.")
+        return
+    if action == "start":
+        view = await frog.start_frog_game(callback.from_user, callback.message.chat.id, int(value or 0))
+        await _edit_or_answer(callback.message, view)
+        if view.session_id:
+            await frog.set_message_id(view.session_id, callback.message.message_id)
+        await callback.answer(view.alert or "O'yin boshlandi.", show_alert=view.show_alert)
+        return
+    if action == "jump":
+        if value is None or column is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await frog.handle_frog_jump(callback.from_user.id, value, column)
+    elif action == "cashout":
+        if value is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await frog.handle_frog_cashout(callback.from_user.id, value)
+    elif action == "cancel":
+        if value is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await frog.handle_frog_cancel(callback.from_user.id, value)
+    else:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+
+    if view.text:
+        await _edit_or_answer(callback.message, view)
+    await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 
 @router.callback_query(F.data.startswith("gm:"))
