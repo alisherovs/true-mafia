@@ -152,6 +152,9 @@ GAMBLE_LOSS_VOICE_FILE_ID_KEY = "gamble_loss_voice_file_id"
 GAMBLE_WIN_VOICE_FILE_ID_KEY = "gamble_win_voice_file_id"
 GAMBLE_GROUP_ID_KEY = "gamble_group_id"
 GAMBLE_GROUP_LINK_KEY = "gamble_group_link"
+GAMBLE_PAID_GROUP_PREFIX = "gamble_paid_group:"
+GAMBLE_GROUP_WEEK_PRICE_DIAMONDS = 15
+GAMBLE_GROUP_PAY_DAYS = 7
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -518,19 +521,94 @@ class GameEngine:
             await self._set_bot_setting_value(session, GAMBLE_GROUP_LINK_KEY, "")
             await session.commit()
 
+    async def get_gamble_paid_until(self, chat_id: int) -> Optional[datetime]:
+        if chat_id >= 0:
+            return None
+        async with self.session_factory() as session:
+            raw = await self._get_bot_setting_value(session, f"{GAMBLE_PAID_GROUP_PREFIX}{chat_id}", "")
+        if not raw:
+            return None
+        try:
+            value = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
+
+    async def is_gamble_paid_group(self, chat_id: int) -> bool:
+        until = await self.get_gamble_paid_until(chat_id)
+        if until is None:
+            return False
+        return until > datetime.now(timezone.utc)
+
+    async def pay_for_gamble_group(
+        self,
+        user_telegram_id: int,
+        chat_id: int,
+        chat_title: str = "",
+    ) -> tuple[bool, str, Optional[datetime]]:
+        if chat_id >= 0:
+            return False, "Bu guruh emas.", None
+        price = GAMBLE_GROUP_WEEK_PRICE_DIAMONDS
+        async with self.session_factory() as session:
+            user = (
+                await session.execute(select(User).where(User.telegram_id == user_telegram_id))
+            ).scalar_one_or_none()
+            if user is None:
+                return False, "Foydalanuvchi topilmadi. Avval /start bosing.", None
+            if int(user.diamonds or 0) < price:
+                return (
+                    False,
+                    f"❌ Almaz yetarli emas. Kerak: 💎 {price}, Sizda: 💎 {int(user.diamonds or 0)}",
+                    None,
+                )
+            now = datetime.now(timezone.utc)
+            key = f"{GAMBLE_PAID_GROUP_PREFIX}{chat_id}"
+            existing_raw = await self._get_bot_setting_value(session, key, "")
+            existing_until: Optional[datetime] = None
+            if existing_raw:
+                try:
+                    existing_until = datetime.fromisoformat(existing_raw)
+                    if existing_until.tzinfo is None:
+                        existing_until = existing_until.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    existing_until = None
+            base = existing_until if (existing_until and existing_until > now) else now
+            new_until = base + timedelta(days=GAMBLE_GROUP_PAY_DAYS)
+            user.diamonds = int(user.diamonds or 0) - price
+            self._record_diamond_transaction(
+                session,
+                user,
+                -price,
+                "gamble_group_pay",
+                note=f"Qimor guruh ochish ({GAMBLE_GROUP_PAY_DAYS} kun): {chat_title or chat_id}",
+                chat_id=chat_id,
+            )
+            await self._set_bot_setting_value(session, key, new_until.isoformat())
+            await session.commit()
+        return True, "ok", new_until
+
     async def gamble_chat_check(self, chat_id: int) -> tuple[bool, str]:
         """Returns (allowed, configured_group_link).
 
         - Private chats (positive chat_id) are always allowed.
-        - If no group configured, allow everywhere (backward compatible).
-        - Otherwise, only the configured group is allowed.
+        - Designated group (set by owner) is always allowed.
+        - Paid groups (active 1-week subscription) are allowed.
+        - If no designated group is set AND group has not paid, fallback allow
+          (backward compatible until owner configures).
+        - Otherwise blocked; caller can offer the official link and a pay button.
         """
         if chat_id > 0:
             return True, ""
         configured_id, link = await self.get_gamble_group()
+        if configured_id is not None and chat_id == configured_id:
+            return True, link
+        if await self.is_gamble_paid_group(chat_id):
+            return True, link
         if configured_id is None:
             return True, link
-        return (chat_id == configured_id), link
+        return False, link
 
     async def gamble_settings_text(self) -> tuple[str, bool, bool, bool, bool]:
         enabled = await self.is_gamble_enabled()

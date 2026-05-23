@@ -6,13 +6,31 @@ from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.database import SessionLocal
-from app.game_engine import GameEngine
+from app.game_engine import GAMBLE_GROUP_PAY_DAYS, GAMBLE_GROUP_WEEK_PRICE_DIAMONDS, GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
 
 router = Router()
 
 
-def _gamble_group_redirect_text(link: str) -> str:
+def _gamble_group_redirect_text(link: str, pay_chat_id: int | None = None) -> str:
+    price = GAMBLE_GROUP_WEEK_PRICE_DIAMONDS
+    days = GAMBLE_GROUP_PAY_DAYS
+    if pay_chat_id is not None and pay_chat_id < 0:
+        parts = ["🎰 <b>Qimor bu guruhda hali ochilmagan</b>\n"]
+        if link:
+            parts.append(
+                "Variantlar:\n"
+                "1) Rasmiy qimor guruhga qo'shilish\n"
+                f"2) Yoki shu guruhda <b>{price}</b> 💎 to'lab <b>{days} kunga</b> ochish"
+            )
+        else:
+            parts.append(
+                f"Bu guruhda qimorni ochish uchun <b>{price}</b> 💎 to'lov qiling. "
+                f"Amal qilish muddati: <b>{days} kun</b>."
+            )
+        if link:
+            parts.append(f"\n🔗 Rasmiy guruh: {link}")
+        return "\n".join(parts)
     base = (
         "🎰 <b>Qimor faqat maxsus guruhda o'ynaladi</b>\n\n"
         "Bu guruhda qimor o'chirilgan. Iltimos, rasmiy qimor guruhiga qo'shiling."
@@ -22,12 +40,22 @@ def _gamble_group_redirect_text(link: str) -> str:
     return base
 
 
-def _gamble_group_keyboard(link: str) -> InlineKeyboardMarkup | None:
-    if not link:
+def _gamble_group_keyboard(link: str, pay_chat_id: int | None = None) -> InlineKeyboardMarkup | None:
+    rows = []
+    if link:
+        rows.append([InlineKeyboardButton(text="🎰 Qimor guruhiga o'tish", url=link)])
+    if pay_chat_id is not None and pay_chat_id < 0:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💎 {GAMBLE_GROUP_WEEK_PRICE_DIAMONDS} olmosga {GAMBLE_GROUP_PAY_DAYS} kunga ochish",
+                    callback_data=f"gpay:{pay_chat_id}",
+                )
+            ]
+        )
+    if not rows:
         return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🎰 Qimor guruhiga o'tish", url=link)]]
-    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _voice_file_id_for_view(engine: GameEngine, view: MinesView) -> str:
@@ -58,8 +86,8 @@ async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine
     allowed, link = await engine.gamble_chat_check(message.chat.id)
     if not allowed:
         await message.answer(
-            _gamble_group_redirect_text(link),
-            reply_markup=_gamble_group_keyboard(link),
+            _gamble_group_redirect_text(link, pay_chat_id=message.chat.id),
+            reply_markup=_gamble_group_keyboard(link, pay_chat_id=message.chat.id),
         )
         return
     mines = MinesEngine(SessionLocal)
@@ -77,8 +105,8 @@ async def cmd_topq(message: Message, engine: GameEngine) -> None:
     allowed, link = await engine.gamble_chat_check(message.chat.id)
     if not allowed:
         await message.answer(
-            _gamble_group_redirect_text(link),
-            reply_markup=_gamble_group_keyboard(link),
+            _gamble_group_redirect_text(link, pay_chat_id=message.chat.id),
+            reply_markup=_gamble_group_keyboard(link, pay_chat_id=message.chat.id),
         )
         return
     mines = MinesEngine(SessionLocal)
@@ -147,3 +175,51 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("gpay:"))
+async def gamble_pay_group_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    parts = (callback.data or "").split(":", 1)
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    target_chat_id = int(parts[1])
+    if target_chat_id != callback.message.chat.id:
+        await callback.answer("Bu tugma boshqa guruh uchun.", show_alert=True)
+        return
+    if target_chat_id >= 0:
+        await callback.answer("Bu xususiyat faqat guruhlar uchun.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Qimor vaqtinchalik ishlamaydi.", show_alert=True)
+        return
+    if await engine.is_gamble_paid_group(target_chat_id):
+        until = await engine.get_gamble_paid_until(target_chat_id)
+        until_str = until.strftime("%Y-%m-%d %H:%M UTC") if until else ""
+        await callback.answer(
+            f"Bu guruh allaqachon ochiq. Amal qiladi: {until_str}\n/qimor yozing.",
+            show_alert=True,
+        )
+        return
+    chat_title = callback.message.chat.title or ""
+    ok, status, until = await engine.pay_for_gamble_group(
+        callback.from_user.id, target_chat_id, chat_title=chat_title
+    )
+    if not ok:
+        await callback.answer(status, show_alert=True)
+        return
+    until_str = until.strftime("%Y-%m-%d %H:%M UTC") if until else ""
+    text = (
+        "✅ <b>To'lov qabul qilindi</b>\n\n"
+        f"💎 Yechildi: <b>{GAMBLE_GROUP_WEEK_PRICE_DIAMONDS}</b>\n"
+        f"⏳ Amal qiladi: <b>{until_str}</b>\n\n"
+        "Endi /qimor yozib boshlashingiz mumkin."
+    )
+    try:
+        await callback.message.edit_text(text)
+    except TelegramBadRequest:
+        await callback.message.answer(text)
+    await callback.answer("✅ To'lov qabul qilindi", show_alert=True)
