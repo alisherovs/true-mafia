@@ -150,6 +150,8 @@ HERO_INFO_HIDDEN_PREFIX = "hero_info_hidden:"
 GAMBLE_ENABLED_KEY = "gamble_enabled"
 GAMBLE_LOSS_VOICE_FILE_ID_KEY = "gamble_loss_voice_file_id"
 GAMBLE_WIN_VOICE_FILE_ID_KEY = "gamble_win_voice_file_id"
+GAMBLE_GROUP_ID_KEY = "gamble_group_id"
+GAMBLE_GROUP_LINK_KEY = "gamble_group_link"
 DIAMOND_LOG_MIN_AMOUNT = 20
 
 INVISIBLE_NAME_CHARS = {
@@ -495,24 +497,68 @@ class GameEngine:
             await session.commit()
         return "🗑 Qimorda yutuq bo'lganda chiqadigan voice xabari o'chirildi."
 
-    async def gamble_settings_text(self) -> tuple[str, bool, bool, bool]:
+    async def get_gamble_group(self) -> tuple[Optional[int], str]:
+        async with self.session_factory() as session:
+            raw_id = await self._get_bot_setting_value(session, GAMBLE_GROUP_ID_KEY, "")
+            link = await self._get_bot_setting_value(session, GAMBLE_GROUP_LINK_KEY, "")
+        chat_id: Optional[int] = None
+        if raw_id and raw_id.lstrip("-").isdigit():
+            chat_id = int(raw_id)
+        return chat_id, link
+
+    async def set_gamble_group(self, chat_id: int, link: str) -> None:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_GROUP_ID_KEY, str(int(chat_id)))
+            await self._set_bot_setting_value(session, GAMBLE_GROUP_LINK_KEY, (link or "").strip())
+            await session.commit()
+
+    async def clear_gamble_group(self) -> None:
+        async with self.session_factory() as session:
+            await self._set_bot_setting_value(session, GAMBLE_GROUP_ID_KEY, "")
+            await self._set_bot_setting_value(session, GAMBLE_GROUP_LINK_KEY, "")
+            await session.commit()
+
+    async def gamble_chat_check(self, chat_id: int) -> tuple[bool, str]:
+        """Returns (allowed, configured_group_link).
+
+        - Private chats (positive chat_id) are always allowed.
+        - If no group configured, allow everywhere (backward compatible).
+        - Otherwise, only the configured group is allowed.
+        """
+        if chat_id > 0:
+            return True, ""
+        configured_id, link = await self.get_gamble_group()
+        if configured_id is None:
+            return True, link
+        return (chat_id == configured_id), link
+
+    async def gamble_settings_text(self) -> tuple[str, bool, bool, bool, bool]:
         enabled = await self.is_gamble_enabled()
         loss_voice_file_ids = await self.get_gamble_loss_voice_file_ids()
         win_voice_file_ids = await self.get_gamble_win_voice_file_ids()
         has_loss_voice = bool(loss_voice_file_ids)
         has_win_voice = bool(win_voice_file_ids)
+        group_id, group_link = await self.get_gamble_group()
+        has_group = group_id is not None
         status = "🟢 <b>YOQILGAN</b>" if enabled else "🔴 <b>O'CHIRILGAN</b>"
         loss_voice_status = f"✅ <b>{len(loss_voice_file_ids)} ta</b>" if has_loss_voice else "❌ <b>Yuklanmagan</b>"
         win_voice_status = f"✅ <b>{len(win_voice_file_ids)} ta</b>" if has_win_voice else "❌ <b>Yuklanmagan</b>"
+        if has_group:
+            link_part = f"\n🔗 Link: {group_link}" if group_link else ""
+            group_status = f"✅ <code>{group_id}</code>{link_part}"
+        else:
+            group_status = "❌ <b>Belgilanmagan</b> (qimor barcha guruhlarda ishlaydi)"
         text = (
             "🎰 <b>Qimor sozlamalari</b>\n"
             "━━━━━━━━━━━━━━━\n\n"
             f"Holat: {status}\n\n"
+            f"🏠 Qimor guruhi: {group_status}\n\n"
             f"💣 Pul kuyganda voice: {loss_voice_status}\n"
             f"🏆 Yutuq bo'lganda voice: {win_voice_status}\n\n"
-            "O'chirilsa userlar /qimor buyrug'ini ishlata olmaydi va eski qimor tugmalari ham to'xtaydi."
+            "Qimor guruhi belgilansa, /qimor faqat o'sha guruhda ishlaydi. "
+            "Boshqa guruhlarda foydalanuvchilarga belgilangan guruh linki ko'rsatiladi."
         )
-        return text, enabled, has_loss_voice, has_win_voice
+        return text, enabled, has_loss_voice, has_win_voice, has_group
 
     @staticmethod
     def _format_minutes(minutes: int) -> str:

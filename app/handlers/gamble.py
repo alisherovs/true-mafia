@@ -3,13 +3,31 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.database import SessionLocal
 from app.game_engine import GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
 
 router = Router()
+
+
+def _gamble_group_redirect_text(link: str) -> str:
+    base = (
+        "🎰 <b>Qimor faqat maxsus guruhda o'ynaladi</b>\n\n"
+        "Bu guruhda qimor o'chirilgan. Iltimos, rasmiy qimor guruhiga qo'shiling."
+    )
+    if link:
+        base += f"\n\n🔗 {link}"
+    return base
+
+
+def _gamble_group_keyboard(link: str) -> InlineKeyboardMarkup | None:
+    if not link:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🎰 Qimor guruhiga o'tish", url=link)]]
+    )
 
 
 async def _voice_file_id_for_view(engine: GameEngine, view: MinesView) -> str:
@@ -37,6 +55,13 @@ async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine
     if not await engine.is_gamble_enabled():
         await message.answer("🚫 Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.")
         return
+    allowed, link = await engine.gamble_chat_check(message.chat.id)
+    if not allowed:
+        await message.answer(
+            _gamble_group_redirect_text(link),
+            reply_markup=_gamble_group_keyboard(link),
+        )
+        return
     mines = MinesEngine(SessionLocal)
     view = await mines.start_or_resume(message.from_user, message.chat.id, command.args)
     file_id = await _voice_file_id_for_view(engine, view)
@@ -48,7 +73,14 @@ async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine
 
 
 @router.message(Command("topq"))
-async def cmd_topq(message: Message) -> None:
+async def cmd_topq(message: Message, engine: GameEngine) -> None:
+    allowed, link = await engine.gamble_chat_check(message.chat.id)
+    if not allowed:
+        await message.answer(
+            _gamble_group_redirect_text(link),
+            reply_markup=_gamble_group_keyboard(link),
+        )
+        return
     mines = MinesEngine(SessionLocal)
     await message.answer(await mines.weekly_top_text(limit=10))
 
@@ -60,6 +92,13 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
         return
     if not await engine.is_gamble_enabled():
         await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer(
+            "🎰 Qimor faqat maxsus guruhda o'ynaladi." + (f"\n\n{link}" if link else ""),
+            show_alert=True,
+        )
         return
     try:
         action, game_id, token, cell = MinesAntiCheatValidator.decode_callback(callback.data or "")

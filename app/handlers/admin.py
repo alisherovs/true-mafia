@@ -156,8 +156,8 @@ async def owner_gamble_callback(callback: CallbackQuery, engine: GameEngine, set
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
     PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    text, enabled, has_loss_voice, has_win_voice = await engine.gamble_settings_text()
-    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice))
+    text, enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice, has_group))
     await callback.answer()
 
 
@@ -166,10 +166,10 @@ async def owner_gamble_toggle_callback(callback: CallbackQuery, engine: GameEngi
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    _, enabled, _, _ = await engine.gamble_settings_text()
+    _, enabled, _, _, _ = await engine.gamble_settings_text()
     await engine.set_gamble_enabled(not enabled)
-    text, new_enabled, has_loss_voice, has_win_voice = await engine.gamble_settings_text()
-    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled, has_loss_voice, has_win_voice))
+    text, new_enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
+    await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled, has_loss_voice, has_win_voice, has_group))
     await callback.answer("Qimor yoqildi." if new_enabled else "Qimor o'chirildi.", show_alert=True)
 
 
@@ -192,6 +192,42 @@ async def owner_gamble_voice_callback(callback: CallbackQuery, settings: Setting
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:gamble:group")
+async def owner_gamble_group_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "gamble_group_set"
+    await _safe_edit(
+        callback,
+        "🎰 <b>Qimor guruhini belgilash</b>\n\n"
+        "Quyidagi formatda yuboring:\n"
+        "<code>chat_id link</code>\n\n"
+        "Masalan:\n"
+        "<code>-1001234567890 https://t.me/+invite</code>\n"
+        "yoki\n"
+        "<code>-1001234567890 https://t.me/group_username</code>\n\n"
+        "💡 Bot o'sha guruhda admin bo'lishi shart emas, lekin guruh ID to'g'ri bo'lishi kerak.",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:gamble:group:clear")
+async def owner_gamble_group_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    await engine.clear_gamble_group()
+    text, enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
+    await _safe_edit(
+        callback,
+        f"🗑 Qimor guruhi o'chirildi.\n\n{text}",
+        reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice, has_group),
+    )
+    await callback.answer("O'chirildi.", show_alert=True)
+
+
 @router.callback_query(F.data.in_({"owner:gamble:voice:clear:loss", "owner:gamble:voice:clear:win"}))
 async def owner_gamble_voice_clear_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
@@ -201,11 +237,11 @@ async def owner_gamble_voice_clear_callback(callback: CallbackQuery, engine: Gam
         text = await engine.clear_gamble_win_voice_file_id()
     else:
         text = await engine.clear_gamble_loss_voice_file_id()
-    settings_text, enabled, has_loss_voice, has_win_voice = await engine.gamble_settings_text()
+    settings_text, enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
     await _safe_edit(
         callback,
         f"{text}\n\n{settings_text}",
-        reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice),
+        reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice, has_group),
     )
     await callback.answer("O'chirildi.", show_alert=True)
 
@@ -939,6 +975,42 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         await message.answer(text, reply_markup=owner_panel_keyboard())
         return True
 
+    if action == "gamble_group_set":
+        raw = (message.text or "").strip()
+        parts = raw.split(maxsplit=1)
+        if len(parts) != 2 or not parts[0].lstrip("-").isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "gamble_group_set"
+            await message.answer(
+                "Format noto'g'ri. Shunday yuboring:\n"
+                "<code>chat_id link</code>\n\n"
+                "Masalan: <code>-1001234567890 https://t.me/+invite</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        chat_id = int(parts[0])
+        link = parts[1].strip()
+        if chat_id >= 0:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "gamble_group_set"
+            await message.answer(
+                "Guruh ID manfiy bo'lishi kerak. Masalan: <code>-1001234567890</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        if not (link.startswith("https://t.me/") or link.startswith("http://t.me/") or link.startswith("t.me/")):
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "gamble_group_set"
+            await message.answer(
+                "Link noto'g'ri. Telegram guruh linkini yuboring.",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        await engine.set_gamble_group(chat_id, link)
+        settings_text, enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
+        await message.answer(
+            f"✅ Qimor guruhi belgilandi.\n\n{settings_text}",
+            reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice, has_group),
+        )
+        return True
+
     if action in {"gamble_loss_voice", "gamble_win_voice"}:
         if message.voice is None:
             PENDING_OWNER_ACTIONS[message.from_user.id] = action
@@ -948,10 +1020,10 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             ok, text = await engine.set_gamble_win_voice_file_id(message.voice.file_id)
         else:
             ok, text = await engine.set_gamble_loss_voice_file_id(message.voice.file_id)
-        settings_text, enabled, has_loss_voice, has_win_voice = await engine.gamble_settings_text()
+        settings_text, enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
         await message.answer(
             f"{text}\n\n{settings_text}" if ok else text,
-            reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice) if ok else owner_wait_keyboard(),
+            reply_markup=owner_gamble_keyboard(enabled, has_loss_voice, has_win_voice, has_group) if ok else owner_wait_keyboard(),
         )
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = action

@@ -958,8 +958,13 @@ def owner_gamble_keyboard(
     enabled: bool,
     has_loss_voice: bool = False,
     has_win_voice: bool = False,
+    has_group: bool = False,
 ) -> InlineKeyboardMarkup:
     toggle_text = "🔴 Qimorni o'chirish" if enabled else "🟢 Qimorni yoqish"
+    group_btn_text = "🏠 Qimor guruhini o'zgartirish" if has_group else "➕ Qimor guruh belgilash"
+    group_rows = [[InlineKeyboardButton(text=group_btn_text, callback_data="owner:gamble:group")]]
+    if has_group:
+        group_rows.append([InlineKeyboardButton(text="🗑 Qimor guruhini o'chirish", callback_data="owner:gamble:group:clear")])
     voice_rows = [
         [InlineKeyboardButton(text="💣 Kuyganda voice qo'shish", callback_data="owner:gamble:voice:loss")],
     ]
@@ -971,6 +976,7 @@ def owner_gamble_keyboard(
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=toggle_text, callback_data="owner:gamble:toggle")],
+            *group_rows,
             *voice_rows,
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
