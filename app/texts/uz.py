@@ -149,7 +149,7 @@ Yakka rol. Tunda tanlagan odamini eshigi oldiga mina qo'yadi va u uyga o'sha tun
     ),
     "give_usage": "Foydalanish: /give 10 yoki /give @username 10 izoh yoki reply qilib /give 10 izoh",
     "give_started": "<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Diamond yuborish uchun /give ishlating.",
-    "give_not_enough": "Balansingizda yetarli diamond yo'q.",
+    "give_not_enough": "Balansingiz yetarli emas.",
     "give_success": "✅ {amount} <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> yuborildi.",
     "give_received": "🎁 Sizga {amount} <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> keldi.",
     "top_title": "🏆 <b>TOP Reyting</b>",
