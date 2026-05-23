@@ -26,6 +26,7 @@ FROG_GAME_TYPE = "frog"
 FROG_ACTIVE = "active"
 FROG_STATUSES = {"active", "won", "lost", "cashed_out", "cancelled"}
 FROG_MULTIPLIERS = (1.18, 1.48, 1.85, 2.31, 2.89, 3.62, 4.52, 5.65)
+FROG_DANGER_COUNTS = (1, 1, 2, 2, 3, 3, 4, 4)
 FROG_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -63,9 +64,36 @@ def _user_link(user: User) -> str:
     return f'<a href="tg://user?id={int(user.telegram_id)}">{name}</a>'
 
 
-def generate_danger_map(rows: int = FROG_ROWS, columns: int = FROG_COLUMNS) -> dict[str, int]:
+def _danger_count_for_row(row: int) -> int:
+    if 0 <= row < len(FROG_DANGER_COUNTS):
+        return min(FROG_DANGER_COUNTS[row], FROG_COLUMNS - 1)
+    return 1
+
+
+def _danger_columns_for_row(danger_map: dict, row: int) -> set[int]:
+    raw = danger_map.get(str(row), [])
+    if isinstance(raw, int):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return set()
+    result: set[int] = set()
+    for item in raw:
+        try:
+            column = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= column < FROG_COLUMNS:
+            result.add(column)
+    return result
+
+
+def generate_danger_map(rows: int = FROG_ROWS, columns: int = FROG_COLUMNS) -> dict[str, list[int]]:
     rng = secrets.SystemRandom()
-    return {str(row): rng.randrange(columns) for row in range(rows)}
+    result: dict[str, list[int]] = {}
+    for row in range(rows):
+        count = min(_danger_count_for_row(row), max(1, columns - 1))
+        result[str(row)] = sorted(rng.sample(range(columns), count))
+    return result
 
 
 def calculate_multiplier(row: int) -> float:
@@ -104,7 +132,7 @@ def parse_frog_callback(data: str) -> tuple[str, Optional[int], Optional[int], O
 def frog_start_text() -> str:
     return (
         "🐸 <b>Qurbaqa Yo'li</b>\n\n"
-        "5x8 maydon. Har qatorda 1 ta xavfli katak bor.\n\n"
+        "5x8 maydon. Yuqoriga chiqqan sari xavf oshadi.\n\n"
         "Stavkani tanlang:"
     )
 
@@ -313,12 +341,12 @@ class FrogRoadEngine:
 
                     row = int(game.current_row or 0)
                     danger_map = _json_loads(game.danger_map, {})
-                    danger_column = int(danger_map.get(str(row), -1))
+                    danger_columns = _danger_columns_for_row(danger_map, row)
                     opened = _json_loads(game.opened_cells, [])
                     now = _utcnow()
                     game.updated_at = now
 
-                    if column == danger_column:
+                    if column in danger_columns:
                         opened.append({"row": row, "column": column, "safe": False})
                         game.opened_cells = json.dumps(opened, ensure_ascii=False)
                         game.current_position = json.dumps({"row": row, "column": column}, ensure_ascii=False)
