@@ -509,6 +509,10 @@ class GameEngine:
             chat_id = int(raw_id)
         return chat_id, link
 
+    async def is_configured_gamble_group(self, chat_id: int) -> bool:
+        configured_id, _link = await self.get_gamble_group()
+        return configured_id is not None and int(chat_id) == int(configured_id)
+
     async def set_gamble_group(self, chat_id: int, link: str) -> None:
         async with self.session_factory() as session:
             await self._set_bot_setting_value(session, GAMBLE_GROUP_ID_KEY, str(int(chat_id)))

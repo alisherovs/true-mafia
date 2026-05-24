@@ -16,6 +16,12 @@ from app.texts import t
 
 router = Router()
 
+GAMBLE_ONLY_GROUP_TEXT = (
+    "🎰 <b>Bu guruh faqat qimor o'yinlari uchun moslashtirilgan.</b>\n\n"
+    "🚫 Mafia o'yini bu yerda boshlanmaydi.\n"
+    "🏠 Iltimos, o'z guruhingizda o'yinni boshlang."
+)
+
 
 async def _safe_edit(callback: CallbackQuery, text: str, reply_markup=None) -> None:
     if callback.message is None:
@@ -48,6 +54,9 @@ async def cmd_start(
     if message.from_user is None:
         return
     if message.chat.type != "private":
+        if await engine.is_configured_gamble_group(message.chat.id):
+            await message.reply(GAMBLE_ONLY_GROUP_TEXT)
+            return
         lang = await engine.get_group_language(message.chat.id)
         game = await engine.active_game_for_chat(message.chat.id)
         if game is None:

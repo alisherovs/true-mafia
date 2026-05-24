@@ -10,6 +10,12 @@ from app.texts import t
 
 router = Router()
 
+GAMBLE_ONLY_GROUP_TEXT = (
+    "🎰 <b>Bu guruh faqat qimor o'yinlari uchun moslashtirilgan.</b>\n\n"
+    "🚫 Mafia o'yini bu yerda boshlanmaydi.\n"
+    "🏠 Iltimos, o'z guruhingizda o'yinni boshlang."
+)
+
 
 async def _start_game_with_mode(
     message: Message,
@@ -25,6 +31,10 @@ async def _start_game_with_mode(
     if message.chat.type == "private":
         lang = await engine.get_user_language(message.from_user.id)
         await message.answer(t(lang, "command_in_group"))
+        return
+
+    if await engine.is_configured_gamble_group(message.chat.id):
+        await message.reply(GAMBLE_ONLY_GROUP_TEXT)
         return
 
     await engine.ensure_user(message.from_user)
