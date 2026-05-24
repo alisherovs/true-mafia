@@ -290,7 +290,7 @@ async def main() -> None:
     scheduler.add_job(
         roulette_engine.resolve_due_rounds,
         "interval",
-        seconds=5,
+        seconds=3,
         args=[bot],
         id="roulette_watchdog",
         replace_existing=True,

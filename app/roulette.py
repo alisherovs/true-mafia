@@ -222,20 +222,40 @@ class RouletteEngine:
 
     async def resolve_due_rounds(self, bot: Bot, limit: int = 20) -> None:
         now = _utcnow()
+        refresh_items: list[tuple[int, int, str, int]] = []
+        result_items: list[tuple[RouletteRound, str]] = []
         async with self.session_factory() as session:
             rounds = (
                 await session.execute(
                     select(RouletteRound)
-                    .where(RouletteRound.status == "active", RouletteRound.ends_at <= now)
+                    .where(RouletteRound.status == "active")
                     .order_by(RouletteRound.ends_at.asc())
-                    .limit(limit)
+                    .limit(max(limit, 50))
                     .with_for_update()
                 )
             ).scalars().all()
             for round_ in rounds:
-                text = await self._resolve_round(session, round_)
-                await session.commit()
-                await self._publish_result(bot, round_, text)
+                if round_.ends_at <= now:
+                    text = await self._resolve_round(session, round_)
+                    result_items.append((round_, text))
+                elif round_.message_id:
+                    text = await self._round_text(session, round_)
+                    refresh_items.append((int(round_.chat_id), int(round_.message_id), text, int(round_.id)))
+            await session.commit()
+
+        for chat_id, message_id, text, round_id in refresh_items:
+            await self._refresh_round_message(bot, chat_id, message_id, text, round_id)
+        for round_, text in result_items:
+            await self._publish_result(bot, round_, text)
+
+    async def _refresh_round_message(self, bot: Bot, chat_id: int, message_id: int, text: str, round_id: int) -> None:
+        try:
+            await bot.edit_message_text(text, chat_id, message_id, reply_markup=_round_keyboard(round_id))
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                logger.debug("roulette_refresh_failed round=%s error=%s", round_id, exc)
+        except TelegramForbiddenError as exc:
+            logger.warning("roulette_refresh_forbidden round=%s error=%s", round_id, exc)
 
     async def _resolve_round(self, session: AsyncSession, round_: RouletteRound) -> str:
         bets = (
