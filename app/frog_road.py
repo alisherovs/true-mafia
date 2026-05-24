@@ -124,6 +124,8 @@ def parse_frog_callback(data: str) -> tuple[str, Optional[int], Optional[int], O
         return action, int(parts[3]), None, int(parts[2])
     if action in {"cashout", "cancel"} and len(parts) == 3 and parts[2].isdigit():
         return action, int(parts[2]), None, None
+    if action == "noop" and len(parts) == 3 and parts[2].isdigit():
+        return action, int(parts[2]), None, None
     if action == "jump" and len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
         return action, int(parts[2]), int(parts[3]), None
     raise ValueError("bad_callback")
@@ -167,25 +169,7 @@ def build_frog_start_keyboard(owner_id: int | None = None) -> InlineKeyboardMark
     )
 
 
-def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup | None:
-    if session.status != FROG_ACTIVE:
-        return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="①", callback_data=f"frog:jump:{session.id}:0"),
-                InlineKeyboardButton(text="②", callback_data=f"frog:jump:{session.id}:1"),
-                InlineKeyboardButton(text="③", callback_data=f"frog:jump:{session.id}:2"),
-                InlineKeyboardButton(text="④", callback_data=f"frog:jump:{session.id}:3"),
-                InlineKeyboardButton(text="⑤", callback_data=f"frog:jump:{session.id}:4"),
-            ],
-            [InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")],
-            [InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"frog:cancel:{session.id}")],
-        ]
-    )
-
-
-def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> str:
+def _frog_board_state(session: FrogGameSession) -> tuple[set[tuple[int, int]], set[tuple[int, int]], Optional[tuple[int, int]]]:
     opened = _json_loads(session.opened_cells, [])
     current_position = _json_loads(session.current_position, {})
     opened_safe = {
@@ -204,22 +188,51 @@ def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> 
             position = (int(current_position["row"]), int(current_position["column"]))
         except (TypeError, ValueError):
             position = None
+    return opened_safe, opened_danger, position
 
+
+def _frog_tile_text(
+    point: tuple[int, int],
+    opened_safe: set[tuple[int, int]],
+    opened_danger: set[tuple[int, int]],
+    position: Optional[tuple[int, int]],
+) -> str:
+    if point in opened_danger:
+        return "💥"
+    if position == point:
+        return "🐸"
+    if point in opened_safe:
+        return "🟩"
+    return "⬛"
+
+
+def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup:
+    opened_safe, opened_danger, position = _frog_board_state(session)
+    rows: list[list[InlineKeyboardButton]] = []
+    current_row = int(session.current_row or 0)
+    active = session.status == FROG_ACTIVE
+    for row in range(FROG_ROWS - 1, -1, -1):
+        buttons: list[InlineKeyboardButton] = []
+        for column in range(FROG_COLUMNS):
+            point = (row, column)
+            text = _frog_tile_text(point, opened_safe, opened_danger, position)
+            callback_data = f"frog:jump:{session.id}:{column}" if active and row == current_row else f"frog:noop:{session.id}"
+            buttons.append(InlineKeyboardButton(text=text, callback_data=callback_data))
+        rows.append(buttons)
+    if active:
+        rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")])
+        rows.append([InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"frog:cancel:{session.id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def render_frog_board(session: FrogGameSession, reveal_danger: bool = False) -> str:
+    opened_safe, opened_danger, position = _frog_board_state(session)
     lines: list[str] = []
     for row in range(FROG_ROWS - 1, -1, -1):
         cells: list[str] = []
         for column in range(FROG_COLUMNS):
             point = (row, column)
-            if point in opened_danger:
-                cells.append("💥")
-            elif position == point and session.status == FROG_ACTIVE:
-                cells.append("🐸")
-            elif point in opened_safe:
-                cells.append("🟩")
-            elif reveal_danger and point in opened_danger:
-                cells.append("💥")
-            else:
-                cells.append("⬛")
+            cells.append(_frog_tile_text(point, opened_safe, opened_danger, position))
         lines.append(" ".join(cells))
     return "\n".join(lines)
 
@@ -240,8 +253,6 @@ def render_frog_text(session: FrogGameSession, user_balance: int, result: str = 
         f"🟢 Xavfsiz sakrash: <b>{current_row}</b>/<b>{FROG_ROWS}</b>",
         f"💣 Tuzoqlar: <b>{danger_count}</b>",
         "",
-        "━━━━━━━━━━━━━━━━━━",
-        render_frog_board(session, reveal_danger=session.status != FROG_ACTIVE),
         "━━━━━━━━━━━━━━━━━━",
     ]
     if result:
@@ -372,10 +383,9 @@ class FrogRoadEngine:
                             f"🟢 Sakrash: <b>{row}</b>/<b>{FROG_ROWS}</b>\n"
                             "💣 Mina portladi.\n"
                             "💸 Stavka kuyib ketdi.\n\n"
-                            f"{render_frog_board(game, reveal_danger=True)}\n\n"
                             "━━━━━━━━━━━━━━━━━━"
                         )
-                        return FrogView(text, None, "💥 Xavfli katakka tushdingiz!", True)
+                        return FrogView(text, build_frog_keyboard(game), "💥 Xavfli katakka tushdingiz!", True)
 
                     opened.append({"row": row, "column": column, "safe": True})
                     game.opened_cells = json.dumps(opened, ensure_ascii=False)
@@ -409,9 +419,8 @@ class FrogRoadEngine:
                             f"💰 Yutuq: <b>{payout}</b> ⭐\n"
                             f"📈 Yakuniy multiplikator: <b>x{FROG_MULTIPLIERS[-1]:.2f}</b>\n\n"
                             "✨ Bonus hisobingizga tushirildi.\n\n"
-                            f"{render_frog_board(game, reveal_danger=True)}\n"
                             "━━━━━━━━━━━━━━━━━━",
-                            None,
+                            build_frog_keyboard(game),
                             "🏆 Maksimal yutuq!",
                             True,
                         )
@@ -455,9 +464,8 @@ class FrogRoadEngine:
                         f"💰 Yutuq: <b>{payout}</b> ⭐\n"
                         f"📈 Multiplikator: <b>x{float(game.current_multiplier or 1.0):.2f}</b>\n"
                         f"💎 Balans: <b>{int(user.dollar or 0)}</b> ⭐\n\n"
-                        f"{render_frog_board(game, reveal_danger=True)}\n\n"
                         "━━━━━━━━━━━━━━━━━━",
-                        None,
+                        build_frog_keyboard(game),
                         f"💰 {payout} coin olindi!",
                         True,
                     )
@@ -487,9 +495,8 @@ class FrogRoadEngine:
                         "━━━━━━━━━━━━━━━━━━\n\n"
                         f"💰 Stavka: <b>{int(game.bet_amount)}</b> ⭐\n"
                         "💸 Stavka qaytarilmaydi.\n\n"
-                        f"{render_frog_board(game, reveal_danger=True)}\n\n"
                         "━━━━━━━━━━━━━━━━━━",
-                        None,
+                        build_frog_keyboard(game),
                         "O'yin bekor qilindi.",
                         True,
                     )

@@ -368,6 +368,9 @@ async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMC
         )
         await callback.answer("Summani yozing.")
         return
+    if action == "noop":
+        await callback.answer()
+        return
     if action == "start":
         view = await frog.start_frog_game(callback.from_user, callback.message.chat.id, int(value or 0))
         await _edit_or_answer(callback.message, view)
