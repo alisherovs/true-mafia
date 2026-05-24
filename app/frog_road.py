@@ -31,6 +31,9 @@ FROG_TILE_CLOSED = "🪷"
 FROG_TILE_SAFE = "🍎"
 FROG_TILE_DANGER = "💥"
 FROG_TILE_CURRENT = "🐸"
+FROG_JUMP_BUTTONS = ("🟢 ①", "🔵 ②", "🟡 ③", "🟣 ④", "🔴 ⑤")
+FROG_MONEY_EMOJI_ID = "5409048419211682843"
+FROG_MINE_EMOJI_ID = "5469654973308476699"
 FROG_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -45,6 +48,10 @@ class FrogView:
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ce(symbol: str, emoji_id: str) -> str:
+    return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
 
 
 def _lock(session_id: int) -> asyncio.Lock:
@@ -225,11 +232,11 @@ def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup:
     if active:
         rows.append(
             [
-                InlineKeyboardButton(text="①", callback_data=f"frog:jump:{session.id}:0"),
-                InlineKeyboardButton(text="②", callback_data=f"frog:jump:{session.id}:1"),
-                InlineKeyboardButton(text="③", callback_data=f"frog:jump:{session.id}:2"),
-                InlineKeyboardButton(text="④", callback_data=f"frog:jump:{session.id}:3"),
-                InlineKeyboardButton(text="⑤", callback_data=f"frog:jump:{session.id}:4"),
+                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[0], callback_data=f"frog:jump:{session.id}:0"),
+                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[1], callback_data=f"frog:jump:{session.id}:1"),
+                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[2], callback_data=f"frog:jump:{session.id}:2"),
+                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[3], callback_data=f"frog:jump:{session.id}:3"),
+                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[4], callback_data=f"frog:jump:{session.id}:4"),
             ]
         )
         rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")])
@@ -387,14 +394,9 @@ class FrogRoadEngine:
                         session.add(_history(game, "lost"))
                         logger.info("frog_lost user=%s session=%s row=%s column=%s", tg_user_id, session_id, row, column)
                         text = (
+                            f"{_ce('💣', FROG_MINE_EMOJI_ID)} <b>Qurbaqa yiqildi!</b>\n"
                             "━━━━━━━━━━━━━━━━━━\n"
-                            "💥 <b>YUTQAZDINGIZ</b>\n"
-                            "━━━━━━━━━━━━━━━━━━\n\n"
-                            "🐸 Qurbaqa tuzoqqa tushib qoldi.\n\n"
-                            f"💰 Stavka: <b>{int(game.bet_amount)}</b> ⭐\n"
-                            f"🟢 Sakrash: <b>{row}</b>/<b>{FROG_ROWS}</b>\n"
-                            "💣 Mina portladi.\n"
-                            "💸 Stavka kuyib ketdi.\n\n"
+                            f"{_ce('💵', FROG_MONEY_EMOJI_ID)} <b>{int(game.bet_amount)}</b> dollar kuyib ketdi.\n"
                             "━━━━━━━━━━━━━━━━━━"
                         )
                         return FrogView(text, None, "💥 Xavfli katakka tushdingiz!", True)
@@ -424,13 +426,9 @@ class FrogRoadEngine:
                         _record_dollar(session, user, payout, "frog_win", f"Qurbaqa Yo'li maksimal yutuq #{game.id}", int(game.chat_id))
                         logger.info("frog_won user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                         return FrogView(
+                            "🏆 <b>Qimor yakunlandi</b>\n"
                             "━━━━━━━━━━━━━━━━━━\n"
-                            "🎉 <b>G'ALABA!</b>\n"
-                            "━━━━━━━━━━━━━━━━━━\n\n"
-                            "🐸 Qurbaqa manzilga yetib bordi!\n\n"
-                            f"💰 Yutuq: <b>{payout}</b> ⭐\n"
-                            f"📈 Yakuniy multiplikator: <b>x{FROG_MULTIPLIERS[-1]:.2f}</b>\n\n"
-                            "✨ Bonus hisobingizga tushirildi.\n\n"
+                            f"{_ce('💵', FROG_MONEY_EMOJI_ID)} Yutuq: <b>{payout}</b> dollar\n"
                             "━━━━━━━━━━━━━━━━━━",
                             None,
                             "🏆 Maksimal yutuq!",
@@ -470,15 +468,12 @@ class FrogRoadEngine:
                     _record_dollar(session, user, payout, "frog_cashout", f"Qurbaqa Yo'li cashout #{game.id}", int(game.chat_id))
                     logger.info("frog_cashout user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                     return FrogView(
+                        "🏆 <b>Qimor yakunlandi</b>\n"
                         "━━━━━━━━━━━━━━━━━━\n"
-                        "💰 <b>YUTUQ OLINDI</b>\n"
-                        "━━━━━━━━━━━━━━━━━━\n\n"
-                        f"💰 Yutuq: <b>{payout}</b> ⭐\n"
-                        f"📈 Multiplikator: <b>x{float(game.current_multiplier or 1.0):.2f}</b>\n"
-                        f"💎 Balans: <b>{int(user.dollar or 0)}</b> ⭐\n\n"
+                        f"{_ce('💵', FROG_MONEY_EMOJI_ID)} Yutuq: <b>{payout}</b> dollar\n"
                         "━━━━━━━━━━━━━━━━━━",
                         None,
-                        f"💰 {payout} coin olindi!",
+                        f"💰 {payout} dollar olindi!",
                         True,
                     )
 
