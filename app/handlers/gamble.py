@@ -7,6 +7,14 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from app.chicken_road import (
+    CHICKEN_MAX_BET,
+    CHICKEN_MIN_BET,
+    ChickenRoadEngine,
+    build_chicken_start_keyboard,
+    chicken_start_text,
+    parse_chicken_callback,
+)
 from app.database import SessionLocal
 from app.frog_road import (
     FROG_MAX_BET,
@@ -42,6 +50,10 @@ class MinesBetState(StatesGroup):
 
 
 class RouletteBetState(StatesGroup):
+    waiting_amount = State()
+
+
+class ChickenBetState(StatesGroup):
     waiting_amount = State()
 
 
@@ -104,7 +116,8 @@ def _gamble_menu_text() -> str:
         "O'ynamoqchi bo'lgan mini-o'yinni tanlang:\n\n"
         "🐸 <b>Qurbaqa Yo'li</b> - 5x8 yo'lda xavfli kataklardan qoching.\n"
         "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor.\n"
-        "🎡 <b>Ruletka</b> - multiplayer avtomatik raund."
+        "🎡 <b>Ruletka</b> - multiplayer avtomatik raund.\n"
+        "🐔 <b>Chicken Road</b> - yo'ldan xavfsiz o'tib yutuqni oling."
     )
 
 
@@ -114,6 +127,7 @@ def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🐸 Qurbaqa Yo'li", callback_data=f"qmenu:frog:{owner_id}")],
             [InlineKeyboardButton(text="💣 Mines", callback_data=f"qmenu:mines:{owner_id}")],
             [InlineKeyboardButton(text="🎡 Ruletka", callback_data=f"qmenu:roulette:{owner_id}")],
+            [InlineKeyboardButton(text="🐔 Chicken Road", callback_data=f"qmenu:chicken:{owner_id}")],
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"qmenu:cancel:{owner_id}")],
         ]
     )
@@ -173,6 +187,16 @@ def _parse_roulette_bet(raw: str | None) -> tuple[bool, int, str]:
         return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
     if amount < ROULETTE_MIN_BET or amount > ROULETTE_MAX_BET:
         return False, 0, f"❌ Stavka <b>{ROULETTE_MIN_BET}</b> dan <b>{ROULETTE_MAX_BET}</b> dollargacha bo'lishi kerak."
+    return True, amount, ""
+
+
+def _parse_chicken_bet(raw: str | None) -> tuple[bool, int, str]:
+    try:
+        amount = int((raw or "").strip().split()[0])
+    except (AttributeError, IndexError, ValueError):
+        return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
+    if amount < CHICKEN_MIN_BET or amount > CHICKEN_MAX_BET:
+        return False, 0, f"❌ Stavka <b>{CHICKEN_MIN_BET}</b> dan <b>{CHICKEN_MAX_BET}</b> coin gacha bo'lishi kerak."
     return True, amount, ""
 
 
@@ -277,6 +301,25 @@ async def roulette_custom_bet_amount(message: Message, state: FSMContext, engine
     await message.answer(roulette_color_text(amount), reply_markup=roulette_color_keyboard(message.from_user.id, amount))
 
 
+@router.message(ChickenBetState.waiting_amount)
+async def chicken_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not await _gamble_allowed_or_reply(message, engine):
+        await state.clear()
+        return
+    ok, amount, error = _parse_chicken_bet(message.text)
+    if not ok:
+        await message.answer(error or "❌ To'g'ri summa kiriting. Masalan: 1000")
+        return
+    await state.clear()
+    chicken = ChickenRoadEngine(SessionLocal)
+    view = await chicken.start_chicken_game(message.from_user, message.chat.id, amount)
+    sent = await message.answer(view.text, reply_markup=view.keyboard)
+    if view.session_id:
+        await chicken.set_message_id(view.session_id, sent.message_id)
+
+
 @router.message(Command("topq"))
 async def cmd_topq(message: Message, engine: GameEngine) -> None:
     allowed, link = await engine.gamble_chat_check(message.chat.id)
@@ -321,6 +364,9 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
     elif action == "roulette":
         await callback.message.edit_text(roulette_start_text(), reply_markup=roulette_bet_keyboard(owner_id))
         await callback.answer("Ruletka tanlandi.")
+    elif action == "chicken":
+        await callback.message.edit_text(chicken_start_text(), reply_markup=build_chicken_start_keyboard(owner_id))
+        await callback.answer("Chicken Road tanlandi.")
     elif action == "back":
         await callback.message.edit_text(_gamble_menu_text(), reply_markup=_gamble_menu_keyboard(owner_id))
         await callback.answer("Menyu.")
@@ -505,6 +551,94 @@ async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMC
 
     if view.text:
         await _edit_or_answer(callback.message, view)
+    await callback.answer(view.alert or "OK", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("chicken:") | (F.data == "qimor:chicken:start"))
+async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    try:
+        action, value, owner_id = parse_chicken_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    if not _callback_owner_ok(callback, owner_id):
+        await callback.answer("❌ Bu o'yin menyusi sizniki emas.", show_alert=True)
+        return
+
+    chicken = ChickenRoadEngine(SessionLocal)
+    if action == "menu":
+        await state.clear()
+        await callback.message.edit_text(chicken_start_text(), reply_markup=build_chicken_start_keyboard(callback.from_user.id))
+        await callback.answer("Chicken Road.")
+        return
+    if action == "back":
+        await state.clear()
+        await callback.message.edit_text(
+            _gamble_menu_text(),
+            reply_markup=_gamble_menu_keyboard(callback.from_user.id),
+        )
+        await callback.answer("Menyu.")
+        return
+    if action == "custom_bet":
+        await state.set_state(ChickenBetState.waiting_amount)
+        await callback.message.answer(
+            f"✍️ Chicken Road stavkasini kiriting.\nMinimal: <b>{CHICKEN_MIN_BET}</b> coin\nMaksimal: <b>{CHICKEN_MAX_BET}</b> coin"
+        )
+        await callback.answer("Summani yozing.")
+        return
+    if action == "noop":
+        await callback.answer()
+        return
+    if action == "bet":
+        if value is None:
+            await callback.answer("Stavka noto'g'ri.", show_alert=True)
+            return
+        await state.clear()
+        view = await chicken.start_chicken_game(callback.from_user, callback.message.chat.id, int(value))
+        try:
+            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                await callback.message.answer(view.text, reply_markup=view.keyboard)
+        if view.session_id:
+            await chicken.set_message_id(view.session_id, callback.message.message_id)
+        await callback.answer(view.alert or "O'yin boshlandi.", show_alert=view.show_alert)
+        return
+    if action == "go":
+        if value is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await chicken.handle_chicken_go(callback.from_user.id, value)
+    elif action == "cashout":
+        if value is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await chicken.handle_chicken_cashout(callback.from_user.id, value)
+    elif action == "cancel":
+        if value is None:
+            await callback.answer("Callback noto'g'ri.", show_alert=True)
+            return
+        view = await chicken.handle_chicken_cancel(callback.from_user.id, value)
+    else:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+
+    if view.text:
+        try:
+            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                await callback.message.answer(view.text, reply_markup=view.keyboard)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 

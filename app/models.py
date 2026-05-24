@@ -429,6 +429,29 @@ class FrogGameSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ChickenRoadSession(Base):
+    __tablename__ = "chicken_road_sessions"
+    __table_args__ = (
+        Index("ix_chicken_sessions_user_status", "user_id", "status"),
+        Index("ix_chicken_sessions_chat_message", "chat_id", "message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    bet_amount: Mapped[int] = mapped_column(Integer)
+    current_step: Mapped[int] = mapped_column(Integer, default=0)
+    current_multiplier: Mapped[float] = mapped_column(Float, default=1.0)
+    difficulty: Mapped[str] = mapped_column(String(16), default="easy")
+    road_map: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    win_amount: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class GameHistory(Base):
     __tablename__ = "game_history"
     __table_args__ = (
