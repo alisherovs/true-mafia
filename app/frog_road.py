@@ -27,6 +27,10 @@ FROG_ACTIVE = "active"
 FROG_STATUSES = {"active", "won", "lost", "cashed_out", "cancelled"}
 FROG_MULTIPLIERS = (1.18, 1.48, 1.85, 2.31, 2.89, 3.62, 4.52, 5.65)
 FROG_DANGER_COUNTS = (1, 1, 2, 2, 3, 3, 4, 4)
+FROG_TILE_CLOSED = "🪷"
+FROG_TILE_SAFE = "🍎"
+FROG_TILE_DANGER = "💥"
+FROG_TILE_CURRENT = "🐸"
 FROG_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -137,7 +141,7 @@ def frog_start_text() -> str:
         "🐸 <b>FROG RUSH</b>\n"
         "━━━━━━━━━━━━━━━━━━\n\n"
         "💎 Premium casino o'yini\n"
-        "⚫ 5x8 yo'l  •  🟢 xavfsiz  •  💣 tuzoq\n\n"
+        "🪷 5x8 yo'l  •  🍎 iz  •  💣 tuzoq\n\n"
         "💰 <b>Stavkani tanlang</b>"
     )
 
@@ -198,12 +202,12 @@ def _frog_tile_text(
     position: Optional[tuple[int, int]],
 ) -> str:
     if point in opened_danger:
-        return "💥"
+        return FROG_TILE_DANGER
     if position == point:
-        return "🐸"
+        return FROG_TILE_CURRENT
     if point in opened_safe:
-        return "🟩"
-    return "⬛"
+        return FROG_TILE_SAFE
+    return FROG_TILE_CLOSED
 
 
 def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup:
@@ -216,10 +220,18 @@ def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup:
         for column in range(FROG_COLUMNS):
             point = (row, column)
             text = _frog_tile_text(point, opened_safe, opened_danger, position)
-            callback_data = f"frog:jump:{session.id}:{column}" if active and row == current_row else f"frog:noop:{session.id}"
-            buttons.append(InlineKeyboardButton(text=text, callback_data=callback_data))
+            buttons.append(InlineKeyboardButton(text=text, callback_data=f"frog:noop:{session.id}"))
         rows.append(buttons)
     if active:
+        rows.append(
+            [
+                InlineKeyboardButton(text="①", callback_data=f"frog:jump:{session.id}:0"),
+                InlineKeyboardButton(text="②", callback_data=f"frog:jump:{session.id}:1"),
+                InlineKeyboardButton(text="③", callback_data=f"frog:jump:{session.id}:2"),
+                InlineKeyboardButton(text="④", callback_data=f"frog:jump:{session.id}:3"),
+                InlineKeyboardButton(text="⑤", callback_data=f"frog:jump:{session.id}:4"),
+            ]
+        )
         rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")])
         rows.append([InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"frog:cancel:{session.id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -385,7 +397,7 @@ class FrogRoadEngine:
                             "💸 Stavka kuyib ketdi.\n\n"
                             "━━━━━━━━━━━━━━━━━━"
                         )
-                        return FrogView(text, build_frog_keyboard(game), "💥 Xavfli katakka tushdingiz!", True)
+                        return FrogView(text, None, "💥 Xavfli katakka tushdingiz!", True)
 
                     opened.append({"row": row, "column": column, "safe": True})
                     game.opened_cells = json.dumps(opened, ensure_ascii=False)
@@ -420,7 +432,7 @@ class FrogRoadEngine:
                             f"📈 Yakuniy multiplikator: <b>x{FROG_MULTIPLIERS[-1]:.2f}</b>\n\n"
                             "✨ Bonus hisobingizga tushirildi.\n\n"
                             "━━━━━━━━━━━━━━━━━━",
-                            build_frog_keyboard(game),
+                            None,
                             "🏆 Maksimal yutuq!",
                             True,
                         )
@@ -465,7 +477,7 @@ class FrogRoadEngine:
                         f"📈 Multiplikator: <b>x{float(game.current_multiplier or 1.0):.2f}</b>\n"
                         f"💎 Balans: <b>{int(user.dollar or 0)}</b> ⭐\n\n"
                         "━━━━━━━━━━━━━━━━━━",
-                        build_frog_keyboard(game),
+                        None,
                         f"💰 {payout} coin olindi!",
                         True,
                     )
@@ -496,7 +508,7 @@ class FrogRoadEngine:
                         f"💰 Stavka: <b>{int(game.bet_amount)}</b> ⭐\n"
                         "💸 Stavka qaytarilmaydi.\n\n"
                         "━━━━━━━━━━━━━━━━━━",
-                        build_frog_keyboard(game),
+                        None,
                         "O'yin bekor qilindi.",
                         True,
                     )
