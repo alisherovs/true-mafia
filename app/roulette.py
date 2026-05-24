@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ROULETTE_MIN_BET = 100
 ROULETTE_MAX_BET = 100_000
 ROULETTE_ROUND_SECONDS = 30
-ROULETTE_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
+ROULETTE_SEPARATOR = "━━━━━━━━━━━━━━━"
 ROULETTE_MONEY_EMOJI_ID = "5409048419211682843"
 ROULETTE_COLORS = {
     "red": ("🔴", "Qizil", 2),

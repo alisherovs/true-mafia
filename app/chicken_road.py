@@ -16,7 +16,7 @@ from app.models import ChickenRoadSession, DollarTransaction, GameHistory, User
 
 logger = logging.getLogger(__name__)
 
-CHICKEN_STEPS = 12
+CHICKEN_STEPS = 8
 CHICKEN_MIN_BET = 100
 CHICKEN_MAX_BET = 100_000
 CHICKEN_BET_OPTIONS = (100, 500, 1000, 5000, 10000)
@@ -25,17 +25,13 @@ CHICKEN_ACTIVE = "active"
 CHICKEN_STATUSES = {"active", "won", "lost", "cashed_out", "cancelled"}
 CHICKEN_MULTIPLIERS = {
     1: 1.10,
-    2: 1.25,
-    3: 1.45,
-    4: 1.70,
-    5: 2.00,
-    6: 2.40,
-    7: 2.90,
-    8: 3.50,
-    9: 4.30,
-    10: 5.30,
-    11: 6.70,
-    12: 8.50,
+    2: 1.35,
+    3: 1.70,
+    4: 2.20,
+    5: 2.90,
+    6: 3.90,
+    7: 5.50,
+    8: 8.50,
 }
 EASY_DANGER_COUNT = 3
 MEDIUM_DANGER_COUNT = 4
@@ -45,7 +41,7 @@ CHICKEN_DANGER_COUNTS = {
     "medium": MEDIUM_DANGER_COUNT,
     "hard": HARD_DANGER_COUNT,
 }
-CHICKEN_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
+CHICKEN_SEPARATOR = "━━━━━━━━━━━━━━━"
 CHICKEN_MONEY_EMOJI_ID = "5409048419211682843"
 CHICKEN_MINE_EMOJI_ID = "5469654973308476699"
 CHICKEN_LOCKS: dict[int, asyncio.Lock] = {}
@@ -179,11 +175,58 @@ def build_chicken_start_keyboard(owner_id: int | None = None) -> InlineKeyboardM
 
 
 def build_chicken_active_keyboard(session_id: int) -> InlineKeyboardMarkup:
+    placeholder = ChickenRoadSession(
+        id=int(session_id),
+        user_id=0,
+        chat_id=0,
+        bet_amount=0,
+        current_step=0,
+        current_multiplier=1.0,
+        road_map="[]",
+        status=CHICKEN_ACTIVE,
+        win_amount=0,
+    )
+    road_row = _chicken_road_buttons(placeholder)
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            road_row,
             [InlineKeyboardButton(text="🚶 Oldinga yurish", callback_data=f"chicken:go:{session_id}")],
             [InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"chicken:cashout:{session_id}")],
             [InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"chicken:cancel:{session_id}")],
+        ]
+    )
+
+
+def _chicken_cell_text(session: ChickenRoadSession, step: int) -> str:
+    current_step = int(session.current_step or 0)
+    road_map = _json_loads(session.road_map, [])
+    index = step - 1
+    is_danger = index < len(road_map) and road_map[index] == "danger"
+    if session.status == "lost" and step == current_step and is_danger:
+        return "💥"
+    if current_step == 0 and step == 1 and session.status == CHICKEN_ACTIVE:
+        return "🐔"
+    if step == current_step and session.status == CHICKEN_ACTIVE:
+        return "🐔"
+    if step <= current_step:
+        return "✅"
+    return "⬜"
+
+
+def _chicken_road_buttons(session: ChickenRoadSession) -> list[InlineKeyboardButton]:
+    return [
+        InlineKeyboardButton(text=_chicken_cell_text(session, step), callback_data=f"chicken:noop:{session.id}")
+        for step in range(CHICKEN_STEPS, 0, -1)
+    ]
+
+
+def _build_chicken_keyboard_for_session(session: ChickenRoadSession) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            _chicken_road_buttons(session),
+            [InlineKeyboardButton(text="🚶 Oldinga yurish", callback_data=f"chicken:go:{session.id}")],
+            [InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"chicken:cashout:{session.id}")],
+            [InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"chicken:cancel:{session.id}")],
         ]
     )
 
@@ -223,8 +266,6 @@ def render_chicken_text(session: ChickenRoadSession, user_balance: int, result: 
         f"🚶 Qadam: <b>{current_step}</b>/<b>{CHICKEN_STEPS}</b>",
         f"📈 Multiplikator: <b>x{multiplier:.2f}</b>",
         f"🏆 Hozirgi olish: <b>{current_win}</b> ⭐",
-        "",
-        render_chicken_board(session),
     ]
     if result:
         parts.extend(["", result])
@@ -280,7 +321,7 @@ class ChickenRoadEngine:
                     active = await self._active_session(session, int(user.id))
                     if active is not None:
                         text = render_chicken_text(active, int(user.dollar or 0), "Davom etayotgan o'yiningiz tiklandi.")
-                        return ChickenView(text, build_chicken_active_keyboard(int(active.id)), "Sizda aktiv o'yin bor.", True, int(active.id))
+                        return ChickenView(text, _build_chicken_keyboard_for_session(active), "Sizda aktiv o'yin bor.", True, int(active.id))
                     if int(user.dollar or 0) < bet_amount:
                         return ChickenView("❌ Balansingiz yetarli emas.", build_chicken_start_keyboard(), "Balans yetarli emas.", True)
 
@@ -300,7 +341,7 @@ class ChickenRoadEngine:
                     await session.flush()
                     _record_dollar(session, user, -bet_amount, "chicken_bet", f"Chicken Road stavka #{game.id}", chat_id)
                     logger.info("chicken_started user=%s session=%s bet=%s", tg_user.id, game.id, bet_amount)
-                    return ChickenView(render_chicken_text(game, int(user.dollar or 0)), build_chicken_active_keyboard(int(game.id)), session_id=int(game.id))
+                    return ChickenView(render_chicken_text(game, int(user.dollar or 0)), _build_chicken_keyboard_for_session(game), session_id=int(game.id))
 
     async def set_message_id(self, session_id: int, message_id: int) -> None:
         async with self.session_factory() as session:
@@ -371,7 +412,7 @@ class ChickenRoadEngine:
 
                     return ChickenView(
                         render_chicken_text(game, int(user.dollar or 0), "✅ Qadam muvaffaqiyatli."),
-                        build_chicken_active_keyboard(int(game.id)),
+                        _build_chicken_keyboard_for_session(game),
                         "✅ Safe!",
                     )
 
@@ -390,7 +431,7 @@ class ChickenRoadEngine:
                     if guard is not None:
                         return guard
                     if int(game.current_step or 0) <= 0:
-                        return ChickenView("", build_chicken_active_keyboard(int(game.id)), "❌ Avval kamida bitta qadam yuring.", True)
+                        return ChickenView("", _build_chicken_keyboard_for_session(game), "❌ Avval kamida bitta qadam yuring.", True)
 
                     payout = calculate_chicken_win(int(game.bet_amount), float(game.current_multiplier or 1.0))
                     user.dollar = int(user.dollar or 0) + payout

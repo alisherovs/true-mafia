@@ -34,7 +34,7 @@ FROG_TILE_CURRENT = "🐸"
 FROG_JUMP_BUTTONS = ("🟢 ①", "🔵 ②", "🟡 ③", "🟣 ④", "🔴 ⑤")
 FROG_MONEY_EMOJI_ID = "5409048419211682843"
 FROG_MINE_EMOJI_ID = "5469654973308476699"
-FROG_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
+FROG_SEPARATOR = "━━━━━━━━━━━━━━━"
 FROG_LOCKS: dict[int, asyncio.Lock] = {}
 
 
