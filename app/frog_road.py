@@ -34,6 +34,7 @@ FROG_TILE_CURRENT = "🐸"
 FROG_JUMP_BUTTONS = ("🟢 ①", "🔵 ②", "🟡 ③", "🟣 ④", "🔴 ⑤")
 FROG_MONEY_EMOJI_ID = "5409048419211682843"
 FROG_MINE_EMOJI_ID = "5469654973308476699"
+FROG_SEPARATOR = "━━━━━━━━━━━━━━━━━━"
 FROG_LOCKS: dict[int, asyncio.Lock] = {}
 
 
@@ -144,9 +145,9 @@ def parse_frog_callback(data: str) -> tuple[str, Optional[int], Optional[int], O
 
 def frog_start_text() -> str:
     return (
-        "━━━━━━━━━━━━━━━━━━\n"
+        f"{FROG_SEPARATOR}\n"
         "🐸 <b>FROG RUSH</b>\n"
-        "━━━━━━━━━━━━━━━━━━\n\n"
+        f"{FROG_SEPARATOR}\n\n"
         "💎 Premium casino o'yini\n"
         "🪷 5x8 yo'l  •  🍎 iz  •  💣 tuzoq\n\n"
         "💰 <b>Stavkani tanlang</b>"
@@ -262,9 +263,9 @@ def render_frog_text(session: FrogGameSession, user_balance: int, result: str = 
     current_win = calculate_win_amount(int(session.bet_amount), multiplier) if current_row > 0 else 0
     danger_count = _danger_count_for_row(current_row) if current_row < FROG_ROWS else _danger_count_for_row(FROG_ROWS - 1)
     parts = [
-        "━━━━━━━━━━━━━━━━━━",
+        FROG_SEPARATOR,
         "🐸 <b>FROG RUSH</b>",
-        "━━━━━━━━━━━━━━━━━━",
+        FROG_SEPARATOR,
         "",
         f"💰 Stavka: <b>{int(session.bet_amount)}</b> ⭐",
         f"📈 Multiplikator: <b>x{multiplier:.2f}</b>",
@@ -272,7 +273,7 @@ def render_frog_text(session: FrogGameSession, user_balance: int, result: str = 
         f"🟢 Xavfsiz sakrash: <b>{current_row}</b>/<b>{FROG_ROWS}</b>",
         f"💣 Tuzoqlar: <b>{danger_count}</b>",
         "",
-        "━━━━━━━━━━━━━━━━━━",
+        FROG_SEPARATOR,
     ]
     if result:
         parts.extend(["", result])
@@ -395,9 +396,9 @@ class FrogRoadEngine:
                         logger.info("frog_lost user=%s session=%s row=%s column=%s", tg_user_id, session_id, row, column)
                         text = (
                             f"{_ce('💣', FROG_MINE_EMOJI_ID)} <b>Qurbaqa yiqildi!</b>\n"
-                            "━━━━━━━━━━━━━━━━━━\n"
+                            f"{FROG_SEPARATOR}\n"
                             f"{_ce('💵', FROG_MONEY_EMOJI_ID)} <b>{int(game.bet_amount)}</b> dollar kuyib ketdi.\n"
-                            "━━━━━━━━━━━━━━━━━━"
+                            f"{FROG_SEPARATOR}"
                         )
                         return FrogView(text, None, "💥 Xavfli katakka tushdingiz!", True)
 
@@ -427,9 +428,9 @@ class FrogRoadEngine:
                         logger.info("frog_won user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                         return FrogView(
                             "🏆 <b>Qimor yakunlandi</b>\n"
-                            "━━━━━━━━━━━━━━━━━━\n"
+                            f"{FROG_SEPARATOR}\n"
                             f"{_ce('💵', FROG_MONEY_EMOJI_ID)} Yutuq: <b>{payout}</b> dollar\n"
-                            "━━━━━━━━━━━━━━━━━━",
+                            f"{FROG_SEPARATOR}",
                             None,
                             "🏆 Maksimal yutuq!",
                             True,
@@ -469,9 +470,9 @@ class FrogRoadEngine:
                     logger.info("frog_cashout user=%s session=%s payout=%s", tg_user_id, session_id, payout)
                     return FrogView(
                         "🏆 <b>Qimor yakunlandi</b>\n"
-                        "━━━━━━━━━━━━━━━━━━\n"
+                        f"{FROG_SEPARATOR}\n"
                         f"{_ce('💵', FROG_MONEY_EMOJI_ID)} Yutuq: <b>{payout}</b> dollar\n"
-                        "━━━━━━━━━━━━━━━━━━",
+                        f"{FROG_SEPARATOR}",
                         None,
                         f"💰 {payout} dollar olindi!",
                         True,
@@ -497,12 +498,12 @@ class FrogRoadEngine:
                     session.add(_history(game, "cancelled"))
                     logger.info("frog_cancelled user=%s session=%s", tg_user_id, session_id)
                     return FrogView(
-                        "━━━━━━━━━━━━━━━━━━\n"
+                        f"{FROG_SEPARATOR}\n"
                         "❌ <b>O'YIN YAKUNLANDI</b>\n"
-                        "━━━━━━━━━━━━━━━━━━\n\n"
+                        f"{FROG_SEPARATOR}\n\n"
                         f"💰 Stavka: <b>{int(game.bet_amount)}</b> ⭐\n"
                         "💸 Stavka qaytarilmaydi.\n\n"
-                        "━━━━━━━━━━━━━━━━━━",
+                        f"{FROG_SEPARATOR}",
                         None,
                         "O'yin bekor qilindi.",
                         True,

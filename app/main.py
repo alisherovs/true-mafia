@@ -21,6 +21,7 @@ from app.database import SessionLocal, init_db
 from app.game_engine import GameEngine
 from app.handlers import admin, callbacks, economy, emoji_debug, gamble, game, hero, language, para, profile, roles, settings as settings_handler, start, top
 from app.models import CreditBlockedUser
+from app.roulette import RouletteEngine
 from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 
 
@@ -285,6 +286,18 @@ async def main() -> None:
         misfire_grace_time=30,
     )
     credit_service = CreditService(SessionLocal)
+    roulette_engine = RouletteEngine(SessionLocal)
+    scheduler.add_job(
+        roulette_engine.resolve_due_rounds,
+        "interval",
+        seconds=5,
+        args=[bot],
+        id="roulette_watchdog",
+        replace_existing=True,
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=15,
+    )
     scheduler.add_job(
         credit_service.daily_watchdog,
         "cron",

@@ -19,6 +19,16 @@ from app.frog_road import (
 )
 from app.game_engine import GAMBLE_GROUP_PAY_DAYS, GAMBLE_GROUP_WEEK_PRICE_DIAMONDS, GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
+from app.roulette import (
+    ROULETTE_MAX_BET,
+    ROULETTE_MIN_BET,
+    RouletteEngine,
+    parse_roulette_callback,
+    roulette_bet_keyboard,
+    roulette_color_keyboard,
+    roulette_color_text,
+    roulette_start_text,
+)
 
 router = Router()
 
@@ -28,6 +38,10 @@ class FrogBetState(StatesGroup):
 
 
 class MinesBetState(StatesGroup):
+    waiting_amount = State()
+
+
+class RouletteBetState(StatesGroup):
     waiting_amount = State()
 
 
@@ -89,7 +103,8 @@ def _gamble_menu_text() -> str:
         "🎰 <b>Qimor o'yinlari</b>\n\n"
         "O'ynamoqchi bo'lgan mini-o'yinni tanlang:\n\n"
         "🐸 <b>Qurbaqa Yo'li</b> - 5x8 yo'lda xavfli kataklardan qoching.\n"
-        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor."
+        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor.\n"
+        "🎡 <b>Ruletka</b> - multiplayer avtomatik raund."
     )
 
 
@@ -98,6 +113,7 @@ def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🐸 Qurbaqa Yo'li", callback_data=f"qmenu:frog:{owner_id}")],
             [InlineKeyboardButton(text="💣 Mines", callback_data=f"qmenu:mines:{owner_id}")],
+            [InlineKeyboardButton(text="🎡 Ruletka", callback_data=f"qmenu:roulette:{owner_id}")],
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"qmenu:cancel:{owner_id}")],
         ]
     )
@@ -147,6 +163,16 @@ def _parse_mines_bet(raw: str | None) -> tuple[bool, int, str]:
     ok, amount, error = MinesAntiCheatValidator.validate_bet(raw)
     if not ok:
         return False, 0, error
+    return True, amount, ""
+
+
+def _parse_roulette_bet(raw: str | None) -> tuple[bool, int, str]:
+    try:
+        amount = int((raw or "").strip().split()[0])
+    except (AttributeError, IndexError, ValueError):
+        return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
+    if amount < ROULETTE_MIN_BET or amount > ROULETTE_MAX_BET:
+        return False, 0, f"❌ Stavka <b>{ROULETTE_MIN_BET}</b> dan <b>{ROULETTE_MAX_BET}</b> dollargacha bo'lishi kerak."
     return True, amount, ""
 
 
@@ -236,6 +262,21 @@ async def mines_custom_bet_amount(message: Message, state: FSMContext, engine: G
         await mines.set_message_id(view.game_id, view.token, sent.message_id)
 
 
+@router.message(RouletteBetState.waiting_amount)
+async def roulette_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not await _gamble_allowed_or_reply(message, engine):
+        await state.clear()
+        return
+    ok, amount, error = _parse_roulette_bet(message.text)
+    if not ok:
+        await message.answer(error or "❌ To'g'ri summa kiriting. Masalan: 1000")
+        return
+    await state.clear()
+    await message.answer(roulette_color_text(amount), reply_markup=roulette_color_keyboard(message.from_user.id, amount))
+
+
 @router.message(Command("topq"))
 async def cmd_topq(message: Message, engine: GameEngine) -> None:
     allowed, link = await engine.gamble_chat_check(message.chat.id)
@@ -277,6 +318,9 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
     elif action == "mines":
         await callback.message.edit_text(_mines_start_text(), reply_markup=_mines_bet_keyboard(owner_id))
         await callback.answer("Mines tanlandi.")
+    elif action == "roulette":
+        await callback.message.edit_text(roulette_start_text(), reply_markup=roulette_bet_keyboard(owner_id))
+        await callback.answer("Ruletka tanlandi.")
     elif action == "back":
         await callback.message.edit_text(_gamble_menu_text(), reply_markup=_gamble_menu_keyboard(owner_id))
         await callback.answer("Menyu.")
@@ -328,6 +372,68 @@ async def mines_start_callback(callback: CallbackQuery, engine: GameEngine, stat
     if view.game_id and view.token:
         await mines.set_message_id(view.game_id, view.token, callback.message.message_id)
     await callback.answer(view.alert or "Mines yaratildi.", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("roulette:"))
+async def roulette_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    try:
+        action, owner_id, amount, choice = parse_roulette_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    if action == "noop":
+        await callback.answer("Yangi stavka uchun /qimor yozing.")
+        return
+    if owner_id is None or not _callback_owner_ok(callback, owner_id):
+        await callback.answer("❌ Bu ruletka menyusi sizniki emas.", show_alert=True)
+        return
+    if action == "menu":
+        await state.clear()
+        await callback.message.edit_text(roulette_start_text(), reply_markup=roulette_bet_keyboard(owner_id))
+        await callback.answer("Ruletka.")
+        return
+    if action == "custom":
+        await state.set_state(RouletteBetState.waiting_amount)
+        await callback.message.answer(
+            f"✍️ Ruletka stavkasini kiriting.\nMinimal: <b>{ROULETTE_MIN_BET}</b> dollar\nMaksimal: <b>{ROULETTE_MAX_BET}</b> dollar"
+        )
+        await callback.answer("Summani yozing.")
+        return
+    if action == "bet":
+        if amount is None:
+            await callback.answer("Stavka noto'g'ri.", show_alert=True)
+            return
+        await state.clear()
+        await callback.message.edit_text(roulette_color_text(amount), reply_markup=roulette_color_keyboard(owner_id, amount))
+        await callback.answer("Rangni tanlang.")
+        return
+    if action == "place":
+        if amount is None or choice is None:
+            await callback.answer("Stavka noto'g'ri.", show_alert=True)
+            return
+        await state.clear()
+        roulette = RouletteEngine(SessionLocal)
+        view = await roulette.place_bet(callback.from_user, callback.message.chat.id, amount, choice)
+        try:
+            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                await callback.message.answer(view.text, reply_markup=view.keyboard)
+        if view.round_id:
+            await roulette.set_message_id(view.round_id, callback.message.message_id)
+        await callback.answer(view.alert or "Stavka qabul qilindi.", show_alert=view.show_alert)
+        return
+    await callback.answer("Callback noto'g'ri.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("frog:"))

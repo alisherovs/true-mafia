@@ -447,6 +447,48 @@ class GameHistory(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class RouletteRound(Base):
+    __tablename__ = "roulette_rounds"
+    __table_args__ = (
+        Index("ix_roulette_rounds_chat_status", "chat_id", "status"),
+        Index("ix_roulette_rounds_status_ends", "status", "ends_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    result_color: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    result_label: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    total_bet: Mapped[int] = mapped_column(Integer, default=0)
+    total_payout: Mapped[int] = mapped_column(Integer, default=0)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class RouletteBet(Base):
+    __tablename__ = "roulette_bets"
+    __table_args__ = (
+        UniqueConstraint("round_id", "user_id", name="uq_roulette_bet_user_round"),
+        Index("ix_roulette_bets_round", "round_id"),
+        Index("ix_roulette_bets_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    round_id: Mapped[int] = mapped_column(ForeignKey("roulette_rounds.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="User")
+    choice: Mapped[str] = mapped_column(String(16))
+    amount: Mapped[int] = mapped_column(Integer, default=0)
+    payout: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ActivityScoreEvent(Base):
     __tablename__ = "activity_score_events"
     __table_args__ = (
