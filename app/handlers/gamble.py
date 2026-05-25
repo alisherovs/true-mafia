@@ -39,6 +39,8 @@ from app.roulette import (
 )
 
 router = Router()
+ROULETTE_ENABLED = False
+CHICKEN_ROAD_ENABLED = False
 
 
 class FrogBetState(StatesGroup):
@@ -115,9 +117,7 @@ def _gamble_menu_text() -> str:
         "🎰 <b>Qimor o'yinlari</b>\n\n"
         "O'ynamoqchi bo'lgan mini-o'yinni tanlang:\n\n"
         "🐸 <b>Qurbaqa Yo'li</b> - 5x8 yo'lda xavfli kataklardan qoching.\n"
-        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor.\n"
-        "🎡 <b>Ruletka</b> - multiplayer avtomatik raund.\n"
-        "🐔 <b>Chicken Road</b> - yo'ldan xavfsiz o'tib yutuqni oling."
+        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor."
     )
 
 
@@ -126,11 +126,13 @@ def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🐸 Qurbaqa Yo'li", callback_data=f"qmenu:frog:{owner_id}")],
             [InlineKeyboardButton(text="💣 Mines", callback_data=f"qmenu:mines:{owner_id}")],
-            [InlineKeyboardButton(text="🎡 Ruletka", callback_data=f"qmenu:roulette:{owner_id}")],
-            [InlineKeyboardButton(text="🐔 Chicken Road", callback_data=f"qmenu:chicken:{owner_id}")],
             [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"qmenu:cancel:{owner_id}")],
         ]
     )
+
+
+def _disabled_game_text(game_name: str) -> str:
+    return f"⏸ <b>{game_name}</b> vaqtincha faolsizlantirilgan."
 
 
 def _mines_start_text() -> str:
@@ -290,6 +292,10 @@ async def mines_custom_bet_amount(message: Message, state: FSMContext, engine: G
 async def roulette_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
     if message.from_user is None:
         return
+    if not ROULETTE_ENABLED:
+        await state.clear()
+        await message.answer(_disabled_game_text("Ruletka"))
+        return
     if not await _gamble_allowed_or_reply(message, engine):
         await state.clear()
         return
@@ -304,6 +310,10 @@ async def roulette_custom_bet_amount(message: Message, state: FSMContext, engine
 @router.message(ChickenBetState.waiting_amount)
 async def chicken_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
     if message.from_user is None:
+        return
+    if not CHICKEN_ROAD_ENABLED:
+        await state.clear()
+        await message.answer(_disabled_game_text("Chicken Road"))
         return
     if not await _gamble_allowed_or_reply(message, engine):
         await state.clear()
@@ -362,9 +372,15 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
         await callback.message.edit_text(_mines_start_text(), reply_markup=_mines_bet_keyboard(owner_id))
         await callback.answer("Mines tanlandi.")
     elif action == "roulette":
+        if not ROULETTE_ENABLED:
+            await callback.answer(_disabled_game_text("Ruletka"), show_alert=True)
+            return
         await callback.message.edit_text(roulette_start_text(), reply_markup=roulette_bet_keyboard(owner_id))
         await callback.answer("Ruletka tanlandi.")
     elif action == "chicken":
+        if not CHICKEN_ROAD_ENABLED:
+            await callback.answer(_disabled_game_text("Chicken Road"), show_alert=True)
+            return
         await callback.message.edit_text(chicken_start_text(), reply_markup=build_chicken_start_keyboard(owner_id))
         await callback.answer("Chicken Road tanlandi.")
     elif action == "back":
@@ -424,6 +440,10 @@ async def mines_start_callback(callback: CallbackQuery, engine: GameEngine, stat
 async def roulette_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not ROULETTE_ENABLED:
+        await state.clear()
+        await callback.answer(_disabled_game_text("Ruletka"), show_alert=True)
         return
     if not await engine.is_gamble_enabled():
         await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
@@ -558,6 +578,10 @@ async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMC
 async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not CHICKEN_ROAD_ENABLED:
+        await state.clear()
+        await callback.answer(_disabled_game_text("Chicken Road"), show_alert=True)
         return
     if not await engine.is_gamble_enabled():
         await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)

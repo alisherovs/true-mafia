@@ -24,6 +24,7 @@ from app.keyboards import (
     owner_news_channel_keyboard,
     owner_panel_keyboard,
     owner_premium_groups_keyboard,
+    owner_vip_users_keyboard,
     owner_wait_keyboard,
 )
 
@@ -95,6 +96,7 @@ OWNER_COMMANDS_TEXT = (
     "🧩 <b>Admin panel tugmalari</b>\n"
     "📊 Statistika - bot statistikasi\n"
     "🎰 Qimor sozlamalari - /qimor xizmatini yoqish yoki o'chirish\n"
+    "👑 VIP aktiv userlar - aktiv VIP userlarni ko'rish va VIPni o'chirish\n"
     "💎 TOP 30 almaz - eng ko'p almazga ega userlar ro'yxati\n"
     "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
     "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
@@ -171,6 +173,34 @@ async def owner_gamble_toggle_callback(callback: CallbackQuery, engine: GameEngi
     text, new_enabled, has_loss_voice, has_win_voice, has_group = await engine.gamble_settings_text()
     await _safe_edit(callback, text, reply_markup=owner_gamble_keyboard(new_enabled, has_loss_voice, has_win_voice, has_group))
     await callback.answer("Qimor yoqildi." if new_enabled else "Qimor o'chirildi.", show_alert=True)
+
+
+@router.callback_query(F.data == "owner:vip")
+async def owner_vip_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    users = await engine.active_vip_users(limit=30)
+    text = await engine.owner_vip_users_text(limit=30)
+    await _safe_edit(callback, text, reply_markup=owner_vip_users_keyboard(users))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("owner:vip:disable:"))
+async def owner_vip_disable_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    parts = (callback.data or "").split(":")
+    if len(parts) != 4 or not parts[3].isdigit():
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    ok, status = await engine.deactivate_vip_user(int(parts[3]))
+    users = await engine.active_vip_users(limit=30)
+    text = await engine.owner_vip_users_text(limit=30)
+    await _safe_edit(callback, text, reply_markup=owner_vip_users_keyboard(users))
+    await callback.answer(status, show_alert=not ok)
 
 
 @router.callback_query(F.data.in_({"owner:gamble:voice:loss", "owner:gamble:voice:win"}))

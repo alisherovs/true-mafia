@@ -930,6 +930,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
             [InlineKeyboardButton(text="🎰 Qimor sozlamalari", callback_data="owner:gamble")],
+            [InlineKeyboardButton(text="👑 VIP aktiv userlar", callback_data="owner:vip")],
             [diamond_icon_button("TOP 30 almaz", callback_data="owner:diamond_top")],
             [dollar_icon_button("TOP 30 dollar", callback_data="owner:dollar_top")],
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
@@ -978,6 +979,19 @@ def owner_gamble_keyboard(
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
+
+
+def owner_vip_users_keyboard(users: list[object] | None = None) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:vip")]
+    ]
+    for user in (users or [])[:30]:
+        telegram_id = int(getattr(user, "telegram_id", 0) or 0)
+        name = str(getattr(user, "display_name", "") or getattr(user, "username", "") or telegram_id)
+        short_name = name[:24] + ("…" if len(name) > 24 else "")
+        rows.append([InlineKeyboardButton(text=f"❌ {short_name}", callback_data=f"owner:vip:disable:{telegram_id}")])
+    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def owner_channel_gifts_keyboard() -> InlineKeyboardMarkup:

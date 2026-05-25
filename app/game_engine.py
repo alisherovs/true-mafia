@@ -8316,6 +8316,63 @@ class GameEngine:
             )
         return "\n".join(lines)
 
+    async def active_vip_users(self, limit: int = 30) -> list[User]:
+        safe_limit = max(1, min(int(limit or 30), 50))
+        now = self._now_utc()
+        async with self.session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(User)
+                    .where(User.telegram_id > 0, User.vip_until.is_not(None))
+                    .order_by(User.vip_until.desc(), User.id.asc())
+                    .limit(max(safe_limit * 3, safe_limit))
+                )
+            ).scalars().all()
+        active: list[User] = []
+        for user in rows:
+            if user.vip_until and self._ensure_utc(user.vip_until) > now:
+                active.append(user)
+            if len(active) >= safe_limit:
+                break
+        return active
+
+    async def owner_vip_users_text(self, limit: int = 30) -> str:
+        users = await self.active_vip_users(limit)
+        if not users:
+            return "👑 <b>Aktiv VIP userlar</b>\n\nHozircha aktiv VIP user topilmadi."
+
+        now = self._now_utc()
+        lines = [
+            "👑 <b>Aktiv VIP userlar</b>",
+            "",
+            f"Jami ko'rsatilmoqda: <b>{len(users)}</b>",
+            "",
+        ]
+        for index, user in enumerate(users, start=1):
+            vip_until = self._ensure_utc(user.vip_until)
+            remaining = vip_until - now
+            days = max(0, remaining.days)
+            hours = max(0, remaining.seconds // 3600)
+            mention = self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))
+            lines.append(
+                f"{index}. {mention} — <b>{days} kun {hours} soat</b> | "
+                f"ID: <code>{user.telegram_id}</code>"
+            )
+        lines.extend(["", "VIPni o'chirish uchun pastdagi user tugmasini bosing."])
+        return "\n".join(lines)
+
+    async def deactivate_vip_user(self, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            user = (
+                await session.execute(select(User).where(User.telegram_id == int(telegram_id)))
+            ).scalar_one_or_none()
+            if user is None:
+                return False, "User topilmadi."
+            user.vip_until = None
+            await session.commit()
+        name = escape(user.display_name or str(telegram_id))
+        return True, f"👑 <b>{name}</b> uchun VIP aktivatsiya o'chirildi."
+
     @staticmethod
     def _diamond_action_label(action: str) -> str:
         labels = {
