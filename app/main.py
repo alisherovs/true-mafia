@@ -104,23 +104,33 @@ class CreditBlockCallbackMiddleware(BaseMiddleware):
 
 
 class DeleteGroupCommandMiddleware(BaseMiddleware):
+    @staticmethod
+    def _is_group_command(message: Message) -> bool:
+        if message.chat.type not in {"group", "supergroup"}:
+            return False
+
+        entities = list(message.entities or []) + list(message.caption_entities or [])
+        if any(entity.type == "bot_command" and entity.offset == 0 for entity in entities):
+            return True
+
+        text = message.text or message.caption or ""
+        return text.lstrip().startswith("/")
+
     async def __call__(
         self,
         handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
         event: Message,
         data: dict[str, Any],
     ) -> Any:
-        result = await handler(event, data)
-        if event.chat.type != "private" and event.text and event.text.startswith("/"):
-            if event.from_user:
-                engine: GameEngine = data["engine"]
-                if await engine.is_vip_user_active(event.from_user.id):
-                    return result
-            try:
-                await event.delete()
-            except (TelegramBadRequest, TelegramForbiddenError):
-                pass
-        return result
+        should_delete = self._is_group_command(event)
+        try:
+            return await handler(event, data)
+        finally:
+            if should_delete:
+                try:
+                    await event.delete()
+                except (TelegramBadRequest, TelegramForbiddenError):
+                    pass
 
 
 class ChatRestrictionMiddleware(BaseMiddleware):
