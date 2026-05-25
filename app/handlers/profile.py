@@ -22,6 +22,8 @@ from app.models import User
 from sqlalchemy import select
 
 router = Router()
+CREDIT_ENABLED = False
+CREDIT_DISABLED_TEXT = "💳 Kredit olish vaqtincha ish faoliyatida emas."
 
 
 PRIVATE_COMMANDS_TEXT = (
@@ -237,6 +239,9 @@ async def credit_open_callback(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer()
         return
+    if not CREDIT_ENABLED:
+        await callback.answer(CREDIT_DISABLED_TEXT, show_alert=True)
+        return
     credit = CreditService(SessionLocal)
     text, has_active = await credit.menu_text(callback.from_user.id)
     try:
@@ -250,6 +255,9 @@ async def credit_open_callback(callback: CallbackQuery) -> None:
 async def credit_amount_callback(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer()
+        return
+    if not CREDIT_ENABLED:
+        await callback.answer(CREDIT_DISABLED_TEXT, show_alert=True)
         return
     try:
         amount = int((callback.data or "").split(":")[2])
@@ -271,6 +279,9 @@ async def credit_amount_callback(callback: CallbackQuery) -> None:
 async def credit_days_callback(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer()
+        return
+    if not CREDIT_ENABLED:
+        await callback.answer(CREDIT_DISABLED_TEXT, show_alert=True)
         return
     parts = (callback.data or "").split(":")
     try:
@@ -294,6 +305,9 @@ async def credit_days_callback(callback: CallbackQuery) -> None:
 async def credit_take_callback(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer()
+        return
+    if not CREDIT_ENABLED:
+        await callback.answer(CREDIT_DISABLED_TEXT, show_alert=True)
         return
     parts = (callback.data or "").split(":")
     try:

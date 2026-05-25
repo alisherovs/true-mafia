@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, time, timedelta, timezone
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import func, or_, select
 
 from app.chicken_road import (
     CHICKEN_MAX_BET,
@@ -27,6 +30,7 @@ from app.frog_road import (
 )
 from app.game_engine import GAMBLE_GROUP_PAY_DAYS, GAMBLE_GROUP_WEEK_PRICE_DIAMONDS, GameEngine
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
+from app.models import GambleMinesGame, GameHistory, User
 from app.roulette import (
     ROULETTE_MAX_BET,
     ROULETTE_MIN_BET,
@@ -41,6 +45,8 @@ from app.roulette import (
 router = Router()
 ROULETTE_ENABLED = False
 CHICKEN_ROAD_ENABLED = False
+DAILY_GAMBLE_WIN_LIMIT = 30_000
+UZ_TZ = timezone(timedelta(hours=5))
 
 
 class FrogBetState(StatesGroup):
@@ -135,6 +141,88 @@ def _disabled_game_text(game_name: str) -> str:
     return f"⏸ <b>{game_name}</b> vaqtincha faolsizlantirilgan."
 
 
+def _daily_limit_text(total: int) -> str:
+    return (
+        "🚫 <b>Kunlik qimor yutuq limiti tugadi.</b>\n\n"
+        f"Bugungi yutuq: <b>{int(total)}</b> dollar\n"
+        f"Kunlik limit: <b>{DAILY_GAMBLE_WIN_LIMIT}</b> dollar\n\n"
+        "⏳ Ertaga yana o'ynashingiz mumkin."
+    )
+
+
+def _daily_window_start_utc() -> datetime:
+    now_local = datetime.now(UZ_TZ)
+    start_local = datetime.combine(now_local.date(), time.min, tzinfo=UZ_TZ)
+    return start_local.astimezone(timezone.utc)
+
+
+async def _daily_gamble_winnings(user_telegram_id: int) -> int:
+    start_utc = _daily_window_start_utc()
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == int(user_telegram_id)))
+        ).scalar_one_or_none()
+        history_total = 0
+        if user is not None:
+            history_total = int(
+                await session.scalar(
+                    select(func.coalesce(func.sum(GameHistory.win_amount), 0)).where(
+                        GameHistory.user_id == int(user.id),
+                        GameHistory.win_amount > 0,
+                        GameHistory.created_at >= start_utc,
+                    )
+                )
+                or 0
+            )
+        mines_total = int(
+            await session.scalar(
+                select(func.coalesce(func.sum(GambleMinesGame.payout), 0)).where(
+                    GambleMinesGame.status == "cashed",
+                    GambleMinesGame.payout > 0,
+                    GambleMinesGame.ended_at.is_not(None),
+                    GambleMinesGame.ended_at >= start_utc,
+                    or_(
+                        GambleMinesGame.winner_telegram_id == int(user_telegram_id),
+                        (
+                            GambleMinesGame.winner_telegram_id.is_(None)
+                            & (GambleMinesGame.user_telegram_id == int(user_telegram_id))
+                        ),
+                    ),
+                )
+            )
+            or 0
+        )
+    return history_total + mines_total
+
+
+async def _daily_gamble_limit_reached(user_telegram_id: int) -> tuple[bool, int]:
+    total = await _daily_gamble_winnings(user_telegram_id)
+    return total >= DAILY_GAMBLE_WIN_LIMIT, total
+
+
+async def _check_daily_limit_message(message: Message) -> bool:
+    if message.from_user is None:
+        return False
+    limited, total = await _daily_gamble_limit_reached(message.from_user.id)
+    if limited:
+        await message.answer(_daily_limit_text(total))
+        return True
+    return False
+
+
+async def _check_daily_limit_callback(callback: CallbackQuery) -> bool:
+    if callback.from_user is None:
+        return False
+    limited, total = await _daily_gamble_limit_reached(callback.from_user.id)
+    if limited:
+        await callback.answer(
+            f"Kunlik limit tugadi. Bugungi yutuq: {int(total)} / {DAILY_GAMBLE_WIN_LIMIT} dollar.",
+            show_alert=True,
+        )
+        return True
+    return False
+
+
 def _mines_start_text() -> str:
     return (
         "💣 <b>Mines</b>\n\n"
@@ -222,6 +310,8 @@ async def _gamble_allowed_or_reply(message: Message, engine: GameEngine) -> bool
             _gamble_group_redirect_text(link, pay_chat_id=message.chat.id),
             reply_markup=_gamble_group_keyboard(link, pay_chat_id=message.chat.id),
         )
+        return False
+    if await _check_daily_limit_message(message):
         return False
     return True
 
@@ -355,6 +445,8 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
         return
+    if await _check_daily_limit_callback(callback):
+        return
     parts = (callback.data or "").split(":")
     if len(parts) != 3 or not parts[2].isdigit():
         await callback.answer("Callback noto'g'ri.", show_alert=True)
@@ -405,6 +497,8 @@ async def mines_start_callback(callback: CallbackQuery, engine: GameEngine, stat
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
         return
+    if await _check_daily_limit_callback(callback):
+        return
     parts = (callback.data or "").split(":")
     if len(parts) < 3 or not parts[2].isdigit():
         await callback.answer("Callback noto'g'ri.", show_alert=True)
@@ -451,6 +545,8 @@ async def roulette_callback(callback: CallbackQuery, engine: GameEngine, state: 
     allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
         return
     try:
         action, owner_id, amount, choice = parse_roulette_callback(callback.data or "")
@@ -513,6 +609,8 @@ async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMC
     allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
         return
     try:
         action, value, column, owner_id = parse_frog_callback(callback.data or "")
@@ -589,6 +687,8 @@ async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: F
     allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
         return
     try:
         action, value, owner_id = parse_chicken_callback(callback.data or "")
@@ -680,6 +780,8 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
             "🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.",
             show_alert=True,
         )
+        return
+    if await _check_daily_limit_callback(callback):
         return
     try:
         action, game_id, token, cell = MinesAntiCheatValidator.decode_callback(callback.data or "")
