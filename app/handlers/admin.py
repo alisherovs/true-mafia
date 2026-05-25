@@ -256,6 +256,28 @@ async def owner_diamond_audit_callback(callback: CallbackQuery, engine: GameEngi
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:diamond_audit:download")
+async def owner_diamond_audit_download_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    if callback.message is None:
+        await callback.answer("Xabar topilmadi.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    await callback.answer("CSV tayyorlanmoqda...", show_alert=False)
+    document, filename, count = await engine.owner_diamond_audit_csv_file()
+    await callback.message.answer_document(
+        document=document,
+        caption=(
+            "💎 <b>Almaz loglari eksport qilindi</b>\n\n"
+            f"📄 Fayl: <code>{escape(filename)}</code>\n"
+            f"🧾 Yozuvlar: <b>{count}</b>\n\n"
+            "Database'da saqlangan barcha almaz kirim-chiqimlari kiritildi."
+        ),
+    )
+
+
 @router.callback_query(F.data == "owner:diamond_top")
 async def owner_diamond_top_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):

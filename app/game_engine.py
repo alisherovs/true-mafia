@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Union
+import csv
+import io
 import json
 import logging
 import asyncio
@@ -14,7 +16,7 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.enums import ChatMemberStatus
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, User as TgUser
+from aiogram.types import BufferedInputFile, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, User as TgUser
 from aiogram.utils.formatting import Bold, Code, CustomEmoji, Text, TextLink
 from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -8510,6 +8512,55 @@ class GameEngine:
         except TelegramBadRequest as exc:
             return False, f"Telegram xatosi: {escape(str(exc))}", sent
         return True, f"Almaz loglari <b>{escape(chat_title)}</b> guruhiga yuborildi. Xabarlar: <b>{sent}</b> ta.", sent
+
+    async def owner_diamond_audit_csv_file(self) -> tuple[BufferedInputFile, str, int]:
+        async with self.session_factory() as session:
+            items = (
+                await session.execute(
+                    select(DiamondTransaction)
+                    .order_by(DiamondTransaction.id.asc())
+                )
+            ).scalars().all()
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "id",
+                "created_at_utc",
+                "user_telegram_id",
+                "user_name",
+                "amount",
+                "balance_after",
+                "action",
+                "action_label",
+                "note",
+                "counterparty_telegram_id",
+                "counterparty_name",
+                "chat_id",
+            ]
+        )
+        for item in items:
+            writer.writerow(
+                [
+                    int(item.id),
+                    self._format_tx_time(item.created_at),
+                    int(item.user_telegram_id),
+                    item.user_name or "",
+                    int(item.amount or 0),
+                    int(item.balance_after or 0),
+                    item.action or "",
+                    self._diamond_action_label(item.action or ""),
+                    item.note or "",
+                    int(item.counterparty_telegram_id) if item.counterparty_telegram_id else "",
+                    item.counterparty_name or "",
+                    int(item.chat_id) if item.chat_id else "",
+                ]
+            )
+        data = buffer.getvalue().encode("utf-8-sig")
+        now = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        filename = f"diamond_logs_{now}.csv"
+        return BufferedInputFile(data, filename=filename), filename, len(items)
 
     def _diamond_transaction_line(self, item: DiamondTransaction) -> str:
         amount = int(item.amount or 0)
