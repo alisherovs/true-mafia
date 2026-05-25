@@ -45,6 +45,7 @@ LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
+BOXES_ENABLED = False
 TELEGRAM_GIFTS_ENABLED = True
 
 
@@ -58,6 +59,10 @@ def _box_session_key(user_id: int) -> str:
 
 def _gifts_disabled_text() -> str:
     return "🎁 Telegram gift bo'limi hozircha vaqtincha o'chirilgan (test rejim)."
+
+
+def _boxes_disabled_text() -> str:
+    return "🎁 Qutilar bo'limi vaqtincha faolsizlantirilgan."
 
 
 def _format_td(delta: timedelta) -> str:
@@ -1769,8 +1774,7 @@ async def vip_open(callback: CallbackQuery) -> None:
         "• Telegram Premium sotib olish\n"
         "imkoniyatiga ega bo'lasiz.\n\n"
         "Muddat: <b>30 kun</b>\n"
-        "Narx: <b>30💎</b> yoki <b>190⭐</b>\n\n"
-        "Pastda qutilarni ham ochishingiz mumkin."
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
     )
     try:
         await callback.message.edit_text(text, reply_markup=vip_keyboard())
@@ -1783,6 +1787,9 @@ async def vip_open(callback: CallbackQuery) -> None:
 async def box_info(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not BOXES_ENABLED:
+        await callback.answer(_boxes_disabled_text(), show_alert=True)
         return
     box_type = callback.data.split(":")[2]
     if box_type not in {"normal", "super", "mega"}:
@@ -1829,6 +1836,9 @@ async def box_info(callback: CallbackQuery) -> None:
 async def box_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not BOXES_ENABLED:
+        await callback.answer(_boxes_disabled_text(), show_alert=True)
         return
     box_type = callback.data.split(":")[2]
     if box_type not in {"normal", "super", "mega"}:
@@ -1889,6 +1899,9 @@ async def box_open_paid_super(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    if not BOXES_ENABLED:
+        await callback.answer(_boxes_disabled_text(), show_alert=True)
+        return
     now = _utc_now()
     async with SessionLocal() as session:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
@@ -1935,6 +1948,9 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    if not BOXES_ENABLED:
+        await callback.answer(_boxes_disabled_text(), show_alert=True)
+        return
     now = _utc_now()
     async with SessionLocal() as session:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
@@ -1977,6 +1993,9 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
 async def box_pick(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not BOXES_ENABLED:
+        await callback.answer(_boxes_disabled_text(), show_alert=True)
         return
     parts = callback.data.split(":")
     if len(parts) != 5:

@@ -614,9 +614,6 @@ def vip_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [diamond_icon_button("30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
             [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
-            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
-            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
-            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
