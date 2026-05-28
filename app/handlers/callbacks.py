@@ -473,7 +473,7 @@ async def settings_callback(callback: CallbackQuery, engine: GameEngine) -> None
         await callback.answer()
     elif action.startswith("rolepreset:"):
         preset = action.split(":", maxsplit=1)[1]
-        if preset not in GAME_MODES and preset not in {"black23", "extended35"}:
+        if preset not in GAME_MODES and preset not in {"black23", "extended35", "zombie"}:
             await callback.answer("Noma'lum role preset.", show_alert=True)
             return
         

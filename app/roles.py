@@ -24,6 +24,27 @@ class RoleShopItem:
 
 
 ROLE_META: dict[Role, RoleMeta] = {
+    Role.HUMAN: RoleMeta(
+        Role.HUMAN,
+        Team.CITY,
+        "🧍",
+        "Inson",
+        "Siz insonlar tarafidasiz. Boss Zombieni topib, kunduzgi ovozda zombi tarafini yo'q qiling.",
+    ),
+    Role.BOSS_ZOMBIE: RoleMeta(
+        Role.BOSS_ZOMBIE,
+        Team.ZOMBIE,
+        "🧟‍♂️",
+        "Boss Zombie",
+        "Siz zombi tarafining boshlig'isiz. Har tunda bitta insonni virus bilan zombi tarafiga o'tkazing.",
+    ),
+    Role.ZOMBIE: RoleMeta(
+        Role.ZOMBIE,
+        Team.ZOMBIE,
+        "🧟",
+        "Zombie",
+        "Siz zombi tarafidasiz. Insonlarni ovoz berishda chalg'iting va zombi safini himoya qiling.",
+    ),
     Role.CITIZEN: RoleMeta(
         Role.CITIZEN,
         Team.CITY,
@@ -413,6 +434,7 @@ ROLE_PRESET_LABELS = {
     "classic": "Classic",
     "super": "Super",
     "mega": "Mega",
+    "zombie": "Zombie Mode",
     "black23": "Universal 30",
     "extended35": "Universal 30",
 }
@@ -421,6 +443,7 @@ ROLE_PRESET_MAX_PLAYERS = {
     "classic": 30,
     "super": 40,
     "mega": 40,
+    "zombie": 50,
     "black23": 30,
     "extended35": 30,
 }
@@ -428,6 +451,7 @@ ROLE_PRESET_MAX_PLAYERS = {
 GAME_MODE_CLASSIC = "classic"
 GAME_MODE_SUPER = "super"
 GAME_MODE_MEGA = "mega"
+GAME_MODE_ZOMBIE = "zombie"
 GAME_MODES = {GAME_MODE_CLASSIC, GAME_MODE_SUPER, GAME_MODE_MEGA}
 
 ROLE_MIN_PLAYERS: dict[str, int] = {

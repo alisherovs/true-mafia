@@ -35,9 +35,14 @@ class Team(str, Enum):
     MAFIA = "mafia"
     KILLER = "killer"
     NEUTRAL = "neutral"
+    ZOMBIE = "zombie"
 
 
 class Role(str, Enum):
+    HUMAN = "human"
+    BOSS_ZOMBIE = "boss_zombie"
+    ZOMBIE = "zombie"
+
     CITIZEN = "citizen"
     MISTRESS = "mistress"
     SERGEANT = "sergeant"
@@ -73,6 +78,7 @@ class Role(str, Enum):
 
 
 class ActionType(str, Enum):
+    INFECT = "infect"
     KILL = "kill"
     HEAL = "heal"
     CHECK = "check"

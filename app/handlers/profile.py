@@ -51,6 +51,7 @@ GROUP_COMMANDS_TEXT = (
     "/classic - Classic mode bilan ro'yxatdan o'tishni boshlash\n"
     "/super - Super mode bilan ro'yxatdan o'tishni boshlash\n"
     "/mega - Mega mode bilan ro'yxatdan o'tishni boshlash\n"
+    "/zombie - Zombie mode bilan ro'yxatdan o'tishni boshlash\n"
     "/start - ro'yxatni yopib o'yinni boshlash\n"
     "/teamgame - turnir o'yinini boshlash\n"
     "/leave - o'yindan chiqish\n"

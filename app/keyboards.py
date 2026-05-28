@@ -200,6 +200,9 @@ def credit_confirm_keyboard(amount: int, days: int) -> InlineKeyboardMarkup:
 
 
 ROLE_INFO_ORDER: tuple[Role, ...] = (
+    Role.BOSS_ZOMBIE,
+    Role.ZOMBIE,
+    Role.HUMAN,
     Role.SORCERER,
     Role.SPY,
     Role.WOLF,
@@ -576,6 +579,7 @@ def role_preset_keyboard(current_preset: str = "black23", chat_id: Optional[int]
             [InlineKeyboardButton(text=label("classic", "🎭 Classic"), callback_data=callback("rolepreset:classic"))],
             [InlineKeyboardButton(text=label("super", "⚡ Super"), callback_data=callback("rolepreset:super"))],
             [InlineKeyboardButton(text=label("mega", "🔥 Mega"), callback_data=callback("rolepreset:mega"))],
+            [InlineKeyboardButton(text=label("zombie", "🧟 Zombie"), callback_data=callback("rolepreset:zombie"))],
             [InlineKeyboardButton(text="◀️ Settings", callback_data=callback("back"))],
         ]
     )

@@ -196,6 +196,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="classic", description="Classic mode"),
         BotCommand(command="super", description="Super mode"),
         BotCommand(command="mega", description="Mega mode"),
+        BotCommand(command="zombie", description="Zombie mode"),
         BotCommand(command="leave", description="O'yindan chiqish"),
         BotCommand(command="extend", description="Ro'yxat vaqtini uzaytirish"),
         BotCommand(command="stop", description="O'yinni to'xtatish"),

@@ -710,6 +710,10 @@ class GameEngine:
             role_lines.append(f"{role_label(role_value)}{suffix}")
         return f"{title} - <b>{count}</b>\n{', '.join(role_lines)}"
 
+    @staticmethod
+    def _is_zombie_game(game: Optional[Game]) -> bool:
+        return bool(game and (game.role_preset or "").lower() == "zombie")
+
     def _format_death_line(self, player: GamePlayer, cause: Optional[str] = None) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
         base = f"Tunda {role_label(player.role)} {name}"
@@ -803,6 +807,24 @@ class GameEngine:
         game: Optional[Game] = None,
         tournament: bool = False,
     ) -> str:
+        if self._is_zombie_game(game):
+            zombie_players = [player for player in alive_players if player.team == Team.ZOMBIE.value]
+            human_players = [player for player in alive_players if player.team != Team.ZOMBIE.value]
+            groups_text = "\n\n".join(
+                block
+                for block in [
+                    self._format_role_group("🧟 <b>Zombielar</b>", len(zombie_players), zombie_players),
+                    self._format_role_group("🧍 <b>Insonlar</b>", len(human_players), human_players),
+                ]
+                if block
+            )
+            return (
+                "<b>Tirik o'yinchilar:</b>\n"
+                f"{self._format_alive_players(alive_players, tournament=tournament)}\n\n"
+                f"{groups_text}\n\n"
+                f"<b>Jami:</b> {len(alive_players)}"
+            )
+
         city_players = [player for player in alive_players if player.team == Team.CITY.value]
         mafia_players = [player for player in alive_players if player.team == Team.MAFIA.value]
         singleton_players = [
@@ -895,6 +917,8 @@ class GameEngine:
 
     @staticmethod
     def _night_activity_line(role: Role, action_key: Optional[str]) -> Optional[str]:
+        if role == Role.BOSS_ZOMBIE:
+            return "🧟‍♂️ Boss Zombie tunda yangi qurbon izlab chiqdi..."
         if role == Role.DOCTOR:
             return "👨🏼‍⚕️️Doktor tungi navbatchilikga ketdi..."
         if role == Role.GUARD:
@@ -2322,6 +2346,7 @@ class GameEngine:
             )
             await session.commit()
             self._invalidate_game_cache(game.chat_id)
+            is_zombie_mode = game.role_preset == "zombie"
 
         await self.update_lobby(bot, game_id, ended=True)
         chat_id = await self._game_chat_id(game_id)
@@ -2332,10 +2357,17 @@ class GameEngine:
                 pass
         await self._safe_send_message(bot, chat_id, t(lang, "registration_ended"))
         await self.assign_roles_and_notify(bot, game_id)
+        start_text = (
+            "🧟 <b>Zombie mode boshlandi!</b>\n\n"
+            "Boss Zombie har tunda bitta insonni virus bilan o'z tarafiga o'tkazadi.\n"
+            "Insonlar kunduzgi ovoz berishda zombielarni topib chiqarib yuborishi kerak."
+            if is_zombie_mode
+            else "<b>O'yin boshlandi!</b>"
+        )
         await self._safe_send_message(
             bot,
             chat_id,
-            "<b>O'yin boshlandi!</b>",
+            start_text,
             reply_markup=go_role_private_keyboard(self.settings, game_id),
         )
         await self.start_night(bot, game_id)
@@ -2359,6 +2391,41 @@ class GameEngine:
                     await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
                 ).scalars().all()
             }
+            if role_preset == "zombie":
+                boss = random.choice(players)
+                for player in players:
+                    if player.telegram_id == boss.telegram_id:
+                        player.role = Role.BOSS_ZOMBIE.value
+                        player.team = Team.ZOMBIE.value
+                    else:
+                        player.role = Role.HUMAN.value
+                        player.team = Team.CITY.value
+                    player.transformed_to_role = None
+                    player.transformed_to_team = None
+                    self._add_game_log(
+                        session,
+                        game,
+                        "zombie_role_assigned",
+                        actor=player,
+                        role=player.role,
+                        team=player.team,
+                    )
+                await session.commit()
+                lang = await self.get_group_language(game.chat_id)
+                chat_id = game.chat_id
+
+                for player in players:
+                    role = Role(player.role)
+                    sent = await self._safe_send_message(
+                        bot,
+                        player.telegram_id,
+                        self._private_role_text(role),
+                        reply_markup=await self.group_return_keyboard(bot, chat_id),
+                    )
+                    if sent is None:
+                        await self._safe_send_message(bot, chat_id, f"{player.display_name}: {t(lang, 'need_start_for_role')}")
+                return
+
             disabled_roles: set[Role] = set()
             for user in users.values():
                 if not user.next_game_disabled_role:
@@ -2562,7 +2629,16 @@ class GameEngine:
             for p in alive_players
             if p.telegram_id != player.telegram_id and p.team != Team.MAFIA.value
         ]
+        human_targets = [
+            (p.telegram_id, p.display_name)
+            for p in alive_players
+            if p.telegram_id != player.telegram_id and p.team != Team.ZOMBIE.value
+        ]
 
+        if role == Role.BOSS_ZOMBIE:
+            if not human_targets:
+                return None
+            return "🧟‍♂️ Kimga virus yuqtiramiz?", target_keyboard("infect", game_id, player.telegram_id, human_targets)
         if role in {Role.MAFIA, Role.DON, Role.SPY, Role.HIRED_KILLER}:
             return "🌚 Kimni yo'q qilamiz?", target_keyboard("kill", game_id, player.telegram_id, mafia_targets)
         if role == Role.DOCTOR:
@@ -2941,6 +3017,133 @@ class GameEngine:
             except Exception:
                 logger.exception("Failed to send night prompt game_id=%s user_id=%s", game_id, player.telegram_id)
 
+    async def _is_zombie_game_id(self, game_id: int) -> bool:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            return self._is_zombie_game(game)
+
+    async def resolve_zombie_night(self, bot: Bot, game_id: int) -> None:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if (
+                game is None
+                or game.status != GameStatus.ACTIVE.value
+                or game.phase != GamePhase.NIGHT.value
+                or not self._is_zombie_game(game)
+            ):
+                return
+
+            night = game.night_number
+            alive_players = await self._alive_players(session, game_id)
+            player_map = {player.telegram_id: player for player in alive_players}
+            infect_actions = (
+                await session.execute(
+                    select(NightAction)
+                    .where(
+                        NightAction.game_id == game_id,
+                        NightAction.night_number == night,
+                        NightAction.action_type == ActionType.INFECT.value,
+                    )
+                    .order_by(NightAction.id.asc())
+                )
+            ).scalars().all()
+
+            infected_player: Optional[GamePlayer] = None
+            for action in infect_actions:
+                actor = player_map.get(action.actor_telegram_id)
+                target = player_map.get(action.target_telegram_id or 0)
+                if (
+                    actor is None
+                    or target is None
+                    or not actor.alive
+                    or not target.alive
+                    or actor.role != Role.BOSS_ZOMBIE.value
+                    or target.team == Team.ZOMBIE.value
+                ):
+                    continue
+                infected_player = target
+                target.role = Role.ZOMBIE.value
+                target.team = Team.ZOMBIE.value
+                target.transformed_to_role = Role.ZOMBIE.value
+                target.transformed_to_team = Team.ZOMBIE.value
+                actor.inactive_rounds = 0
+                self._add_activity_points(session, game, actor, 10, "zombie_infect")
+                self._add_game_log(
+                    session,
+                    game,
+                    "zombie_infected",
+                    actor=actor,
+                    target=target,
+                    night_number=night,
+                )
+                break
+
+            game.phase = GamePhase.DAY_DISCUSSION.value
+            game.day_number += 1
+            self._add_game_log(
+                session,
+                game,
+                "zombie_night_resolved",
+                night_number=night,
+                infected_id=infected_player.telegram_id if infected_player else None,
+            )
+            await session.commit()
+
+            chat_id = game.chat_id
+            lang = await self.get_group_language(chat_id)
+            alive_after = await self._alive_players(session, game_id)
+            alive_status = self._build_alive_status_text(alive_after, game)
+            day_caption = self._build_day_intro_text(game.day_number)
+            infected_notice = (
+                "🦠 Virus tarqalmadi. Insonlar bu tongni omon kutib oldi."
+                if infected_player is None
+                else (
+                    "🦠 Boss Zombie "
+                    f"{self._tg_mention(infected_player.telegram_id, infected_player.display_name)}ga virus yuqtirdi.\n"
+                    "U endi zombi tarafida!"
+                )
+            )
+            infected_private_id = infected_player.telegram_id if infected_player else None
+
+        await self._clear_night_prompt_buttons(bot, game_id, night)
+        try:
+            await self._send_phase_media(
+                bot,
+                chat_id,
+                is_night=False,
+                lang=lang,
+                game_id=game_id,
+                caption_override=day_caption,
+            )
+        except Exception:
+            logger.exception("Failed to send zombie day phase media game_id=%s", game_id)
+        await self._safe_send_message(bot, chat_id, alive_status)
+        await self._safe_send_message(bot, chat_id, infected_notice)
+        if infected_private_id is not None:
+            try:
+                await bot.send_message(
+                    infected_private_id,
+                    "🦠 Sizga virus yuqdi. Endi siz 🧟 <b>Zombie</b> tarafidasiz!",
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+
+        winner = await self.check_winner(game_id)
+        if winner:
+            await self.finish_game(bot, game_id, winner)
+            return
+
+        discussion_timeout = await self.group_timeout(chat_id, "day_discussion_timeout")
+        scheduler.add_job(
+            self.start_voting,
+            "date",
+            run_date=datetime.now(timezone.utc) + timedelta(seconds=discussion_timeout),
+            args=[bot, game_id],
+            id=f"discussion_end_{game_id}",
+            replace_existing=True,
+        )
+
     async def record_action(
         self,
         bot: Bot,
@@ -2950,6 +3153,7 @@ class GameEngine:
         target_id: int,
     ) -> tuple[bool, str]:
         action_map = {
+            "infect": ActionType.INFECT,
             "kill": ActionType.KILL,
             "heal": ActionType.HEAL,
             "check": ActionType.CHECK,
@@ -3010,6 +3214,7 @@ class GameEngine:
                 return False, "Kezuvchi sabab bu tunda hech qanday amal bajara olmaysiz."
 
             allowed_actions: dict[Role, set[str]] = {
+                Role.BOSS_ZOMBIE: {"infect"},
                 Role.DON: {"kill"},
                 Role.MAFIA: {"kill"},
                 Role.SPY: {"kill"},
@@ -3036,6 +3241,8 @@ class GameEngine:
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
                 return False, "Bu amal sizning rolingiz uchun mavjud emas."
+            if action_type == ActionType.INFECT and game.role_preset != "zombie":
+                return False, "Bu amal faqat Zombie mode uchun mavjud."
             if action_type == ActionType.MINE and not 1 <= target_id <= 10:
                 return False, "Kon noto'g'ri."
             if action_type == ActionType.MINE:
@@ -3114,6 +3321,11 @@ class GameEngine:
                 ).scalar_one_or_none()
                 if target is None or not target.alive:
                     return False, "Nishon noto'g'ri."
+            if action_type == ActionType.INFECT:
+                if target.telegram_id == actor.telegram_id:
+                    return False, "O'zingizga virus yuqtira olmaysiz."
+                if target.team == Team.ZOMBIE.value:
+                    return False, "Bu o'yinchi allaqachon zombi tarafida."
             if actor_role == Role.JOKER and action_key == "joker_card":
                 if target_id not in {1, 2, 3, 4}:
                     return False, "Karta noto'g'ri."
@@ -3188,6 +3400,8 @@ class GameEngine:
                 return False, "Mafiya o'z sherigiga zarar yetkaza olmaydi."
             if actor_role == Role.COMMISSAR and action_key == "check":
                 success_text = f"Siz {target.display_name}ning uyiga tekshiruvga borishni tanladingiz."
+            elif action_key == "infect":
+                success_text = f"Siz {target.display_name}ga virus yuqtirishni tanladingiz."
             elif actor_role == Role.COMMISSAR and action_key == "shoot":
                 success_text = f"Siz {target.display_name}ni o'yindan chetlatishni tanladingiz."
             elif action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
@@ -3522,6 +3736,10 @@ class GameEngine:
         return True, "O'tkazib yuborildi."
 
     async def resolve_night(self, bot: Bot, game_id: int) -> None:
+        if await self._is_zombie_game_id(game_id):
+            await self.resolve_zombie_night(bot, game_id)
+            return
+
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value:
@@ -5139,6 +5357,10 @@ class GameEngine:
         return True
 
     async def resolve_voting(self, bot: Bot, game_id: int) -> None:
+        if await self._is_zombie_game_id(game_id):
+            await self.resolve_zombie_voting(bot, game_id)
+            return
+
         async with self.session_factory() as session:
             game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             if game is None or game.status != GameStatus.ACTIVE.value:
@@ -5260,6 +5482,95 @@ class GameEngine:
         votes: list[Vote],
     ) -> None:
         return
+
+    async def resolve_zombie_voting(self, bot: Bot, game_id: int) -> None:
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if (
+                game is None
+                or game.status != GameStatus.ACTIVE.value
+                or game.phase != GamePhase.DAY_VOTING.value
+                or not self._is_zombie_game(game)
+            ):
+                return
+
+            votes = (
+                await session.execute(
+                    select(Vote).where(Vote.game_id == game_id, Vote.day_number == game.day_number)
+                )
+            ).scalars().all()
+            alive = await self._alive_players(session, game_id)
+            alive_map = {player.telegram_id: player for player in alive}
+            counter = Counter(vote.target_telegram_id for vote in votes)
+            chat_id = game.chat_id
+
+            if not counter:
+                self._add_game_log(session, game, "zombie_voting_resolved", result="no_votes", votes_count=0)
+                game.phase = GamePhase.NIGHT.value
+                game.night_number += 1
+                await session.commit()
+                await self._safe_send_message(
+                    bot,
+                    chat_id,
+                    "<b>Ovoz berish natijalari:</b>\n"
+                    "Hech kim ovoz bermadi. Insonlar tarqaldi...",
+                )
+                await self.start_night(bot, game_id)
+                return
+
+            top_count = counter.most_common(1)[0][1]
+            top_targets = [target_id for target_id, count in counter.items() if count == top_count]
+            if len(top_targets) > 1:
+                self._add_game_log(
+                    session,
+                    game,
+                    "zombie_voting_resolved",
+                    result="tie",
+                    top_targets=top_targets,
+                    top_count=top_count,
+                )
+                game.phase = GamePhase.NIGHT.value
+                game.night_number += 1
+                await session.commit()
+                await self._safe_send_message(bot, chat_id, "Ovozlar teng chiqdi. Hech kim chiqarilmadi.")
+                await self.start_night(bot, game_id)
+                return
+
+            target = alive_map.get(top_targets[0])
+            if target is None:
+                return
+
+            target.alive = False
+            target.death_day = game.day_number
+            self._add_game_log(
+                session,
+                game,
+                "zombie_player_hanged",
+                target=target,
+                votes_count=top_count,
+            )
+            await session.commit()
+            target_line = (
+                f"🗳 {self._tg_mention(target.telegram_id, target.display_name)} "
+                "kunduzgi ovoz bilan o'yindan chiqarildi.\n"
+                f"U edi {role_label(target.role)}."
+            )
+
+        await self._safe_send_message(bot, chat_id, target_line)
+        winner = await self.check_winner(game_id)
+        if winner:
+            await self.finish_game(bot, game_id, winner)
+            return
+
+        async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
+            if game is None or game.status != GameStatus.ACTIVE.value:
+                return
+            game.phase = GamePhase.NIGHT.value
+            game.night_number += 1
+            await session.commit()
+
+        await self.start_night(bot, game_id)
 
     async def confirm_hang(
         self,
@@ -6011,12 +6322,22 @@ class GameEngine:
         7. Boshqa holda o'yin davom etadi
         """
         async with self.session_factory() as session:
+            game = (await session.execute(select(Game).where(Game.id == game_id))).scalar_one_or_none()
             alive = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.alive.is_(True)))
             ).scalars().all()
             
             if not alive:
                 return Team.CITY
+
+            if self._is_zombie_game(game):
+                zombie_count = sum(1 for player in alive if player.team == Team.ZOMBIE.value)
+                human_count = len(alive) - zombie_count
+                if zombie_count <= 0:
+                    return Team.CITY
+                if human_count <= 1:
+                    return Team.ZOMBIE
+                return None
 
             teams = [p.team for p in alive]
             
@@ -9783,7 +10104,7 @@ class GameEngine:
                 return True, f"✅ Minimal o'yinchilar: {group.min_players}"
             elif field == "role_preset":
                 preset = str(value)
-                if preset not in GAME_MODES and preset not in {"black23", "extended35"}:
+                if preset not in GAME_MODES and preset not in {"black23", "extended35", "zombie"}:
                     return False, "❌ Noma'lum role preset"
                 
                 # Registration vaqtida mode almashtirish mumkin, aktiv o'yinda esa mumkin emas.
@@ -9810,5 +10131,6 @@ class GameEngine:
             f"Maksimal tavsiya qilingan o'yinchi: <b>{role_preset_max_players(preset)}</b>\n\n"
             "<b>Classic</b> - eski klassik taqsimotni saqlaydi.\n"
             "<b>Super</b> - faol rollarni minimal o'yinchi soniga qarab ertaroq beradi, yetmasa Tinch aholi bilan to'ldiradi.\n"
-            "<b>Mega</b> - faqat faol rollar, Tinch aholi hech qachon tushmaydi."
+            "<b>Mega</b> - faqat faol rollar, Tinch aholi hech qachon tushmaydi.\n"
+            "<b>Zombie</b> - /zombie orqali alohida virus rejimi sifatida boshlanadi."
         )

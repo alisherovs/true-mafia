@@ -74,6 +74,7 @@ OWNER_COMMANDS_TEXT = (
     "/classic - Classic mode bilan ro'yxatdan o'tishni boshlash\n"
     "/super - Super mode bilan ro'yxatdan o'tishni boshlash\n"
     "/mega - Mega mode bilan ro'yxatdan o'tishni boshlash\n"
+    "/zombie - Zombie mode bilan ro'yxatdan o'tishni boshlash\n"
     "/start - ro'yxatdan o'tish tugagach o'yinni boshlash\n"
     "/leave - o'yindan chiqish\n"
     "/extend - ro'yxatdan o'tish vaqtini uzaytirish\n"

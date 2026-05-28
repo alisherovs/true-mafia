@@ -6,6 +6,7 @@ from aiogram import Router
 
 from app.game_engine import GameEngine
 from app.enums import GameStatus
+from app.roles import role_preset_label
 from app.texts import t
 
 router = Router()
@@ -69,7 +70,7 @@ async def _start_game_with_mode(
     if not ok:
         await message.answer(text)
     elif mode:
-        await message.answer(f"✅ Mode tanlandi: <b>{mode}</b>")
+        await message.answer(f"✅ Mode tanlandi: <b>{role_preset_label(mode)}</b>")
     elif tournament:
         await message.answer("🏆 Turnir ro'yxatdan o'tishi boshlandi.")
     elif teamgame:
@@ -109,6 +110,16 @@ async def cmd_super_game(message: Message, engine: GameEngine) -> None:
 @router.message(Command("mega"))
 async def cmd_mega_game(message: Message, engine: GameEngine) -> None:
     await _start_game_with_mode(message, engine, "mega")
+
+
+@router.message(Command("zombie"))
+async def cmd_zombie_game(message: Message, engine: GameEngine) -> None:
+    if message.from_user and message.chat.type != "private":
+        ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "game")
+        if not ok:
+            await message.reply(err)
+            return
+    await _start_game_with_mode(message, engine, "zombie")
 
 
 @router.message(Command("leave"))
