@@ -87,8 +87,11 @@ def start_menu_keyboard(
 
 def _toggle_button(icon: str, field: str, user: object | None) -> InlineKeyboardButton:
     enabled = getattr(user, field, True) is not False
-    state = "🟢 ON" if enabled else "🔴 OFF"
-    return InlineKeyboardButton(text=f"{icon} - {state}", callback_data=f"invtoggle:{field}")
+    return InlineKeyboardButton(
+        text=icon,
+        callback_data=f"invtoggle:{field}",
+        **{"style": "primary" if enabled else "danger"},
+    )
 
 
 def profile_dashboard_keyboard(
@@ -102,25 +105,21 @@ def profile_dashboard_keyboard(
         [
             _toggle_button("🛡", "use_protection", user),
             _toggle_button("🧿", "use_killer_protection", user),
-        ],
-        [
             _toggle_button("⚖️", "use_vote_protection", user),
             _toggle_button("💊", "use_drug_protection", user),
-        ],
-        [
             _toggle_button("📦", "use_miner_protection", user),
             _toggle_button("🎭", "use_mask", user),
-        ],
-        [
             _toggle_button("📁", "use_fake_document", user),
         ],
-        [InlineKeyboardButton(text="Do'kon", callback_data="shop:open")],
+        [InlineKeyboardButton(text="🛒 Do'kon", callback_data="shop:open")],
         [
-            diamond_icon_button("Xarid qilish", callback_data="diamond:shop"),
-            dollar_icon_button("Xarid qilish", callback_data="dollar:shop"),
+            diamond_icon_button("💎 Xarid qilish", callback_data="diamond:shop"),
+            dollar_icon_button("💵 Xarid qilish", callback_data="dollar:shop"),
         ],
-        [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
         *([[InlineKeyboardButton(text="🥷 Mening geroyim", callback_data="hero:panel")]] if has_hero else []),
+        [InlineKeyboardButton(text="🎁 Mening giftlarim", callback_data="shop:gifts")],
+        [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="premium:info")],
+        [InlineKeyboardButton(text="⭐ VIP user", callback_data="vip:open")],
     ]
     if news_url:
         rows.append([InlineKeyboardButton(text="Yangiliklar ↗", url=news_url)])
