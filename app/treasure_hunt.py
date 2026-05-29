@@ -15,6 +15,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, U
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.gamble_guard import enforce_gamble_overwin_guard
 from app.models import DollarTransaction, GameHistory, TreasureHuntGame, User
 
 logger = logging.getLogger(__name__)
@@ -455,6 +456,7 @@ class TreasureHuntEngine:
             reveal_markup = None
             next_text = ""
             next_markup = None
+            guard_ids: list[int] = []
             chat_id = None
             message_id = None
             async with self.session_factory() as session:
@@ -467,6 +469,11 @@ class TreasureHuntEngine:
                     old_mines = _mines(game)
                     old_picks = _picks(game)
                     await self._resolve_locked(session, game)
+                    guard_ids = [
+                        int(item.get("telegram_id") or 0)
+                        for item in _results(game)
+                        if int(item.get("prize") or 0) > 0 and int(item.get("telegram_id") or 0) > 0
+                    ]
                     reveal_text = _active_text(game, result=self._last_round_result_text(game)) if game.status == TREASURE_ACTIVE else _finished_text(game)
                     reveal_markup = _reveal_keyboard(game, old_mines, old_picks) if game.status == TREASURE_ACTIVE else None
                     next_text = _view(game).text
@@ -477,6 +484,8 @@ class TreasureHuntEngine:
             if next_markup is not None and reveal_markup is not None:
                 await asyncio.sleep(2)
                 await self._safe_edit(bot, chat_id, message_id, next_text, next_markup)
+            for user_id in guard_ids:
+                await enforce_gamble_overwin_guard(self.session_factory, bot, user_id)
 
     async def _resolve_locked(self, session: AsyncSession, game: TreasureHuntGame) -> None:
         if game.status != TREASURE_ACTIVE:

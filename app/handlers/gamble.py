@@ -29,6 +29,7 @@ from app.frog_road import (
     parse_frog_callback,
 )
 from app.game_engine import GAMBLE_GROUP_PAY_DAYS, GAMBLE_GROUP_WEEK_PRICE_DIAMONDS, GameEngine
+from app.gamble_guard import enforce_gamble_overwin_guard
 from app.gamble_mines import MinesAntiCheatValidator, MinesEngine, MinesView
 from app.models import GambleMinesGame, GameHistory, User
 from app.roulette import (
@@ -234,6 +235,25 @@ async def _check_daily_limit_callback(callback: CallbackQuery) -> bool:
         )
         return True
     return False
+
+
+async def _enforce_overwin_for_user(callback: CallbackQuery, telegram_id: int | None = None) -> None:
+    target_id = int(telegram_id or callback.from_user.id)
+    await enforce_gamble_overwin_guard(SessionLocal, callback.bot, target_id)
+
+
+async def _enforce_overwin_for_mines_game(callback: CallbackQuery, game_id: int) -> None:
+    ids: set[int] = {int(callback.from_user.id)}
+    async with SessionLocal() as session:
+        game = await session.get(GambleMinesGame, int(game_id))
+        if game is not None:
+            ids.add(int(game.user_telegram_id))
+            if game.opponent_telegram_id:
+                ids.add(int(game.opponent_telegram_id))
+            if game.winner_telegram_id:
+                ids.add(int(game.winner_telegram_id))
+    for user_id in ids:
+        await enforce_gamble_overwin_guard(SessionLocal, callback.bot, user_id)
 
 
 def _mines_start_text() -> str:
@@ -773,6 +793,8 @@ async def frog_callback(callback: CallbackQuery, engine: GameEngine, state: FSMC
 
     if view.text:
         await _edit_or_answer(callback.message, view)
+    if action in {"jump", "cashout"}:
+        await _enforce_overwin_for_user(callback)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 
@@ -867,6 +889,8 @@ async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: F
         except TelegramBadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
+    if action in {"go", "cashout"}:
+        await _enforce_overwin_for_user(callback)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 
@@ -924,6 +948,8 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
                     await callback.message.edit_reply_markup(reply_markup=None)
                 except TelegramBadRequest:
                     pass
+            if action in {"o", "p", "open", "c", "cashout"}:
+                await _enforce_overwin_for_mines_game(callback, game_id)
             await callback.answer(view.alert or "OK", show_alert=view.show_alert)
             return
 
@@ -933,6 +959,8 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
         except TelegramBadRequest as exc:
             if "message is not modified" not in str(exc).lower():
                 await callback.message.answer(view.text, reply_markup=view.keyboard)
+    if action in {"o", "p", "open", "c", "cashout"}:
+        await _enforce_overwin_for_mines_game(callback, game_id)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 

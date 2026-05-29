@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import DollarTransaction, GameHistory, RouletteBet, RouletteRound, User
+from app.gamble_guard import enforce_gamble_overwin_guard
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +224,7 @@ class RouletteEngine:
     async def resolve_due_rounds(self, bot: Bot, limit: int = 20) -> None:
         now = _utcnow()
         refresh_items: list[tuple[int, int, str, int]] = []
-        result_items: list[tuple[RouletteRound, str]] = []
+        result_items: list[tuple[RouletteRound, str, list[int]]] = []
         async with self.session_factory() as session:
             rounds = (
                 await session.execute(
@@ -236,8 +237,8 @@ class RouletteEngine:
             ).scalars().all()
             for round_ in rounds:
                 if round_.ends_at <= now:
-                    text = await self._resolve_round(session, round_)
-                    result_items.append((round_, text))
+                    text, winner_ids = await self._resolve_round(session, round_)
+                    result_items.append((round_, text, winner_ids))
                 elif round_.message_id:
                     text = await self._round_text(session, round_)
                     refresh_items.append((int(round_.chat_id), int(round_.message_id), text, int(round_.id)))
@@ -245,8 +246,10 @@ class RouletteEngine:
 
         for chat_id, message_id, text, round_id in refresh_items:
             await self._refresh_round_message(bot, chat_id, message_id, text, round_id)
-        for round_, text in result_items:
+        for round_, text, winner_ids in result_items:
             await self._publish_result(bot, round_, text)
+            for user_id in winner_ids:
+                await enforce_gamble_overwin_guard(self.session_factory, bot, user_id)
 
     async def _refresh_round_message(self, bot: Bot, chat_id: int, message_id: int, text: str, round_id: int) -> None:
         try:
@@ -257,7 +260,7 @@ class RouletteEngine:
         except TelegramForbiddenError as exc:
             logger.warning("roulette_refresh_forbidden round=%s error=%s", round_id, exc)
 
-    async def _resolve_round(self, session: AsyncSession, round_: RouletteRound) -> str:
+    async def _resolve_round(self, session: AsyncSession, round_: RouletteRound) -> tuple[str, list[int]]:
         bets = (
             await session.execute(select(RouletteBet).where(RouletteBet.round_id == int(round_.id)).order_by(RouletteBet.id.asc()))
         ).scalars().all()
@@ -268,6 +271,7 @@ class RouletteEngine:
         round_.result_label = f"{result_emoji} {result_label}"
         total_payout = 0
         winners: list[str] = []
+        winner_ids: list[int] = []
         for bet in bets:
             user = await session.get(User, int(bet.user_id))
             if user is None:
@@ -280,6 +284,7 @@ class RouletteEngine:
                 bet.payout = payout
                 bet.status = "won"
                 total_payout += payout
+                winner_ids.append(int(user.telegram_id))
                 winners.append(f"{_user_link(bet)} - <b>{payout}</b> dollar")
                 self._record_dollar(session, user, payout, "roulette_win", f"Ruletka #{round_.id}: {round_.result_label}", int(round_.chat_id))
                 session.add(
@@ -305,7 +310,7 @@ class RouletteEngine:
                     )
                 )
         round_.total_payout = total_payout
-        return self._result_text(round_, bets, winners)
+        return self._result_text(round_, bets, winners), winner_ids
 
     async def _publish_result(self, bot: Bot, round_: RouletteRound, text: str) -> None:
         message_id = int(round_.message_id or 0)
