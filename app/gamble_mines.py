@@ -56,6 +56,10 @@ def _ce(symbol: str, emoji_id: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
 
 
+def _button(text: str, callback_data: str, style: str = "primary") -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback_data, **{"style": style})
+
+
 @dataclass(frozen=True)
 class MinesView:
     text: str
@@ -125,8 +129,8 @@ class MinesRenderer:
         if game.status == "waiting":
             return InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="👥 2 kishilik qo'shilish", callback_data=f"gm:j:{game.id}:{game.token}")],
-                    [InlineKeyboardButton(text="🎮 1 kishilik boshlash", callback_data=f"gm:s:{game.id}:{game.token}")],
+                    [_button("👥 2 kishilik qo'shilish", f"gm:j:{game.id}:{game.token}", "success")],
+                    [_button("🎮 1 kishilik boshlash", f"gm:s:{game.id}:{game.token}", "primary")],
                 ]
             )
         if game.status != "active":
@@ -146,10 +150,12 @@ class MinesRenderer:
                 if opened is not None:
                     text = "💣" if opened.get("mine") else f"{int(opened.get('value') or 0):02d}"
                     callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                    style = "danger" if opened.get("mine") else "success"
                 else:
                     text = "⬜"
                     callback = f"gm:p:{game.id}:{game.token}:{cell}"
-                row.append(InlineKeyboardButton(text=text, callback_data=callback))
+                    style = "primary"
+                row.append(_button(text, callback, style))
             rows.append(row)
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -166,18 +172,22 @@ class MinesRenderer:
                 if cell in opened:
                     text = "💎"
                     callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                    style = "success"
                 elif reveal and cell in mines:
                     text = "💣"
                     callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                    style = "danger"
                 elif reveal:
                     text = "▫️"
                     callback = f"gm:noop:{game.id}:{game.token}:{cell}"
+                    style = "primary"
                 else:
                     text = "⬜"
                     callback = f"gm:p:{game.id}:{game.token}:{cell}"
-                row.append(InlineKeyboardButton(text=text, callback_data=callback))
+                    style = "primary"
+                row.append(_button(text, callback, style))
             rows.append(row)
-        rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"gm:c:{game.id}:{game.token}")])
+        rows.append([_button("💰 Pulni olish", f"gm:c:{game.id}:{game.token}", "success")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
     @staticmethod

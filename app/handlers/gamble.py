@@ -49,6 +49,10 @@ DAILY_GAMBLE_WIN_LIMIT = 30_000
 UZ_TZ = timezone(timedelta(hours=5))
 
 
+def _button(text: str, callback_data: str, style: str = "primary") -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback_data, **{"style": style})
+
+
 class FrogBetState(StatesGroup):
     waiting_amount = State()
 
@@ -130,9 +134,9 @@ def _gamble_menu_text() -> str:
 def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🐸 Qurbaqa Yo'li", callback_data=f"qmenu:frog:{owner_id}")],
-            [InlineKeyboardButton(text="💣 Mines", callback_data=f"qmenu:mines:{owner_id}")],
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"qmenu:cancel:{owner_id}")],
+            [_button("🐸 Qurbaqa Yo'li", f"qmenu:frog:{owner_id}", "success")],
+            [_button("💣 Mines", f"qmenu:mines:{owner_id}", "primary")],
+            [_button("❌ Bekor qilish", f"qmenu:cancel:{owner_id}", "danger")],
         ]
     )
 
@@ -235,16 +239,16 @@ def _mines_bet_keyboard(owner_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="100", callback_data=f"gmnew:start:{owner_id}:100"),
-                InlineKeyboardButton(text="500", callback_data=f"gmnew:start:{owner_id}:500"),
-                InlineKeyboardButton(text="1000", callback_data=f"gmnew:start:{owner_id}:1000"),
+                _button("100", f"gmnew:start:{owner_id}:100", "primary"),
+                _button("500", f"gmnew:start:{owner_id}:500", "primary"),
+                _button("1000", f"gmnew:start:{owner_id}:1000", "primary"),
             ],
             [
-                InlineKeyboardButton(text="5000", callback_data=f"gmnew:start:{owner_id}:5000"),
-                InlineKeyboardButton(text="10000", callback_data=f"gmnew:start:{owner_id}:10000"),
+                _button("5000", f"gmnew:start:{owner_id}:5000", "primary"),
+                _button("10000", f"gmnew:start:{owner_id}:10000", "primary"),
             ],
-            [InlineKeyboardButton(text="✍️ Boshqa summa", callback_data=f"gmnew:custom:{owner_id}")],
-            [InlineKeyboardButton(text="⬅️ Ortga", callback_data=f"qmenu:back:{owner_id}")],
+            [_button("✍️ Boshqa summa", f"gmnew:custom:{owner_id}", "success")],
+            [_button("⬅️ Ortga", f"qmenu:back:{owner_id}", "danger")],
         ]
     )
 

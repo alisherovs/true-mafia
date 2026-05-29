@@ -55,6 +55,10 @@ def _ce(symbol: str, emoji_id: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
 
 
+def _button(text: str, callback_data: str, style: str = "primary") -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=callback_data, **{"style": style})
+
+
 def _lock(session_id: int) -> asyncio.Lock:
     lock = FROG_LOCKS.get(session_id)
     if lock is None:
@@ -167,16 +171,16 @@ def build_frog_start_keyboard(owner_id: int | None = None) -> InlineKeyboardMark
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="100 ⭐", callback_data=cb("start", 100)),
-                InlineKeyboardButton(text="500 ⭐", callback_data=cb("start", 500)),
-                InlineKeyboardButton(text="1000 ⭐", callback_data=cb("start", 1000)),
+                _button("100 ⭐", cb("start", 100), "primary"),
+                _button("500 ⭐", cb("start", 500), "primary"),
+                _button("1000 ⭐", cb("start", 1000), "primary"),
             ],
             [
-                InlineKeyboardButton(text="5000 ⭐", callback_data=cb("start", 5000)),
-                InlineKeyboardButton(text="10000 ⭐", callback_data=cb("start", 10000)),
+                _button("5000 ⭐", cb("start", 5000), "primary"),
+                _button("10000 ⭐", cb("start", 10000), "primary"),
             ],
-            [InlineKeyboardButton(text="✍️ Boshqa summa", callback_data=cb("custom_bet"))],
-            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=cb("menu_cancel"))],
+            [_button("✍️ Boshqa summa", cb("custom_bet"), "success")],
+            [_button("❌ Bekor qilish", cb("menu_cancel"), "danger")],
         ]
     )
 
@@ -218,30 +222,48 @@ def _frog_tile_text(
     return FROG_TILE_CLOSED
 
 
+def _frog_tile_style(
+    point: tuple[int, int],
+    opened_safe: set[tuple[int, int]],
+    opened_danger: set[tuple[int, int]],
+    position: Optional[tuple[int, int]],
+) -> str:
+    if point in opened_danger:
+        return "danger"
+    if position == point or point in opened_safe:
+        return "success"
+    return "primary"
+
+
 def build_frog_keyboard(session: FrogGameSession) -> InlineKeyboardMarkup:
     opened_safe, opened_danger, position = _frog_board_state(session)
     rows: list[list[InlineKeyboardButton]] = []
-    current_row = int(session.current_row or 0)
     active = session.status == FROG_ACTIVE
     for row in range(FROG_ROWS - 1, -1, -1):
         buttons: list[InlineKeyboardButton] = []
         for column in range(FROG_COLUMNS):
             point = (row, column)
             text = _frog_tile_text(point, opened_safe, opened_danger, position)
-            buttons.append(InlineKeyboardButton(text=text, callback_data=f"frog:noop:{session.id}"))
+            buttons.append(
+                _button(
+                    text,
+                    f"frog:noop:{session.id}",
+                    _frog_tile_style(point, opened_safe, opened_danger, position),
+                )
+            )
         rows.append(buttons)
     if active:
         rows.append(
             [
-                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[0], callback_data=f"frog:jump:{session.id}:0"),
-                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[1], callback_data=f"frog:jump:{session.id}:1"),
-                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[2], callback_data=f"frog:jump:{session.id}:2"),
-                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[3], callback_data=f"frog:jump:{session.id}:3"),
-                InlineKeyboardButton(text=FROG_JUMP_BUTTONS[4], callback_data=f"frog:jump:{session.id}:4"),
+                _button(FROG_JUMP_BUTTONS[0], f"frog:jump:{session.id}:0", "primary"),
+                _button(FROG_JUMP_BUTTONS[1], f"frog:jump:{session.id}:1", "primary"),
+                _button(FROG_JUMP_BUTTONS[2], f"frog:jump:{session.id}:2", "primary"),
+                _button(FROG_JUMP_BUTTONS[3], f"frog:jump:{session.id}:3", "primary"),
+                _button(FROG_JUMP_BUTTONS[4], f"frog:jump:{session.id}:4", "primary"),
             ]
         )
-        rows.append([InlineKeyboardButton(text="💰 Pulni olish", callback_data=f"frog:cashout:{session.id}")])
-        rows.append([InlineKeyboardButton(text="❌ Taslim bo'lish", callback_data=f"frog:cancel:{session.id}")])
+        rows.append([_button("💰 Pulni olish", f"frog:cashout:{session.id}", "success")])
+        rows.append([_button("❌ Taslim bo'lish", f"frog:cancel:{session.id}", "danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
