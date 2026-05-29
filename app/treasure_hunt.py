@@ -266,7 +266,7 @@ def _keyboard(game: TreasureHuntGame, *, reveal: bool = False) -> InlineKeyboard
             cell = row_idx * TREASURE_GRID_WIDTH + col_idx
             if reveal and cell in mines:
                 row.append(_button("💣", f"th:noop:{game.id}:{game.token}:{cell}", "danger"))
-            elif reveal and cell in picks:
+            elif cell in picks:
                 row.append(_button("✅", f"th:noop:{game.id}:{game.token}:{cell}", "success"))
             else:
                 row.append(_button("🟩", f"th:p:{game.id}:{game.token}:{cell}", "success"))
@@ -416,7 +416,8 @@ class TreasureHuntEngine:
                     picks[str(int(tg_user_id))] = int(cell)
                     game.picks_json = _dumps(picks)
                     game.last_action_at = _utcnow()
-                    return _view(game)
+                    view = _view(game)
+                    return TreasureView(view.text, view.keyboard, "✅ Katak tanlandi.", False, int(game.id), str(game.token))
 
     async def cancel(self, tg_user_id: int, game_id: int, token: str) -> TreasureView:
         async with _lock(game_id):
