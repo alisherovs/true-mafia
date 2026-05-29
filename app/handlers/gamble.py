@@ -616,8 +616,6 @@ async def treasure_callback(callback: CallbackQuery, engine: GameEngine) -> None
     if not allowed:
         await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
         return
-    if await _check_daily_limit_callback(callback):
-        return
     try:
         action, game_id, token, cell = parse_treasure_callback(callback.data or "")
     except ValueError:
@@ -625,6 +623,8 @@ async def treasure_callback(callback: CallbackQuery, engine: GameEngine) -> None
         return
     if action == "noop":
         await callback.answer()
+        return
+    if action in {"j", "join"} and await _check_daily_limit_callback(callback):
         return
 
     treasure = TreasureHuntEngine(SessionLocal)
