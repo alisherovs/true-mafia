@@ -113,8 +113,8 @@ def profile_dashboard_keyboard(
         ],
         [InlineKeyboardButton(text="🛒 Do'kon", callback_data="shop:open")],
         [
-            diamond_icon_button("💎 Xarid qilish", callback_data="diamond:shop"),
-            dollar_icon_button("💵 Xarid qilish", callback_data="dollar:shop"),
+            diamond_icon_button("Xarid qilish", callback_data="diamond:shop"),
+            dollar_icon_button("Xarid qilish", callback_data="dollar:shop"),
         ],
         *([[InlineKeyboardButton(text="🥷 Mening geroyim", callback_data="hero:panel")]] if has_hero else []),
         [InlineKeyboardButton(text="🎁 Mening giftlarim", callback_data="shop:gifts")],
