@@ -452,6 +452,34 @@ class ChickenRoadSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class TreasureHuntGame(Base):
+    __tablename__ = "treasure_hunt_games"
+    __table_args__ = (
+        Index("ix_treasure_hunt_chat_status", "chat_id", "status"),
+        Index("ix_treasure_hunt_creator_status", "creator_telegram_id", "status"),
+        Index("ix_treasure_hunt_round_ends", "status", "round_ends_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    creator_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    bet_amount: Mapped[int] = mapped_column(Integer)
+    pool_amount: Mapped[int] = mapped_column(Integer, default=0)
+    round_number: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="waiting")
+    token: Mapped[str] = mapped_column(String(32), index=True)
+    players_json: Mapped[str] = mapped_column(Text, default="[]")
+    mines_json: Mapped[str] = mapped_column(Text, default="[]")
+    picks_json: Mapped[str] = mapped_column(Text, default="{}")
+    eliminated_json: Mapped[str] = mapped_column(Text, default="[]")
+    results_json: Mapped[str] = mapped_column(Text, default="[]")
+    round_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_action_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class GameHistory(Base):
     __tablename__ = "game_history"
     __table_args__ = (

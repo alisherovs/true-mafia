@@ -41,6 +41,13 @@ from app.roulette import (
     roulette_color_text,
     roulette_start_text,
 )
+from app.treasure_hunt import (
+    TreasureHuntEngine,
+    build_treasure_start_keyboard,
+    parse_treasure_callback,
+    parse_treasure_new_callback,
+    treasure_start_text,
+)
 
 router = Router()
 ROULETTE_ENABLED = False
@@ -127,7 +134,8 @@ def _gamble_menu_text() -> str:
         "🎰 <b>Qimor o'yinlari</b>\n\n"
         "O'ynamoqchi bo'lgan mini-o'yinni tanlang:\n\n"
         "🐸 <b>Qurbaqa Yo'li</b> - 5x8 yo'lda xavfli kataklardan qoching.\n"
-        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor."
+        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor.\n"
+        "💎 <b>Treasure Hunt</b> - 2-10 kishilik survival xazina o'yini."
     )
 
 
@@ -136,6 +144,7 @@ def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [_button("🐸 Qurbaqa Yo'li", f"qmenu:frog:{owner_id}", "success")],
             [_button("💣 Mines", f"qmenu:mines:{owner_id}", "primary")],
+            [_button("💎 Treasure Hunt", f"qmenu:treasure:{owner_id}", "success")],
             [_button("❌ Bekor qilish", f"qmenu:cancel:{owner_id}", "danger")],
         ]
     )
@@ -467,6 +476,9 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
     elif action == "mines":
         await callback.message.edit_text(_mines_start_text(), reply_markup=_mines_bet_keyboard(owner_id))
         await callback.answer("Mines tanlandi.")
+    elif action == "treasure":
+        await callback.message.edit_text(treasure_start_text(), reply_markup=build_treasure_start_keyboard(owner_id))
+        await callback.answer("Treasure Hunt tanlandi.")
     elif action == "roulette":
         if not ROULETTE_ENABLED:
             await callback.answer(_disabled_game_text("Ruletka"), show_alert=True)
@@ -532,6 +544,94 @@ async def mines_start_callback(callback: CallbackQuery, engine: GameEngine, stat
     if view.game_id and view.token:
         await mines.set_message_id(view.game_id, view.token, callback.message.message_id)
     await callback.answer(view.alert or "Mines yaratildi.", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("thnew:"))
+async def treasure_start_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
+        return
+    try:
+        action, owner_id, amount = parse_treasure_new_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    if not _callback_owner_ok(callback, owner_id):
+        await callback.answer("❌ Bu o'yin menyusi sizniki emas.", show_alert=True)
+        return
+    if action != "start" or amount is None:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    await state.clear()
+    treasure = TreasureHuntEngine(SessionLocal)
+    view = await treasure.create_game(callback.from_user, callback.message.chat.id, int(amount))
+    try:
+        await callback.message.edit_text(view.text, reply_markup=view.keyboard)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            await callback.message.answer(view.text, reply_markup=view.keyboard)
+    if view.game_id and view.token:
+        await treasure.set_message_id(view.game_id, view.token, callback.message.message_id)
+    await callback.answer(view.alert or "Treasure Hunt yaratildi.", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("th:"))
+async def treasure_callback(callback: CallbackQuery, engine: GameEngine) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
+        return
+    try:
+        action, game_id, token, cell = parse_treasure_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto'g'ri.", show_alert=True)
+        return
+    if action == "noop":
+        await callback.answer()
+        return
+
+    treasure = TreasureHuntEngine(SessionLocal)
+    if action in {"j", "join"}:
+        view = await treasure.join(callback.from_user, game_id, token)
+    elif action == "start":
+        view = await treasure.start(callback.from_user.id, game_id, token)
+    elif action in {"p", "pick"}:
+        if cell is None:
+            await callback.answer("Katak noto'g'ri.", show_alert=True)
+            return
+        view = await treasure.pick(callback.from_user.id, game_id, token, cell)
+    elif action == "cancel":
+        view = await treasure.cancel(callback.from_user.id, game_id, token)
+    else:
+        await callback.answer("Bu tugma eskirgan. /qimor bilan qayta oching.", show_alert=True)
+        return
+
+    if view.text:
+        try:
+            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc).lower():
+                await callback.message.answer(view.text, reply_markup=view.keyboard)
+    if view.game_id and view.token:
+        await treasure.set_message_id(view.game_id, view.token, callback.message.message_id)
+    await callback.answer(view.alert or "OK", show_alert=view.show_alert)
 
 
 @router.callback_query(F.data.startswith("roulette:"))
