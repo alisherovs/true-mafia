@@ -201,6 +201,13 @@ def credit_confirm_keyboard(amount: int, days: int) -> InlineKeyboardMarkup:
 ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.BOSS_ZOMBIE,
     Role.ZOMBIE,
+    Role.ZOMBIE_RESCUER,
+    Role.VIROLOGIST,
+    Role.QUARANTINE_OFFICER,
+    Role.VACCINATOR,
+    Role.IMMUNE,
+    Role.MUTANT_ZOMBIE,
+    Role.INFECTOR,
     Role.HUMAN,
     Role.SORCERER,
     Role.SPY,

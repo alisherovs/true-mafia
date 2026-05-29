@@ -42,6 +42,13 @@ class Role(str, Enum):
     HUMAN = "human"
     BOSS_ZOMBIE = "boss_zombie"
     ZOMBIE = "zombie"
+    ZOMBIE_RESCUER = "zombie_rescuer"
+    VIROLOGIST = "virologist"
+    QUARANTINE_OFFICER = "quarantine_officer"
+    VACCINATOR = "vaccinator"
+    IMMUNE = "immune"
+    MUTANT_ZOMBIE = "mutant_zombie"
+    INFECTOR = "infector"
 
     CITIZEN = "citizen"
     MISTRESS = "mistress"
@@ -79,6 +86,11 @@ class Role(str, Enum):
 
 class ActionType(str, Enum):
     INFECT = "infect"
+    ZOMBIE_RESCUE = "zombie_rescue"
+    ZOMBIE_SCAN = "zombie_scan"
+    QUARANTINE = "quarantine"
+    VACCINATE = "vaccinate"
+    MUTANT_HIDE = "mutant_hide"
     KILL = "kill"
     HEAL = "heal"
     CHECK = "check"

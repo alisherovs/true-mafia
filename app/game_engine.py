@@ -714,6 +714,33 @@ class GameEngine:
     def _is_zombie_game(game: Optional[Game]) -> bool:
         return bool(game and (game.role_preset or "").lower() == "zombie")
 
+    @staticmethod
+    def _zombie_roles_for_player_count(player_count: int) -> list[Role]:
+        roles = [Role.BOSS_ZOMBIE] + [Role.HUMAN] * max(0, player_count - 1)
+        thresholds: list[tuple[int, Role]] = [
+            (5, Role.ZOMBIE_RESCUER),
+            (6, Role.VIROLOGIST),
+            (8, Role.QUARANTINE_OFFICER),
+            (10, Role.IMMUNE),
+            (12, Role.VACCINATOR),
+            (14, Role.MUTANT_ZOMBIE),
+            (16, Role.INFECTOR),
+            (18, Role.ZOMBIE_RESCUER),
+            (20, Role.VIROLOGIST),
+            (22, Role.IMMUNE),
+            (24, Role.QUARANTINE_OFFICER),
+            (26, Role.VACCINATOR),
+            (28, Role.MUTANT_ZOMBIE),
+            (32, Role.INFECTOR),
+        ]
+        replace_index = 1
+        for threshold, role in thresholds:
+            if player_count < threshold or replace_index >= len(roles):
+                continue
+            roles[replace_index] = role
+            replace_index += 1
+        return roles[:player_count]
+
     def _format_death_line(self, player: GamePlayer, cause: Optional[str] = None) -> str:
         name = self._tg_mention(player.telegram_id, player.display_name)
         base = f"Tunda {role_label(player.role)} {name}"
@@ -919,6 +946,18 @@ class GameEngine:
     def _night_activity_line(role: Role, action_key: Optional[str]) -> Optional[str]:
         if role == Role.BOSS_ZOMBIE:
             return "🧟‍♂️ Boss Zombie tunda yangi qurbon izlab chiqdi..."
+        if role == Role.INFECTOR:
+            return "🦠 Infektor jim yurib virus izlarini yoydi..."
+        if role == Role.MUTANT_ZOMBIE:
+            return "🧠 Mutant Zombie kimnidir soyada yashirdi..."
+        if role == Role.ZOMBIE_RESCUER:
+            return "🩺 Qutqaruvchi tun bo'yi virusga qarshi kurashdi..."
+        if role == Role.VIROLOGIST:
+            return "🔬 Virusolog namunalarni tekshirishga ketdi..."
+        if role == Role.QUARANTINE_OFFICER:
+            return "🛡 Karantinchi kimnidir izolyatsiyaga oldi..."
+        if role == Role.VACCINATOR:
+            return "💉 Vaktsinator so'nggi imkoniyatini tayyorladi..."
         if role == Role.DOCTOR:
             return "👨🏼‍⚕️️Doktor tungi navbatchilikga ketdi..."
         if role == Role.GUARD:
@@ -2392,14 +2431,13 @@ class GameEngine:
                 ).scalars().all()
             }
             if role_preset == "zombie":
-                boss = random.choice(players)
-                for player in players:
-                    if player.telegram_id == boss.telegram_id:
-                        player.role = Role.BOSS_ZOMBIE.value
-                        player.team = Team.ZOMBIE.value
-                    else:
-                        player.role = Role.HUMAN.value
-                        player.team = Team.CITY.value
+                zombie_roles = self._zombie_roles_for_player_count(len(players))
+                random.shuffle(zombie_roles)
+                if Role.BOSS_ZOMBIE not in zombie_roles:
+                    zombie_roles[0] = Role.BOSS_ZOMBIE
+                for player, role in zip(players, zombie_roles):
+                    player.role = role.value
+                    player.team = role_team(role).value
                     player.transformed_to_role = None
                     player.transformed_to_team = None
                     self._add_game_log(
@@ -2634,11 +2672,32 @@ class GameEngine:
             for p in alive_players
             if p.telegram_id != player.telegram_id and p.team != Team.ZOMBIE.value
         ]
+        zombie_targets = [
+            (p.telegram_id, p.display_name)
+            for p in alive_players
+            if p.team == Team.ZOMBIE.value
+        ]
 
         if role == Role.BOSS_ZOMBIE:
             if not human_targets:
                 return None
             return "🧟‍♂️ Kimga virus yuqtiramiz?", target_keyboard("infect", game_id, player.telegram_id, human_targets)
+        if role == Role.INFECTOR:
+            if night_number % 2 != 0 or not human_targets:
+                return None
+            return "🦠 Kimga yashirin virus yuqtirasiz?", target_keyboard("infect", game_id, player.telegram_id, human_targets)
+        if role == Role.MUTANT_ZOMBIE:
+            if not zombie_targets:
+                return None
+            return "🧠 Kimni tekshiruvdan yashirasiz?", target_keyboard("zhide", game_id, player.telegram_id, zombie_targets)
+        if role == Role.ZOMBIE_RESCUER:
+            return "🩺 Kimni virusdan qutqarasiz?", target_keyboard("zsave", game_id, player.telegram_id, all_choices)
+        if role == Role.VIROLOGIST:
+            return "🔬 Kimni virusga tekshirasiz?", target_keyboard("zscan", game_id, player.telegram_id, targets)
+        if role == Role.QUARANTINE_OFFICER:
+            return "🛡 Kimni karantinga olasiz?", target_keyboard("zquarantine", game_id, player.telegram_id, all_choices)
+        if role == Role.VACCINATOR and not player.self_heal_used:
+            return "💉 Kimga vaktsina ishlatasiz?", target_keyboard("zvaccinate", game_id, player.telegram_id, targets)
         if role in {Role.MAFIA, Role.DON, Role.SPY, Role.HIRED_KILLER}:
             return "🌚 Kimni yo'q qilamiz?", target_keyboard("kill", game_id, player.telegram_id, mafia_targets)
         if role == Role.DOCTOR:
@@ -3036,19 +3095,77 @@ class GameEngine:
             night = game.night_number
             alive_players = await self._alive_players(session, game_id)
             player_map = {player.telegram_id: player for player in alive_players}
-            infect_actions = (
+            actions = (
                 await session.execute(
                     select(NightAction)
                     .where(
                         NightAction.game_id == game_id,
                         NightAction.night_number == night,
-                        NightAction.action_type == ActionType.INFECT.value,
                     )
                     .order_by(NightAction.id.asc())
                 )
             ).scalars().all()
 
+            quarantined_ids = {
+                int(action.target_telegram_id)
+                for action in actions
+                if action.action_type == ActionType.QUARANTINE.value and action.target_telegram_id
+            }
+            rescued_ids = {
+                int(action.target_telegram_id)
+                for action in actions
+                if action.action_type == ActionType.ZOMBIE_RESCUE.value
+                and action.actor_telegram_id not in quarantined_ids
+                and action.target_telegram_id
+            }
+            hidden_zombie_ids = {
+                int(action.target_telegram_id)
+                for action in actions
+                if action.action_type == ActionType.MUTANT_HIDE.value
+                and action.actor_telegram_id not in quarantined_ids
+                and action.target_telegram_id
+                and (player_map.get(int(action.target_telegram_id)) is not None)
+                and player_map[int(action.target_telegram_id)].team == Team.ZOMBIE.value
+            }
+
+            vaccine_lines: list[str] = []
+            vaccine_private_lines: list[tuple[int, str]] = []
+            scan_results: list[tuple[int, str]] = []
+            for action in actions:
+                if action.action_type != ActionType.VACCINATE.value or not action.target_telegram_id:
+                    continue
+                actor = player_map.get(action.actor_telegram_id)
+                target = player_map.get(action.target_telegram_id)
+                if actor is None or target is None or not actor.alive or not target.alive:
+                    continue
+                if actor.role != Role.VACCINATOR.value or action.actor_telegram_id in quarantined_ids:
+                    continue
+                if target.role == Role.BOSS_ZOMBIE.value:
+                    vaccine_private_lines.append((actor.telegram_id, "💉 Vaktsina Boss Zombiega ta'sir qilmadi."))
+                    continue
+                if target.team == Team.ZOMBIE.value:
+                    target.role = Role.HUMAN.value
+                    target.team = Team.CITY.value
+                    target.transformed_to_role = Role.HUMAN.value
+                    target.transformed_to_team = Team.CITY.value
+                    vaccine_lines.append(
+                        f"💉 Vaktsina ishladi: {self._tg_mention(target.telegram_id, target.display_name)} yana insonlar tarafiga qaytdi."
+                    )
+                    vaccine_private_lines.append((target.telegram_id, "💉 Sizga vaktsina ishlatildi. Endi siz yana 🧍 Inson tarafidasiz."))
+                else:
+                    vaccine_private_lines.append((actor.telegram_id, "💉 Vaktsina insonda ishlatildi va kuchi sarflandi."))
+
             infected_player: Optional[GamePlayer] = None
+            blocked_infection_lines: list[str] = []
+            immune_private_lines: list[tuple[int, str]] = []
+            infect_actions = [
+                action
+                for action in actions
+                if action.action_type == ActionType.INFECT.value and action.target_telegram_id
+            ]
+            infect_actions.sort(
+                key=lambda action: 0 if (player_map.get(action.actor_telegram_id) and player_map[action.actor_telegram_id].role == Role.BOSS_ZOMBIE.value) else 1
+            )
             for action in infect_actions:
                 actor = player_map.get(action.actor_telegram_id)
                 target = player_map.get(action.target_telegram_id or 0)
@@ -3057,9 +3174,34 @@ class GameEngine:
                     or target is None
                     or not actor.alive
                     or not target.alive
-                    or actor.role != Role.BOSS_ZOMBIE.value
                     or target.team == Team.ZOMBIE.value
                 ):
+                    continue
+                if actor.role == Role.INFECTOR.value and night % 2 != 0:
+                    continue
+                if actor.role not in {Role.BOSS_ZOMBIE.value, Role.INFECTOR.value}:
+                    continue
+                if actor.telegram_id in quarantined_ids:
+                    blocked_infection_lines.append(
+                        f"🛡 {role_label(actor.role)} karantinda qoldi va virus tarqata olmadi."
+                    )
+                    continue
+                if target.telegram_id in quarantined_ids:
+                    blocked_infection_lines.append(
+                        f"🛡 {self._tg_mention(target.telegram_id, target.display_name)} karantin sabab virusdan omon qoldi."
+                    )
+                    continue
+                if target.telegram_id in rescued_ids:
+                    blocked_infection_lines.append(
+                        f"🩺 Qutqaruvchi {self._tg_mention(target.telegram_id, target.display_name)}ni virusdan saqlab qoldi."
+                    )
+                    continue
+                if target.role == Role.IMMUNE.value and not target.self_heal_used:
+                    target.self_heal_used = True
+                    immune_private_lines.append((target.telegram_id, "🧬 Immunitetingiz birinchi virus hujumini qaytardi."))
+                    blocked_infection_lines.append(
+                        f"🧬 Kimningdir immuniteti virusni qaytardi."
+                    )
                     continue
                 infected_player = target
                 target.role = Role.ZOMBIE.value
@@ -3078,6 +3220,23 @@ class GameEngine:
                 )
                 break
 
+            for action in actions:
+                if action.action_type != ActionType.ZOMBIE_SCAN.value or not action.target_telegram_id:
+                    continue
+                actor = player_map.get(action.actor_telegram_id)
+                target = player_map.get(action.target_telegram_id)
+                if actor is None or target is None or not actor.alive or actor.role != Role.VIROLOGIST.value:
+                    continue
+                if actor.telegram_id in quarantined_ids:
+                    scan_results.append((actor.telegram_id, "🛡 Karantin sabab bu tun tekshiruv qila olmadingiz."))
+                    continue
+                seen_zombie = target.team == Team.ZOMBIE.value and target.telegram_id not in hidden_zombie_ids
+                status = "🧟 Zombie tarafida" if seen_zombie else "🧍 Inson tarafida"
+                scan_results.append((
+                    actor.telegram_id,
+                    f"🔬 Tekshiruv natijasi: {self._tg_mention(target.telegram_id, target.display_name)} — <b>{status}</b>.",
+                ))
+
             game.phase = GamePhase.DAY_DISCUSSION.value
             game.day_number += 1
             self._add_game_log(
@@ -3086,6 +3245,9 @@ class GameEngine:
                 "zombie_night_resolved",
                 night_number=night,
                 infected_id=infected_player.telegram_id if infected_player else None,
+                quarantined_ids=sorted(quarantined_ids),
+                rescued_ids=sorted(rescued_ids),
+                hidden_zombie_ids=sorted(hidden_zombie_ids),
             )
             await session.commit()
 
@@ -3104,6 +3266,8 @@ class GameEngine:
                 )
             )
             infected_private_id = infected_player.telegram_id if infected_player else None
+            private_notices = list(vaccine_private_lines) + list(immune_private_lines) + list(scan_results)
+            group_lines = vaccine_lines + blocked_infection_lines
 
         await self._clear_night_prompt_buttons(bot, game_id, night)
         try:
@@ -3118,7 +3282,18 @@ class GameEngine:
         except Exception:
             logger.exception("Failed to send zombie day phase media game_id=%s", game_id)
         await self._safe_send_message(bot, chat_id, alive_status)
+        for line in dict.fromkeys(group_lines):
+            await self._safe_send_message(bot, chat_id, line)
         await self._safe_send_message(bot, chat_id, infected_notice)
+        for telegram_id, text in private_notices:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
         if infected_private_id is not None:
             try:
                 await bot.send_message(
@@ -3154,6 +3329,11 @@ class GameEngine:
     ) -> tuple[bool, str]:
         action_map = {
             "infect": ActionType.INFECT,
+            "zsave": ActionType.ZOMBIE_RESCUE,
+            "zscan": ActionType.ZOMBIE_SCAN,
+            "zquarantine": ActionType.QUARANTINE,
+            "zvaccinate": ActionType.VACCINATE,
+            "zhide": ActionType.MUTANT_HIDE,
             "kill": ActionType.KILL,
             "heal": ActionType.HEAL,
             "check": ActionType.CHECK,
@@ -3215,6 +3395,12 @@ class GameEngine:
 
             allowed_actions: dict[Role, set[str]] = {
                 Role.BOSS_ZOMBIE: {"infect"},
+                Role.INFECTOR: {"infect"},
+                Role.MUTANT_ZOMBIE: {"zhide"},
+                Role.ZOMBIE_RESCUER: {"zsave"},
+                Role.VIROLOGIST: {"zscan"},
+                Role.QUARANTINE_OFFICER: {"zquarantine"},
+                Role.VACCINATOR: {"zvaccinate"},
                 Role.DON: {"kill"},
                 Role.MAFIA: {"kill"},
                 Role.SPY: {"kill"},
@@ -3241,8 +3427,18 @@ class GameEngine:
             role_allowed = allowed_actions.get(actor_role, set())
             if action_key not in role_allowed:
                 return False, "Bu amal sizning rolingiz uchun mavjud emas."
-            if action_type == ActionType.INFECT and game.role_preset != "zombie":
+            zombie_action_types = {
+                ActionType.INFECT,
+                ActionType.ZOMBIE_RESCUE,
+                ActionType.ZOMBIE_SCAN,
+                ActionType.QUARANTINE,
+                ActionType.VACCINATE,
+                ActionType.MUTANT_HIDE,
+            }
+            if action_type in zombie_action_types and game.role_preset != "zombie":
                 return False, "Bu amal faqat Zombie mode uchun mavjud."
+            if actor_role == Role.INFECTOR and action_type == ActionType.INFECT and game.night_number % 2 != 0:
+                return False, "Infektor faqat juft tunlarda virus yuqtira oladi."
             if action_type == ActionType.MINE and not 1 <= target_id <= 10:
                 return False, "Kon noto'g'ri."
             if action_type == ActionType.MINE:
@@ -3326,6 +3522,10 @@ class GameEngine:
                     return False, "O'zingizga virus yuqtira olmaysiz."
                 if target.team == Team.ZOMBIE.value:
                     return False, "Bu o'yinchi allaqachon zombi tarafida."
+            if action_type == ActionType.MUTANT_HIDE and target.team != Team.ZOMBIE.value:
+                return False, "Mutant faqat zombi tarafdoshini yashira oladi."
+            if action_type == ActionType.VACCINATE and actor.self_heal_used:
+                return False, "Vaktsina kuchi allaqachon ishlatilgan."
             if actor_role == Role.JOKER and action_key == "joker_card":
                 if target_id not in {1, 2, 3, 4}:
                     return False, "Karta noto'g'ri."
@@ -3402,6 +3602,16 @@ class GameEngine:
                 success_text = f"Siz {target.display_name}ning uyiga tekshiruvga borishni tanladingiz."
             elif action_key == "infect":
                 success_text = f"Siz {target.display_name}ga virus yuqtirishni tanladingiz."
+            elif action_key == "zsave":
+                success_text = f"Siz {target.display_name}ni virusdan himoya qilishni tanladingiz."
+            elif action_key == "zscan":
+                success_text = f"Siz {target.display_name}ni virusga tekshirishni tanladingiz."
+            elif action_key == "zquarantine":
+                success_text = f"Siz {target.display_name}ni karantinga olishni tanladingiz."
+            elif action_key == "zvaccinate":
+                success_text = f"Siz {target.display_name}ga vaktsina ishlatishni tanladingiz."
+            elif action_key == "zhide":
+                success_text = f"Siz {target.display_name}ni tekshiruvdan yashirishni tanladingiz."
             elif actor_role == Role.COMMISSAR and action_key == "shoot":
                 success_text = f"Siz {target.display_name}ni o'yindan chetlatishni tanladingiz."
             elif action_key == "kill" and actor_role in {Role.MAFIA, Role.SPY, Role.HIRED_KILLER}:
@@ -3453,6 +3663,8 @@ class GameEngine:
             )
 
             if action_type == ActionType.HEAL and actor.telegram_id == target_id:
+                actor.self_heal_used = True
+            if action_type == ActionType.VACCINATE:
                 actor.self_heal_used = True
 
             self._add_game_log(
