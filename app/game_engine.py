@@ -3259,11 +3259,7 @@ class GameEngine:
             infected_notice = (
                 "🦠 Virus tarqalmadi. Insonlar bu tongni omon kutib oldi."
                 if infected_player is None
-                else (
-                    "🦠 Boss Zombie "
-                    f"{self._tg_mention(infected_player.telegram_id, infected_player.display_name)}ga virus yuqtirdi.\n"
-                    "U endi zombi tarafida!"
-                )
+                else "🦠 Boss Zombie tunda kimnidir virus bilan o'z tarafiga o'tkazdi."
             )
             infected_private_id = infected_player.telegram_id if infected_player else None
             private_notices = list(vaccine_private_lines) + list(immune_private_lines) + list(scan_results)
