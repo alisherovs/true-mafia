@@ -36,6 +36,8 @@ async def enforce_gamble_overwin_guard(
             user = await session.scalar(select(User).where(User.telegram_id == int(telegram_id)).with_for_update())
             if user is None:
                 return False
+            if _is_vip_active(user):
+                return False
             since = await _guard_window_start(session, int(user.telegram_id))
             total = await _winnings_since(session, user, since)
             if total <= GAMBLE_OVERWIN_RESET_THRESHOLD:
@@ -60,6 +62,17 @@ async def enforce_gamble_overwin_guard(
     if triggered and bot is not None:
         await _notify_user(bot, int(telegram_id))
     return triggered
+
+
+def _is_vip_active(user: User) -> bool:
+    vip_until = user.vip_until
+    if vip_until is None:
+        return False
+    if vip_until.tzinfo is None:
+        vip_until = vip_until.replace(tzinfo=timezone.utc)
+    else:
+        vip_until = vip_until.astimezone(timezone.utc)
+    return vip_until > datetime.now(timezone.utc)
 
 
 async def _guard_window_start(session: AsyncSession, telegram_id: int) -> datetime:

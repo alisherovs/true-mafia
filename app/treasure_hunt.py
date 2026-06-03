@@ -54,6 +54,12 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _ce(symbol: str, emoji_id: str) -> str:
     return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
 
@@ -199,7 +205,7 @@ def _waiting_text(game: TreasureHuntGame) -> str:
 def _round_status_line(game: TreasureHuntGame) -> str:
     if not game.round_ends_at:
         return "⏳ Raund: <b>20s</b>"
-    left = max(0, int((game.round_ends_at - _utcnow()).total_seconds()))
+    left = max(0, int((_as_aware_utc(game.round_ends_at) - _utcnow()).total_seconds()))
     return f"⏳ Raund: <b>{left}s</b>"
 
 

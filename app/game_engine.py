@@ -840,7 +840,7 @@ class GameEngine:
             groups_text = "\n\n".join(
                 block
                 for block in [
-                    self._format_role_group("🧟 <b>Zombielar</b>", len(zombie_players), zombie_players),
+                    f"🧟 <b>Zombielar</b> - <b>{len(zombie_players)}</b>" if zombie_players else "",
                     self._format_role_group("🧍 <b>Insonlar</b>", len(human_players), human_players),
                 ]
                 if block
@@ -935,6 +935,22 @@ class GameEngine:
         meta = ROLE_META[role]
         return f"Siz - {meta.emoji} <b>{meta.title_uz}</b>siz!\n{meta.short_desc_uz}"
 
+    def _zombie_team_private_text(self, player: GamePlayer, alive_players: list[GamePlayer]) -> str:
+        if player.team != Team.ZOMBIE.value:
+            return ""
+        zombies = [
+            zombie
+            for zombie in alive_players
+            if zombie.alive and zombie.team == Team.ZOMBIE.value and zombie.role is not None
+        ]
+        if not zombies:
+            return ""
+        lines = ["🧟 <b>Zombi safdoshlari</b>"]
+        for index, zombie in enumerate(zombies, 1):
+            label = role_label(zombie.role)
+            lines.append(f"{index}. {self._tg_mention(zombie.telegram_id, zombie.display_name)} — <b>{label}</b>")
+        return "\n".join(lines)
+
     def _commissar_check_result_text(self, target: GamePlayer, seen_role: Role) -> str:
         return f"{self._tg_mention(target.telegram_id, target.display_name)} - {role_label(seen_role)}"
 
@@ -945,11 +961,11 @@ class GameEngine:
     @staticmethod
     def _night_activity_line(role: Role, action_key: Optional[str]) -> Optional[str]:
         if role == Role.BOSS_ZOMBIE:
-            return "🧟‍♂️ Boss Zombie tunda yangi qurbon izlab chiqdi..."
+            return "🦠 Tunda virus soyasi yangi qurbon izlab yurdi..."
         if role == Role.INFECTOR:
-            return "🦠 Infektor jim yurib virus izlarini yoydi..."
+            return "🦠 Tunda virus izlari jim yoyildi..."
         if role == Role.MUTANT_ZOMBIE:
-            return "🧠 Mutant Zombie kimnidir soyada yashirdi..."
+            return "🧟 Zombi tarafi soyada harakat qildi..."
         if role == Role.ZOMBIE_RESCUER:
             return "🩺 Qutqaruvchi tun bo'yi virusga qarshi kurashdi..."
         if role == Role.VIROLOGIST:
@@ -2398,7 +2414,7 @@ class GameEngine:
         await self.assign_roles_and_notify(bot, game_id)
         start_text = (
             "🧟 <b>Zombie mode boshlandi!</b>\n\n"
-            "Boss Zombie har tunda bitta insonni virus bilan o'z tarafiga o'tkazadi.\n"
+            "Zombi taraf har tunda bitta insonni virus bilan o'z tarafiga o'tkazishga urinadi.\n"
             "Insonlar kunduzgi ovoz berishda zombielarni topib chiqarib yuborishi kerak."
             if is_zombie_mode
             else "<b>O'yin boshlandi!</b>"
@@ -2454,10 +2470,14 @@ class GameEngine:
 
                 for player in players:
                     role = Role(player.role)
+                    text = self._private_role_text(role)
+                    zombie_team_text = self._zombie_team_private_text(player, players)
+                    if zombie_team_text:
+                        text = f"{text}\n\n{zombie_team_text}"
                     sent = await self._safe_send_message(
                         bot,
                         player.telegram_id,
-                        self._private_role_text(role),
+                        text,
                         reply_markup=await self.group_return_keyboard(bot, chat_id),
                     )
                     if sent is None:
@@ -2819,6 +2839,9 @@ class GameEngine:
 
         if prompt:
             text, keyboard = prompt
+            zombie_team_text = self._zombie_team_private_text(player, alive)
+            if zombie_team_text:
+                text = f"{zombie_team_text}\n\n{text}"
             prompt_message = await self._safe_send_message(bot, telegram_id, text, reply_markup=keyboard)
             if prompt_message is not None:
                 await self._remember_night_prompt(
@@ -2828,16 +2851,27 @@ class GameEngine:
                     message_id=prompt_message.message_id,
                 )
         elif is_night and is_alive:
+            zombie_team_text = self._zombie_team_private_text(player, alive)
             await self._safe_send_message(
                 bot,
                 telegram_id,
-                "🌚 Bu tun uchun faol tanlov mavjud emas yoki tanlovingiz allaqachon qabul qilingan.",
+                (
+                    f"{zombie_team_text}\n\n"
+                    "🌚 Bu tun uchun faol tanlov mavjud emas yoki tanlovingiz allaqachon qabul qilingan."
+                    if zombie_team_text
+                    else "🌚 Bu tun uchun faol tanlov mavjud emas yoki tanlovingiz allaqachon qabul qilingan."
+                ),
             )
         else:
+            zombie_team_text = self._zombie_team_private_text(player, alive)
             await self._safe_send_message(
                 bot,
                 telegram_id,
-                "🎭 Rolingiz o'yin boshida bir marta yuborilgan. Hozir faol tanlov bosqichi emas.",
+                (
+                    f"{zombie_team_text}\n\n🎭 Rolingiz o'yin boshida bir marta yuborilgan. Hozir faol tanlov bosqichi emas."
+                    if zombie_team_text
+                    else "🎭 Rolingiz o'yin boshida bir marta yuborilgan. Hozir faol tanlov bosqichi emas."
+                ),
             )
         return True, "Bot private chatiga kerakli ma'lumot yuborildi."
 
@@ -3056,11 +3090,27 @@ class GameEngine:
                 if target_id is not None and actor_id != target_id:
                     arson_marks[actor_id].add(target_id)
 
+        chat_id = await self._game_chat_id(game_id)
         for player in alive:
             prompt = self._night_prompt_for_player(game_id, night, player, alive, miner_visits, arson_marks)
             if prompt is None:
+                zombie_team_text = self._zombie_team_private_text(player, alive)
+                if zombie_team_text:
+                    try:
+                        await bot.send_message(
+                            player.telegram_id,
+                            zombie_team_text,
+                            reply_markup=await self.group_return_keyboard(bot, chat_id),
+                        )
+                    except TelegramForbiddenError:
+                        await self._safe_send_message(bot, chat_id, f"{player.display_name}: /start orqali botga kiring.")
+                    except Exception:
+                        logger.exception("Failed to send zombie team list game_id=%s user_id=%s", game_id, player.telegram_id)
                 continue
             text, keyboard = prompt
+            zombie_team_text = self._zombie_team_private_text(player, alive)
+            if zombie_team_text:
+                text = f"{zombie_team_text}\n\n{text}"
 
             try:
                 prompt_message = await bot.send_message(player.telegram_id, text, reply_markup=keyboard)
@@ -3071,7 +3121,6 @@ class GameEngine:
                     message_id=prompt_message.message_id,
                 )
             except TelegramForbiddenError:
-                chat_id = (await self._game_chat_id(game_id))
                 await self._safe_send_message(bot, chat_id, f"{player.display_name}: /start orqali botga kiring.")
             except Exception:
                 logger.exception("Failed to send night prompt game_id=%s user_id=%s", game_id, player.telegram_id)
@@ -3131,6 +3180,7 @@ class GameEngine:
             vaccine_lines: list[str] = []
             vaccine_private_lines: list[tuple[int, str]] = []
             scan_results: list[tuple[int, str]] = []
+            zombie_team_changed = False
             for action in actions:
                 if action.action_type != ActionType.VACCINATE.value or not action.target_telegram_id:
                     continue
@@ -3141,13 +3191,14 @@ class GameEngine:
                 if actor.role != Role.VACCINATOR.value or action.actor_telegram_id in quarantined_ids:
                     continue
                 if target.role == Role.BOSS_ZOMBIE.value:
-                    vaccine_private_lines.append((actor.telegram_id, "💉 Vaktsina Boss Zombiega ta'sir qilmadi."))
+                    vaccine_private_lines.append((actor.telegram_id, "💉 Vaktsina bu safar ta'sir qilmadi."))
                     continue
                 if target.team == Team.ZOMBIE.value:
                     target.role = Role.HUMAN.value
                     target.team = Team.CITY.value
                     target.transformed_to_role = Role.HUMAN.value
                     target.transformed_to_team = Team.CITY.value
+                    zombie_team_changed = True
                     vaccine_lines.append(
                         f"💉 Vaktsina ishladi: {self._tg_mention(target.telegram_id, target.display_name)} yana insonlar tarafiga qaytdi."
                     )
@@ -3208,6 +3259,7 @@ class GameEngine:
                 target.team = Team.ZOMBIE.value
                 target.transformed_to_role = Role.ZOMBIE.value
                 target.transformed_to_team = Team.ZOMBIE.value
+                zombie_team_changed = True
                 actor.inactive_rounds = 0
                 self._add_activity_points(session, game, actor, 10, "zombie_infect")
                 self._add_game_log(
@@ -3259,9 +3311,23 @@ class GameEngine:
             infected_notice = (
                 "🦠 Virus tarqalmadi. Insonlar bu tongni omon kutib oldi."
                 if infected_player is None
-                else "🦠 Boss Zombie tunda kimnidir virus bilan o'z tarafiga o'tkazdi."
+                else "🦠 Tunda virus tarqaldi. Kimdir zombi tarafga o'tdi."
             )
             infected_private_id = infected_player.telegram_id if infected_player else None
+            zombie_team_private_lines: list[tuple[int, str]] = []
+            if zombie_team_changed:
+                current_zombies = [
+                    player
+                    for player in player_map.values()
+                    if player.alive and player.team == Team.ZOMBIE.value
+                ]
+                for zombie in current_zombies:
+                    zombie_team_text = self._zombie_team_private_text(zombie, current_zombies)
+                    if zombie_team_text:
+                        zombie_team_private_lines.append((
+                            zombie.telegram_id,
+                            f"🦠 <b>Zombi safi yangilandi</b>\n\n{zombie_team_text}",
+                        ))
             private_notices = list(vaccine_private_lines) + list(immune_private_lines) + list(scan_results)
             group_lines = vaccine_lines + blocked_infection_lines
 
@@ -3295,6 +3361,15 @@ class GameEngine:
                 await bot.send_message(
                     infected_private_id,
                     "🦠 Sizga virus yuqdi. Endi siz 🧟 <b>Zombie</b> tarafidasiz!",
+                    reply_markup=await self.group_return_keyboard(bot, chat_id),
+                )
+            except TelegramForbiddenError:
+                pass
+        for telegram_id, text in zombie_team_private_lines:
+            try:
+                await bot.send_message(
+                    telegram_id,
+                    text,
                     reply_markup=await self.group_return_keyboard(bot, chat_id),
                 )
             except TelegramForbiddenError:

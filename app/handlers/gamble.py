@@ -210,8 +210,22 @@ async def _daily_gamble_winnings(user_telegram_id: int) -> int:
 
 
 async def _daily_gamble_limit_reached(user_telegram_id: int) -> tuple[bool, int]:
+    if await _is_vip_user_active(user_telegram_id):
+        return False, 0
     total = await _daily_gamble_winnings(user_telegram_id)
     return total >= DAILY_GAMBLE_WIN_LIMIT, total
+
+
+async def _is_vip_user_active(user_telegram_id: int) -> bool:
+    async with SessionLocal() as session:
+        vip_until = await session.scalar(select(User.vip_until).where(User.telegram_id == int(user_telegram_id)))
+    if vip_until is None:
+        return False
+    if vip_until.tzinfo is None:
+        vip_until = vip_until.replace(tzinfo=timezone.utc)
+    else:
+        vip_until = vip_until.astimezone(timezone.utc)
+    return vip_until > datetime.now(timezone.utc)
 
 
 async def _check_daily_limit_message(message: Message) -> bool:
