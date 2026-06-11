@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>World Mafia Bot — Telegram Mafia Platformasi</title>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Oswald:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070608;--red:#c1121f;--gold:#c9a227;--txt:#e8e2d6;--mut:#8d8478;--line:rgba(201,162,39,.18)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--txt);font-family:'Oswald',sans-serif;overflow-x:hidden}
+::selection{background:var(--red);color:#fff}
+
+/* ---- fon qatlamlari ---- */
+#bgvid{position:fixed;inset:0;z-index:0;width:100%;height:100%;object-fit:cover;opacity:.28;filter:saturate(.4) contrast(1.15)}
+#fx{position:fixed;inset:0;z-index:1;pointer-events:none}
+#three{position:fixed;inset:0;z-index:2;pointer-events:none}
+.spot{position:fixed;inset:0;z-index:3;pointer-events:none;background:radial-gradient(430px circle at var(--sx,50%) var(--sy,30%),rgba(201,162,39,.07),transparent 70%)}
+.grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.07;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation:gr .4s steps(2) infinite}
+@keyframes gr{50%{transform:translate(2px,-2px)}}
+.vig{position:fixed;inset:0;z-index:59;pointer-events:none;background:radial-gradient(ellipse at center,transparent 42%,rgba(0,0,0,.88))}
+#flash{position:fixed;inset:0;z-index:58;pointer-events:none;background:#fff;opacity:0}
+
+#loader{position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+#loader h2{font-family:'Cinzel';font-weight:900;font-size:clamp(2rem,8vw,4rem);letter-spacing:.4em;animation:flick 2s infinite}
+@keyframes flick{0%,100%{opacity:1}8%{opacity:.3}10%{opacity:1}42%{opacity:.5}44%{opacity:1}}
+#loader p{color:var(--red);letter-spacing:.5em;font-size:.7rem;text-transform:uppercase}
+#loader svg{width:60px;height:60px;stroke:var(--gold)}
+
+.ic{width:1.2em;height:1.2em;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.22em}
+
+nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;justify-content:space-between;align-items:center;padding:16px 5vw;background:linear-gradient(180deg,rgba(7,6,8,.92),rgba(7,6,8,.5) 80%,transparent);backdrop-filter:blur(8px)}
+.logo{font-family:'Cinzel';font-weight:900;font-size:1.05rem;letter-spacing:.18em;display:flex;align-items:center;gap:10px}
+.logo b{color:var(--red)}.logo svg{width:26px;height:26px;stroke:var(--gold)}
+nav ul{display:flex;gap:26px;list-style:none}
+nav a{color:var(--mut);text-decoration:none;font-size:.78rem;letter-spacing:.25em;text-transform:uppercase;transition:.3s}
+nav a:hover{color:var(--gold)}
+@media(max-width:860px){nav ul{display:none}}
+
+main{position:relative;z-index:10}
+section{padding:120px 5vw;max-width:1280px;margin:0 auto}
+.tag{color:var(--red);letter-spacing:.45em;font-size:.7rem;text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.tag svg{width:18px;height:18px;stroke:var(--red)}
+.title{font-family:'Cinzel';font-weight:700;font-size:clamp(1.7rem,4.5vw,3rem);margin-bottom:46px;letter-spacing:.04em}
+.title b{color:var(--gold)}
+.rv{opacity:0;transform:translateY(46px)}
+
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;max-width:none;padding:0 5vw;text-align:center;align-items:center;position:relative}
+.hero .hat{width:clamp(60px,9vw,96px);height:auto;stroke:var(--gold);filter:drop-shadow(0 0 18px rgba(201,162,39,.45));margin-bottom:18px}
+.hero .pre{letter-spacing:.6em;color:var(--gold);font-size:clamp(.62rem,1.6vw,.85rem);text-transform:uppercase;margin-bottom:22px}
+.hero h1{font-family:'Cinzel';font-weight:900;font-size:clamp(2.4rem,9.5vw,7rem);line-height:1.02;letter-spacing:.05em}
+.hero h1 .w{display:inline-block;overflow:hidden;vertical-align:top}
+.hero h1 .c{display:inline-block;transform:translateY(115%)}
+.hero h1 .red .c{color:var(--red);text-shadow:0 0 40px rgba(193,18,31,.55)}
+.hero .sub{margin-top:26px;color:var(--mut);font-weight:300;font-size:clamp(.95rem,2vw,1.18rem);max-width:660px;line-height:1.8}
+.hero .cta{margin-top:42px;display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.btn{padding:16px 38px;text-decoration:none;font-size:.8rem;letter-spacing:.3em;text-transform:uppercase;transition:.35s;display:inline-flex;align-items:center;gap:10px}
+.btn svg{width:18px;height:18px}
+.btn.f{background:var(--red);color:#fff}
+.btn.f:hover{box-shadow:0 0 40px rgba(193,18,31,.6);transform:translateY(-3px)}
+.btn.o{border:1px solid var(--line);color:var(--gold)}
+.btn.o:hover{border-color:var(--gold);box-shadow:0 0 25px rgba(201,162,39,.25);transform:translateY(-3px)}
+.langs{position:absolute;bottom:0;left:0;right:0;border-top:1px solid var(--line);padding:18px 0;overflow:hidden}
+.langs .trk{display:flex;gap:54px;width:max-content;will-change:transform}
+.langs span{color:var(--mut);font-size:.8rem;letter-spacing:.3em;text-transform:uppercase;white-space:nowrap}
+.langs span::before{content:'✦  ';color:var(--red)}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:18px}
+.stat{border:1px solid var(--line);padding:28px 18px;text-align:center;background:rgba(13,11,14,.7);transition:.35s}
+.stat:hover{border-color:var(--red);transform:translateY(-6px)}
+.stat svg{width:30px;height:30px;stroke:var(--red);margin-bottom:12px}
+.stat .n{font-family:'Cinzel';font-weight:900;font-size:2.1rem;color:var(--gold)}
+.stat .l{color:var(--mut);font-size:.72rem;letter-spacing:.25em;text-transform:uppercase;margin-top:6px}
+
+.steps{position:relative;padding-left:34px}
+.steps::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.step{position:relative;margin-bottom:30px;color:var(--mut);font-weight:300;font-size:1rem;line-height:1.7}
+.step b{color:var(--txt);font-weight:500}
+.step::before{content:'';position:absolute;left:-30px;top:8px;width:9px;height:9px;background:var(--red);transform:rotate(45deg);box-shadow:0 0 14px rgba(193,18,31,.8)}
+
+.modes,.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:20px}
+.mode{border:1px solid var(--line);background:rgba(13,11,14,.72);padding:32px 26px;position:relative;overflow:hidden;transition:.35s}
+.mode::after{content:'';position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--red);transition:.5s}
+.mode:hover{transform:translateY(-7px);border-color:rgba(193,18,31,.5)}
+.mode:hover::after{width:100%}
+.mode svg{width:34px;height:34px;stroke:var(--gold)}
+.mode .pl{color:var(--gold);font-size:.7rem;letter-spacing:.3em;margin-top:14px}
+.mode h3{font-family:'Cinzel';font-size:1.25rem;margin:10px 0}
+.mode p{color:var(--mut);font-weight:300;font-size:.92rem;line-height:1.7}
+
+.tabs{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:38px}
+.tab{padding:12px 24px;border:1px solid var(--line);background:none;color:var(--mut);font-family:'Oswald';font-size:.78rem;letter-spacing:.22em;text-transform:uppercase;cursor:pointer;transition:.3s;display:inline-flex;align-items:center;gap:8px}
+.tab svg{width:17px;height:17px}
+.tab.on{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 24px rgba(193,18,31,.4)}
+.role{border:1px solid var(--line);background:rgba(13,11,14,.72);padding:24px 22px;transition:.35s}
+.role:hover{border-color:var(--gold);transform:translateY(-5px);box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.role h4{font-family:'Cinzel';color:var(--gold);font-size:1rem;margin-bottom:10px}
+.role p{color:var(--mut);font-weight:300;font-size:.88rem;line-height:1.65}
+
+.split{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+@media(max-width:860px){.split{grid-template-columns:1fr}}
+.panel{border:1px solid var(--line);background:rgba(13,11,14,.72);padding:34px 28px}
+.panel h3{font-family:'Cinzel';font-size:1.2rem;margin-bottom:16px;display:flex;align-items:center;gap:10px}
+.panel h3 svg{width:24px;height:24px;stroke:var(--red)}
+.panel p,.panel li{color:var(--mut);font-weight:300;font-size:.95rem;line-height:1.8}
+.panel ul{list-style:none}
+.panel li::before{content:'— ';color:var(--red)}
+.panel b{color:var(--txt)}
+
+.cmds{display:flex;flex-wrap:wrap;gap:10px}
+.cmds code{font-family:'Oswald';font-weight:300;border:1px solid var(--line);color:var(--gold);padding:8px 16px;font-size:.85rem;transition:.3s;cursor:default}
+.cmds code:hover{border-color:var(--red);color:#fff;background:rgba(193,18,31,.15)}
+.cgrp{margin-bottom:26px}
+.cgrp .gl{color:var(--mut);font-size:.72rem;letter-spacing:.35em;text-transform:uppercase;margin-bottom:12px}
+
+.fin{text-align:center;max-width:none}
+.fin h2{font-family:'Cinzel';font-weight:900;font-size:clamp(2rem,7vw,5rem);line-height:1.1}
+.fin h2 em{font-style:normal;color:var(--red);text-shadow:0 0 36px rgba(193,18,31,.6)}
+.fin p{color:var(--mut);margin-top:20px;font-weight:300}
+footer{position:relative;z-index:10;text-align:center;padding:34px;color:var(--mut);font-size:.72rem;letter-spacing:.3em;text-transform:uppercase;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<!-- SVG IKONKALAR KUTUBXONASI (oddiy emoji o'rniga) -->
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+ <symbol id="i-hat" viewBox="0 0 64 40"><path d="M4 30 Q32 38 60 30 M4 30 Q10 26 16 25 L18 12 Q19 6 32 6 Q45 6 46 12 L48 25 Q54 26 60 30"/><path d="M16 25 Q32 30 48 25"/><path d="M19 16 Q32 20 45 16" stroke-opacity=".5"/></symbol>
+ <symbol id="i-gun" viewBox="0 0 64 40"><path d="M6 12 H52 V20 H30 L26 32 H14 L18 20 H10 Q6 20 6 16 Z M52 12 L58 10 V14 Z"/><circle cx="22" cy="16" r="1.6"/></symbol>
+ <symbol id="i-gem" viewBox="0 0 48 44"><path d="M12 4 H36 L44 16 L24 40 L4 16 Z M12 4 L24 16 L36 4 M4 16 H44 M24 16 V40"/></symbol>
+ <symbol id="i-skull" viewBox="0 0 48 48"><path d="M24 4 Q40 4 40 20 Q40 28 35 31 V38 H13 V31 Q8 28 8 20 Q8 4 24 4 Z"/><circle cx="17" cy="20" r="4"/><circle cx="31" cy="20" r="4"/><path d="M24 26 L22 30 H26 Z M18 38 V42 M24 38 V42 M30 38 V42"/></symbol>
+ <symbol id="i-card" viewBox="0 0 40 52"><rect x="4" y="4" width="32" height="44" rx="3"/><path d="M20 16 Q26 22 20 30 Q14 22 20 16 Z M20 30 L20 36"/></symbol>
+ <symbol id="i-coin" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"/><circle cx="24" cy="24" r="15" stroke-opacity=".5"/><path d="M24 12 V36 M29 17 Q24 13 20 17 Q16 21 24 24 Q32 27 28 31 Q24 35 19 31"/></symbol>
+ <symbol id="i-crown" viewBox="0 0 52 40"><path d="M6 32 L4 10 L16 20 L26 6 L36 20 L48 10 L46 32 Z M6 36 H46"/></symbol>
+ <symbol id="i-dice" viewBox="0 0 44 44"><rect x="4" y="4" width="36" height="36" rx="6"/><circle cx="14" cy="14" r="2.4" fill="currentColor"/><circle cx="30" cy="14" r="2.4" fill="currentColor"/><circle cx="22" cy="22" r="2.4" fill="currentColor"/><circle cx="14" cy="30" r="2.4" fill="currentColor"/><circle cx="30" cy="30" r="2.4" fill="currentColor"/></symbol>
+ <symbol id="i-eye" viewBox="0 0 52 32"><path d="M4 16 Q26 -6 48 16 Q26 38 4 16 Z"/><circle cx="26" cy="16" r="6"/></symbol>
+ <symbol id="i-shield" viewBox="0 0 44 52"><path d="M22 4 L40 10 V26 Q40 42 22 48 Q4 42 4 26 V10 Z"/><path d="M14 24 L20 30 L31 18"/></symbol>
+ <symbol id="i-bio" viewBox="0 0 48 48"><circle cx="24" cy="24" r="6"/><path d="M24 4 V14 M24 34 V44 M6.7 14 L15.3 19 M32.7 29 L41.3 34 M6.7 34 L15.3 29 M32.7 19 L41.3 14" /></symbol>
+ <symbol id="i-tg" viewBox="0 0 48 48"><path d="M42 8 L6 22 L17 26 L20 38 L26 30 L36 38 Z M17 26 L36 14"/></symbol>
+ <symbol id="i-gear" viewBox="0 0 48 48"><circle cx="24" cy="24" r="8"/><path d="M24 2 V10 M24 38 V46 M2 24 H10 M38 24 H46 M8 8 L14 14 M34 34 L40 40 M40 8 L34 14 M14 34 L8 40"/></symbol>
+ <symbol id="i-users" viewBox="0 0 52 40"><circle cx="18" cy="13" r="8"/><path d="M4 36 Q4 26 18 26 Q32 26 32 36"/><circle cx="38" cy="15" r="6"/><path d="M34 26 Q48 26 48 35"/></symbol>
+ <symbol id="i-globe" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"/><path d="M4 24 H44 M24 4 Q34 24 24 44 Q14 24 24 4"/></symbol>
+</svg>
+
+<div id="loader"><svg class="ic"><use href="#i-hat"/></svg><h2>MAFIA</h2><p>Shahar uxlayapti...</p></div>
+
+<!-- VIDEO FON: bg.mp4 faylini index.html yoniga qo'ying (noir tutun/yomg'ir loop) -->
+<video id="bgvid" autoplay muted loop playsinline>
+  <source src="bg.mp4" type="video/mp4">
+</video>
+<canvas id="fx"></canvas>
+<canvas id="three"></canvas>
+<div class="spot"></div><div class="grain"></div><div class="vig"></div><div id="flash"></div>
+
+<nav>
+  <div class="logo"><svg><use href="#i-hat"/></svg>WORLD <b>MAFIA</b></div>
+  <ul>
+    <li><a href="#about">Bot haqida</a></li>
+    <li><a href="#modes">Rejimlar</a></li>
+    <li><a href="#roles">Rollar</a></li>
+    <li><a href="#econ">Iqtisodiyot</a></li>
+    <li><a href="#cmds">Buyruqlar</a></li>
+  </ul>
+</nav>
+
+<main>
+<section class="hero">
+  <svg class="hat" viewBox="0 0 64 40" fill="none" stroke-width="1.4"><use href="#i-hat"/></svg>
+  <div class="pre">Telegram guruhlari uchun · @worldmafiabot</div>
+  <h1 id="h1"><span class="w" data-t="WORLD"></span><br><span class="w red" data-t="MAFIA BOT"></span></h1>
+  <p class="sub">Rollarni avtomatik tarqatadigan, tun va kunduzni boshqaradigan, iqtisodiyot, turnirlar va mini-o‘yinlarga ega kengaytirilgan Mafia platformasi.</p>
+  <div class="cta">
+    <a class="btn f" href="https://t.me/worldmafiabot" target="_blank"><svg class="ic"><use href="#i-tg"/></svg>O‘yinni boshlash</a>
+    <a class="btn o" href="#roles"><svg class="ic"><use href="#i-card"/></svg>Rollarni ko‘rish</a>
+  </div>
+  <div class="langs"><div class="trk" id="langs">
+    <span>O‘zbek</span><span>Русский</span><span>English</span><span>Türkçe</span><span>Azərbaycan</span><span>Українська</span><span>Қазақша</span><span>Indonesia</span>
+  </div></div>
+</section>
+
+<section id="about">
+  <div class="tag rv"><svg><use href="#i-eye"/></svg>Dossier № 01</div>
+  <h2 class="title rv">BOT <b>HAQIDA</b></h2>
+  <div class="stats">
+    <div class="stat rv"><svg class="ic"><use href="#i-globe"/></svg><div class="n" data-c="8">0</div><div class="l">Til</div></div>
+    <div class="stat rv"><svg class="ic"><use href="#i-dice"/></svg><div class="n" data-c="6">0</div><div class="l">O‘yin rejimi</div></div>
+    <div class="stat rv"><svg class="ic"><use href="#i-card"/></svg><div class="n" data-c="39">0</div><div class="l">Rol</div></div>
+    <div class="stat rv"><svg class="ic"><use href="#i-users"/></svg><div class="n" data-c="50">0</div><div class="l">O‘yinchigacha</div></div>
+  </div>
+  <div style="margin-top:46px" class="split">
+    <div class="panel rv"><h3><svg><use href="#i-gun"/></svg>O‘yin jarayoni</h3>
+      <div class="steps" style="margin-top:18px">
+        <div class="step rv"><b>/game</b> orqali guruhda ro‘yxatdan o‘tish boshlanadi, ishtirokchilar tugma orqali qo‘shiladi.</div>
+        <div class="step rv">Rollar botning <b>shaxsiy chatida maxfiy</b> tarqatiladi.</div>
+        <div class="step rv"><b>Tunda</b> faol rollar o‘z harakatini bajaradi.</div>
+        <div class="step rv"><b>Kunduzi</b> natijalar muhokama qilinadi, gumondor tanlanadi va osish uchun ovoz beriladi.</div>
+        <div class="step rv">G‘olib jamoa aniqlanguncha <b>tun va kunduz almashadi</b>. Ro‘yxat xabari avtomatik yopiladi va pindan olinadi.</div>
+      </div>
+    </div>
+    <div class="panel rv"><h3><svg><use href="#i-crown"/></svg>Nega aynan shu bot?</h3>
+      <ul>
+        <li>To‘liq avtomatik boshqaruv: tun, muhokama, ovoz berish</li>
+        <li>8 tilda interfeys</li>
+        <li>Iqtisodiyot: dollar, olmos, do‘kon, VIP</li>
+        <li>Turnir, Team Game va Para tizimi</li>
+        <li>Geroylar va haftalik TOP reytingi</li>
+        <li>Virtual mini-o‘yinlar to‘plami</li>
+        <li>Moslashuvchan /settings boshqaruvi</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="modes">
+  <div class="tag rv"><svg><use href="#i-dice"/></svg>Dossier № 02</div>
+  <h2 class="title rv">O‘YIN <b>REJIMLARI</b></h2>
+  <div class="modes" id="modesGrid"></div>
+</section>
+
+<section id="roles">
+  <div class="tag rv"><svg><use href="#i-card"/></svg>Dossier № 03</div>
+  <h2 class="title rv">ROLLAR <b>KARTOTEKASI</b></h2>
+  <div class="tabs rv" id="tabs"></div>
+  <div class="cards" id="rolesGrid"></div>
+</section>
+
+<section id="econ">
+  <div class="tag rv"><svg><use href="#i-coin"/></svg>Dossier № 04</div>
+  <h2 class="title rv">PROFIL VA <b>IQTISODIYOT</b></h2>
+  <div class="split">
+    <div class="panel rv"><h3><svg><use href="#i-coin"/></svg>Profil va Do‘kon</h3>
+      <p><b>/profile</b> orqali dollar, olmos, g‘alabalar, o‘yinlar soni, VIP muddati, himoyalar, maska, soxta hujjat va keyingi rol ko‘rinadi.</p><br>
+      <ul>
+        <li>Do‘konda: himoya, qotildan himoya, ovoz himoyasi, doridan himoya, sirpanishdan himoya, maska, geroy, VIP va keyingi o‘yin rollari</li>
+        <li>Sotib olingan rol bir marta ishlatiladi; o‘yinchi yetmasa keyingi mos o‘yinga saqlanadi</li>
+        <li>Standart mukofot: g‘olibga 15$, mag‘lubga 10$</li>
+        <li>Yangiliklar kanaliga obuna — mukofot ×2</li>
+      </ul>
+    </div>
+    <div class="panel rv"><h3><svg><use href="#i-crown"/></svg>Qo‘shimcha tizimlar</h3>
+      <ul>
+        <li><b>Geroylar:</b> bir nechta geroyga egalik, kuchaytirish, nom o‘zgartirish, jangda ishlatish va sovg‘a qilish</li>
+        <li><b>Para:</b> reply orqali taklif, sheriklik muddati va uzish imkoniyati</li>
+        <li><b>Haftalik TOP:</b> faol tungi harakat — 10 ball, geroy bilan chiqarilgan o‘yinchi — 30 ball</li>
+        <li><b>VIP:</b> 30 kun — 30 olmos yoki 190 Stars; sovg‘alar, Premium xaridlar, qimor limitlaridan ozodlik</li>
+      </ul>
+    </div>
+    <div class="panel rv"><h3><svg><use href="#i-dice"/></svg>Virtual mini-o‘yinlar</h3>
+      <ul>
+        <li><b>Qurbaqa Yo‘li:</b> 5×8 maydonda xavfli kataklardan qochish, yutuqni istalgan vaqtda olish</li>
+        <li><b>Mines:</b> 6×6 maydonda yakka yoki ikki kishilik mina o‘yini</li>
+        <li><b>Treasure Hunt:</b> 2–10 kishilik survival, har raund 20 soniya, 5 ta mina ko‘chib yuradi</li>
+        <li>Roulette va Chicken Road — vaqtincha faolsiz</li>
+        <li>Barchasi faqat virtual dollar bilan ishlaydi</li>
+      </ul>
+    </div>
+    <div class="panel rv"><h3><svg><use href="#i-gear"/></svg>Guruh sozlamalari</h3>
+      <p>Guruh adminlari <b>/settings</b> orqali o‘yin turi, vaqtlar, admin tasdiqi, rollar, himoyalar, /leave bloki, chat cheklovlari, buyruq ruxsatlari, pin, avto-tozalash va natija e’lonlarini boshqaradi.</p>
+    </div>
+  </div>
+</section>
+
+<section id="cmds">
+  <div class="tag rv"><svg><use href="#i-gear"/></svg>Dossier № 05</div>
+  <h2 class="title rv">ASOSIY <b>BUYRUQLAR</b></h2>
+  <div id="cmdWrap"></div>
+</section>
+
+<section class="fin">
+  <h2 class="rv">SHAHAR <em>UYG‘ONMOQDA.</em></h2>
+  <p class="rv">Guruhing tayyor bo‘lsa — o‘yin boshlansin.</p>
+  <div class="cta rv" style="margin-top:40px;display:flex;justify-content:center">
+    <a class="btn f" href="https://t.me/worldmafiabot" target="_blank"><svg class="ic"><use href="#i-tg"/></svg>@worldmafiabot</a>
+  </div>
+</section>
+</main>
+
+<footer>© 2026 World Mafia Bot — Orifjon Alisherov</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script>
+gsap.registerPlugin(ScrollTrigger);
+const mob=matchMedia('(max-width:860px)').matches;
+
+/* ===== THREE.JS — 3D OBYEKTLAR ===== */
+const tcv=document.getElementById('three');
+const ren=new THREE.WebGLRenderer({canvas:tcv,alpha:true,antialias:!mob});
+ren.setSize(innerWidth,innerHeight);ren.setPixelRatio(Math.min(devicePixelRatio,mob?1.5:2));
+const scn=new THREE.Scene();scn.fog=new THREE.FogExp2(0x070608,.018);
+const cam=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,.1,200);cam.position.z=30;
+const GOLD=0xc9a227,RED=0xc1121f;
+const objs=[];
+function add(geo,col,op,x,y,z,sp){
+  const m=new THREE.Mesh(geo,new THREE.MeshBasicMaterial({color:col,wireframe:true,transparent:true,opacity:op}));
+  m.position.set(x,y,z);m.userData={sp,ph:Math.random()*7,y0:y};scn.add(m);objs.push(m);return m;
+}
+/* olmoslar */
+const ND=mob?4:7;
+for(let i=0;i<ND;i++)add(new THREE.OctahedronGeometry(1.4+Math.random()),GOLD,.5,(Math.random()-.5)*46,(Math.random()-.5)*26,-6-Math.random()*22,.3+Math.random()*.5);
+/* tangalar */
+for(let i=0;i<(mob?2:4);i++)add(new THREE.CylinderGeometry(1.5,1.5,.22,22),GOLD,.35,(Math.random()-.5)*40,(Math.random()-.5)*22,-8-Math.random()*18,.4+Math.random()*.4);
+/* kartalar */
+for(let i=0;i<(mob?2:4);i++)add(new THREE.PlaneGeometry(2.2,3.2,2,3),RED,.4,(Math.random()-.5)*42,(Math.random()-.5)*24,-7-Math.random()*20,.25+Math.random()*.4);
+/* markaziy qizil halqa */
+const ring=add(new THREE.TorusGeometry(7,.05,8,90),RED,.3,0,0,-14,.1);
+let mx=0,my=0;
+if(!mob)addEventListener('mousemove',e=>{mx=e.clientX/innerWidth-.5;my=e.clientY/innerHeight-.5;
+  document.querySelector('.spot').style.setProperty('--sx',e.clientX+'px');
+  document.querySelector('.spot').style.setProperty('--sy',e.clientY+'px');
+});
+const clk=new THREE.Clock();
+(function loop3d(){
+  requestAnimationFrame(loop3d);
+  const t=clk.getElapsedTime();
+  objs.forEach(o=>{
+    o.rotation.x=t*o.userData.sp*.6;o.rotation.y=t*o.userData.sp;
+    o.position.y=o.userData.y0+Math.sin(t*.7+o.userData.ph)*1.6;
+  });
+  ring.rotation.x=Math.PI/2.4;ring.rotation.z=t*.15;
+  cam.position.x+=(mx*5-cam.position.x)*.04;
+  cam.position.y+=(-my*5-cam.position.y)*.04;
+  cam.lookAt(0,0,-10);
+  ren.render(scn,cam);
+})();
+addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();ren.setSize(innerWidth,innerHeight)});
+/* scroll bilan kamera orqaga uchadi */
+gsap.to(cam.position,{z:46,scrollTrigger:{trigger:'main',start:'top top',end:'bottom bottom',scrub:1.2}});
+
+/* ===== TUTUN + UCHQUNLAR ===== */
+const cv=document.getElementById('fx'),cx=cv.getContext('2d');
+let W,H;function rs(){W=cv.width=innerWidth;H=cv.height=innerHeight}rs();addEventListener('resize',rs);
+const smoke=[],emb=[];
+for(let i=0;i<(mob?6:12);i++)smoke.push({x:Math.random()*W,y:H*.4+Math.random()*H*.7,r:140+Math.random()*220,vx:.08+Math.random()*.2,o:.02+Math.random()*.04,p:Math.random()*7});
+for(let i=0;i<(mob?16:40);i++)emb.push({x:Math.random()*W,y:Math.random()*H,s:.6+Math.random()*1.8,vy:.15+Math.random()*.5,vx:(Math.random()-.5)*.3,o:.2+Math.random()*.5,p:Math.random()*7});
+let tm=0;
+(function draw(){
+  requestAnimationFrame(draw);tm+=.008;cx.clearRect(0,0,W,H);
+  smoke.forEach(s=>{s.x+=s.vx;if(s.x-s.r>W)s.x=-s.r;
+    const y=s.y+Math.sin(tm+s.p)*22;
+    const g=cx.createRadialGradient(s.x,y,0,s.x,y,s.r);
+    g.addColorStop(0,`rgba(120,110,125,${s.o})`);g.addColorStop(1,'rgba(120,110,125,0)');
+    cx.fillStyle=g;cx.beginPath();cx.arc(s.x,y,s.r,0,7);cx.fill();});
+  emb.forEach(e=>{e.y-=e.vy;e.x+=e.vx+Math.sin(tm*2+e.p)*.2;
+    if(e.y<-10){e.y=H+10;e.x=Math.random()*W}
+    cx.fillStyle=`rgba(201,${120+Math.sin(tm*3+e.p)*40|0},39,${e.o*(0.6+Math.sin(tm*4+e.p)*.4)})`;
+    cx.beginPath();cx.arc(e.x,e.y,e.s,0,7);cx.fill();});
+})();
+(function bolt(){setTimeout(()=>{gsap.fromTo('#flash',{opacity:.12},{opacity:0,duration:.5});bolt()},7000+Math.random()*14000)})();
+
+/* ===== KONTENT ===== */
+const modes=[
+ ['i-hat','CLASSIC','4–30 o‘yinchi','Klassik va muvozanatli rollar taqsimoti.'],
+ ['i-gun','SUPER','4–40 o‘yinchi','Ko‘proq faol va maxsus rollarga ega tezkor rejim.'],
+ ['i-crown','MEGA','4–40 o‘yinchi','Deyarli barcha ishtirokchilarga faol vazifa beriladigan murakkab rejim.'],
+ ['i-skull','ZOMBIE','4–50 o‘yinchi','Boss Zombie insonlarga virus yuqtiradi, insonlar zombielarni ovoz berib yo‘q qiladi.'],
+ ['i-gem','TURNIR','Para egalari','Sheriklardan biri o‘lsa, ikkinchisi ham chiqadi; biri g‘olib bo‘lsa — ikkalasi g‘olib.'],
+ ['i-users','TEAM GAME','Ko‘k vs Qizil','Jamoa a’zosi g‘alaba shartini bajarsa, butun jamoa g‘olib bo‘ladi.']];
+document.getElementById('modesGrid').innerHTML=modes.map(m=>
+ `<div class="mode rv"><svg class="ic"><use href="#${m[0]}"/></svg><div class="pl">${m[2]}</div><h3>${m[1]}</h3><p>${m[3]}</p></div>`).join('');
+
+const roles={
+ 'Tinch aholi':['i-shield',[
+  ['Tinch aholi','Yashirin dushmanlarni muhokama va ovoz orqali topadi.'],
+  ['Komissar Katani','O‘yinchini tekshiradi yoki otadi.'],
+  ['Serjant','Komissar yordamchisi; Komissar o‘lsa, vazifasini davom ettiradi.'],
+  ['Doktor','Tunda o‘yinchini hujumdan qutqaradi.'],
+  ['Kezuvchi','Tashrif buyurgan o‘yinchining tungi harakatini bloklaydi.'],
+  ['Qo‘riqchi','Tanlangan o‘yinchini himoya qiladi.'],
+  ['Kuzatuvchi','Tanlangan o‘yinchining oldiga kimlar kelganini ko‘radi.'],
+  ['Sudya','O‘yinda bir marta kunduzgi hukmni bekor qiladi.'],
+  ['Daydi','Tashrif buyurgan uyda sodir bo‘lgan qotillik guvohiga aylanishi mumkin.'],
+  ['Afsungar','Tunda o‘ldirilsa qotilidan qasos oladi; osilsa bir o‘yinchini o‘zi bilan olib ketadi.'],
+  ['Omadli','Ayrim hujumlardan tasodifiy omon qolishi mumkin.'],
+  ['Sotqin','Don, Mafia yoki Qotilni topib, shaxsini oshkor qilmasdan xalqqa sotadi.'],
+  ['Janob','Kunduzgi ovozi ikki ovozga teng, shaxsi yashirin qoladi.'],
+  ['Mashka','Dollar yoki olmos o‘g‘irlaydi; balans yetmasa nishon jonining 50% ini oladi.']]],
+ 'Mafia':['i-gun',[
+  ['Don','Mafia rahbari va tungi nishonni belgilovchi.'],
+  ['Mafia','Donga bo‘ysunadi; Don o‘lsa, mafiyadan biri yangi Don bo‘ladi.'],
+  ['Advokat','Mafia a’zosini Komissar tekshiruvidan yashiradi.'],
+  ['Ayg‘oqchi','Mafia tomonida, ammo Komissarga tinch aholi bo‘lib ko‘rinadi.'],
+  ['Jurnalist','Nishonga kelganlarni ko‘rib, ma’lumotni mafiyaga uzatadi.'],
+  ['Yollanma qotil','Alohida hujum qiladi; Komissarga hujum qilsa o‘zi halok bo‘ladi.']]],
+ 'Mustaqil':['i-eye',[
+  ['Qotil','Barcha raqiblarni yo‘q qilib, yolg‘iz qolishga harakat qiladi.'],
+  ['Bo‘ri','Mafia hujumida Mafiyaga, Komissar hujumida Serjantga aylanadi; Qotildan o‘ladi.'],
+  ['Suidsid','Kunduzgi ovozda osilsa g‘olib bo‘ladi.'],
+  ['G‘azabkor','Uch o‘yinchini belgilab, o‘zini tanlasa barchasini yoqadi va g‘olib bo‘ladi.'],
+  ['Sehrgar','Don, Qotil yoki Komissar hujumini qaytarib, kechirish yoki o‘ldirishni tanlaydi.'],
+  ['Aferist','Nishonning ovoz berishdagi shaxsini vaqtincha almashtiradi.'],
+  ['Konchi','10 kondan birini tanlaydi: 3 o‘lim, 2 olmos va 5 dollarli kon.'],
+  ['Hazilkash','Tanlangan o‘yinchining tungi harakatini kulgili voqea bilan bekor qiladi.'],
+  ['Joker','4 kartadan o‘lim kartasini belgilaydi; nishon xato qilsa halok bo‘ladi.'],
+  ['Hojiaka','Himoya buyumi, dollar yoki olmos ehson qiladi; tirik qolsa g‘olib bo‘ladi.']]],
+ 'Zombie':['i-bio',[
+  ['Boss Zombie','Har tunda bitta insonni zombi tomoniga o‘tkazadi.'],
+  ['Zombie','Boss Zombie bilan birga insonlarni chalg‘itadi.'],
+  ['Qutqaruvchi','O‘yinchini virusdan himoya qiladi.'],
+  ['Virusolog','O‘yinchining inson yoki zombi ekanini tekshiradi.'],
+  ['Karantinchi','Nishonni virusdan saqlaydi va tungi yurishini bloklaydi.'],
+  ['Vaktsinator','Bir marta oddiy zombieni yana insonga aylantiradi.'],
+  ['Immunitetli','Birinchi virusdan omon qoladi, ikkinchisida zombiga aylanadi.'],
+  ['Mutant Zombie','Zombi sherigini Virusolog tekshiruvidan yashiradi.'],
+  ['Infektor','Juft tunlarda qo‘shimcha virus yuqtiradi.']]]};
+const tabsEl=document.getElementById('tabs'),grid=document.getElementById('rolesGrid');
+Object.keys(roles).forEach((k,i)=>{
+  const b=document.createElement('button');b.className='tab'+(i?'':' on');
+  b.innerHTML=`<svg class="ic"><use href="#${roles[k][0]}"/></svg>${k}`;
+  b.onclick=()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));b.classList.add('on');render(k)};
+  tabsEl.appendChild(b);
+});
+function render(k){
+  grid.innerHTML=roles[k][1].map(r=>`<div class="role"><h4>${r[0]}</h4><p>${r[1]}</p></div>`).join('');
+  gsap.from('.role',{opacity:0,y:32,duration:.55,stagger:.05,ease:'power3.out'});
+}
+render('Tinch aholi');
+
+const cmds=[
+ ['Umumiy','/start /profile /roles /commands /lang /top /shop /qimor /topq'],
+ ['Guruhda','/game /start /leave /extend /stop /turnir /teamgame /lastwords /settings /tep'],
+ ['Iqtisodiyot','/give /money /send /change /gsend'],
+ ['Para','/para /mypara /stats /unpara'],
+ ['Admin','/admin /you /geroyinfo /bust1 /bust2 /gbust']];
+document.getElementById('cmdWrap').innerHTML=cmds.map(g=>
+ `<div class="cgrp rv"><div class="gl">${g[0]}</div><div class="cmds">${g[1].split(' ').map(c=>`<code>${c}</code>`).join('')}</div></div>`).join('');
+
+/* ===== UI ANIMATSIYALAR ===== */
+document.querySelectorAll('#h1 .w').forEach(w=>{
+  w.innerHTML=[...w.dataset.t].map(c=>`<span class="c">${c==' '?'&nbsp;':c}</span>`).join('');
+});
+gsap.to('#loader',{opacity:0,duration:.8,delay:1.6,onComplete(){
+  loader.remove();
+  gsap.to('#h1 .c',{y:0,duration:1.1,ease:'power4.out',stagger:.045});
+  gsap.from('.hat,.pre,.sub,.hero .cta,.langs',{opacity:0,y:26,duration:1,stagger:.13,delay:.4,ease:'power3.out'});
+}});
+gsap.to('.hat',{y:-10,duration:2.4,yoyo:true,repeat:-1,ease:'sine.inOut'});
+const trk=document.getElementById('langs');trk.innerHTML+=trk.innerHTML;
+gsap.to(trk,{xPercent:-50,duration:26,repeat:-1,ease:'none'});
+document.querySelectorAll('.rv').forEach(el=>{
+  gsap.to(el,{opacity:1,y:0,duration:.95,ease:'power3.out',scrollTrigger:{trigger:el,start:'top 88%'}});
+});
+document.querySelectorAll('.n').forEach(el=>{
+  ScrollTrigger.create({trigger:el,start:'top 92%',once:true,
+    onEnter:()=>gsap.to(el,{innerText:el.dataset.c,duration:1.8,snap:{innerText:1},ease:'power2.out'})});
+});
+gsap.to('.hero',{opacity:.3,scale:.97,scrollTrigger:{trigger:'.hero',start:'top top',end:'bottom top',scrub:true}});
+</script>
+</body>
+</html>
