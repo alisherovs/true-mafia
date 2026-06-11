@@ -25,11 +25,12 @@ from app.keyboards import (
     settings_times_keyboard,
     settings_time_value_keyboard,
     settings_admin_confirm_keyboard,
-    settings_mode_keyboard,
+    settings_game_type_keyboard,
     settings_extra_keyboard,
     settings_extra_toggle_keyboard,
     settings_panel_keyboard,
 )
+from app.roles import role_preset_label, role_preset_max_players
 from app.texts import t
 
 router = Router()
@@ -66,8 +67,6 @@ CHAT_PERMISSION_LABELS: dict[str, str] = {
     "alive_players": "💚 Faqat tirik ishtirokchilar", "players": "🎮 Faqat ishtirokchilar", "all": "👥 Hamma",
 }
 
-MODE_LABELS: dict[str, str] = {"normal": "🎲 Oddiy", "fast": "⚡ Tezkor", "protected": "🛡 Himoyali", "hard": "🔥 Qiyin"}
-
 EXTRA_LABELS: dict[str, str] = {
     "notifications": "🔔 Bildirishnoma", "auto_clean": "🗑 Avto tozalash",
     "pin_message": "📌 Pin xabar", "result_announce": "📢 Natija e'loni",
@@ -86,6 +85,33 @@ def _leave_settings_text(allowed: bool, lock_minutes: int, notice: str = "") -> 
         f"Qayta qo'shilish bloki: <b>{lock_text}</b>\n\n"
         "O'yinchi /leave qilsa ro'yxatdan yoki o'yindan chiqariladi. "
         "Blok vaqti tugamaguncha u qayta ro'yxatdan o'ta olmaydi."
+    )
+
+
+def _normalized_game_type(preset: str | None) -> str:
+    return "classic" if preset in {None, "", "black23", "extended35"} else preset
+
+
+def _game_type_settings_text(preset: str | None, notice: str = "") -> str:
+    current = _normalized_game_type(preset)
+    prefix = f"{notice}\n\n" if notice else ""
+    return (
+        f"{prefix}"
+        "🎮 <b>O'yin turlari</b>\n\n"
+        f"Joriy tur: <b>{role_preset_label(current)}</b>\n"
+        f"O'yinchi limiti: <b>{role_preset_max_players(current)}</b> tagacha\n\n"
+        "Tanlangan tur ushbu guruh uchun doimiy saqlanadi. "
+        "Keyingi /game, /turnir va /teamgame o'yinlari shu turda boshlanadi.\n\n"
+        "Aktiv ro'yxatdan o'tish yoki davom etayotgan o'yin turi o'zgartirilmaydi."
+    )
+
+
+def _settings_main_text(preset: str | None) -> str:
+    current = role_preset_label(_normalized_game_type(preset))
+    return (
+        "⚙️ <b>Guruh sozlamalari</b>\n\n"
+        f"🎮 Joriy o'yin turi: <b>{current}</b>\n\n"
+        "Quyidagi bo'limlardan birini tanlang:"
     )
 
 
@@ -117,6 +143,32 @@ async def _deny_if_not_admin(callback: CallbackQuery, chat_id: int, engine: Game
     return True
 
 
+async def send_game_types_to_private(message: Message, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if message.chat.type == "private":
+        lang = await engine.get_user_language(message.from_user.id)
+        await message.answer(t(lang, "command_in_group"))
+        return
+    allowed = await _check_admin(message.bot, message.chat.id, message.from_user.id, engine)
+    if not allowed:
+        await message.reply("❌ O'yin turini faqat guruh administratori o'zgartira oladi.")
+        return
+
+    await engine.get_or_create_group(message.chat.id, message.chat.title or "Group")
+    group = await engine.group_settings(message.chat.id)
+    SETTINGS_CHAT_MAP[message.from_user.id] = message.chat.id
+    try:
+        await message.bot.send_message(
+            message.from_user.id,
+            _game_type_settings_text(group.role_preset),
+            reply_markup=settings_game_type_keyboard(group.role_preset),
+        )
+        await message.reply("🎮 O'yin turlari bot private chatiga yuborildi.")
+    except TelegramForbiddenError:
+        await message.reply("⚠️ O'yin turini sozlash uchun avval botga private chatda /start bosing.")
+
+
 @router.message(Command("settings"))
 async def cmd_settings(message: Message, engine: GameEngine) -> None:
     if message.chat.type == "private":
@@ -127,8 +179,10 @@ async def cmd_settings(message: Message, engine: GameEngine) -> None:
     if not allowed:
         await message.reply("❌ Sizda bu sozlamani o'zgartirish huquqi yo'q.")
         return
+    await engine.get_or_create_group(message.chat.id, message.chat.title or "Group")
+    group = await engine.group_settings(message.chat.id)
     SETTINGS_CHAT_MAP[message.from_user.id] = message.chat.id
-    text = "⚙️ <b>Guruh sozlamalari</b>\n\nQuyidagi bo'limlardan birini tanlang:"
+    text = _settings_main_text(group.role_preset)
     try:
         await message.bot.send_message(message.from_user.id, text, reply_markup=settings_main_keyboard())
         await message.reply("⚙️ Sozlamalar bot private chatiga yuborildi.")
@@ -156,7 +210,11 @@ async def settings_back(callback: CallbackQuery, engine: GameEngine) -> None:
     chat_id = _get_chat_id(callback)
     gsm = GroupSettingsManager(engine.session_factory)
     if target == "main":
-        await callback.message.edit_text("⚙️ <b>Guruh sozlamalari</b>\n\nQuyidagi bo'limlardan birini tanlang:", reply_markup=settings_main_keyboard())
+        group = await engine.group_settings(chat_id)
+        await callback.message.edit_text(
+            _settings_main_text(group.role_preset),
+            reply_markup=settings_main_keyboard(),
+        )
     elif target == "giveaway":
         await callback.message.edit_text("🎁 <b>Giveawaylar</b>\n\nQaysi giveaway turini sozlamoqchisiz?", reply_markup=settings_giveaway_keyboard())
     elif target == "roles":
@@ -179,6 +237,12 @@ async def settings_back(callback: CallbackQuery, engine: GameEngine) -> None:
         await callback.message.edit_text("✍️ <b>Yozishni cheklash</b>\n\nQaysi paytni sozlaymiz?", reply_markup=settings_chat_keyboard())
     elif target == "times":
         await callback.message.edit_text("⏰ <b>Vaqtlar</b>\n\nQaysi vaqtni sozlaysiz?", reply_markup=settings_times_keyboard())
+    elif target == "game_types":
+        group = await engine.group_settings(chat_id)
+        await callback.message.edit_text(
+            _game_type_settings_text(group.role_preset),
+            reply_markup=settings_game_type_keyboard(group.role_preset),
+        )
     elif target == "extra":
         states = await gsm.get_all_extra(chat_id)
         await callback.message.edit_text("⚙️ <b>Boshqa sozlamalar</b>\n\nKerakli sozlamani tanlang:", reply_markup=settings_extra_keyboard(states))
@@ -488,29 +552,50 @@ async def settings_time_handler(callback: CallbackQuery, engine: GameEngine) -> 
     await callback.answer()
 
 
-# ── MODE ──
+# ── GAME TYPE ──
 
-@router.callback_query(F.data == "settings:mode")
-async def settings_mode_menu(callback: CallbackQuery, engine: GameEngine) -> None:
+@router.callback_query(F.data.in_({"settings:game_types", "settings:mode"}))
+async def settings_game_type_menu(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.message is None: await callback.answer(); return
-    chat_id = _get_chat_id(callback)
-    gsm = GroupSettingsManager(engine.session_factory)
-    gs = await gsm.get_settings(chat_id)
-    await callback.message.edit_text("🎮 <b>O'yin modi</b>\n\nQaysi modda o'ynaymiz?", reply_markup=settings_mode_keyboard(gs.game_mode))
+    chat_id = await _ensure_chat_id(callback)
+    if not chat_id or not await _deny_if_not_admin(callback, chat_id, engine):
+        return
+    group = await engine.group_settings(chat_id)
+    await callback.message.edit_text(
+        _game_type_settings_text(group.role_preset),
+        reply_markup=settings_game_type_keyboard(group.role_preset),
+    )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("settings:mode:"))
-async def settings_mode_handler(callback: CallbackQuery, engine: GameEngine) -> None:
+@router.callback_query(
+    lambda callback: bool(
+        callback.data
+        and (
+            callback.data.startswith("settings:game_type:")
+            or callback.data.startswith("settings:mode:")
+        )
+    )
+)
+async def settings_game_type_handler(callback: CallbackQuery, engine: GameEngine) -> None:
     if callback.message is None: await callback.answer(); return
-    mode = callback.data.split(":")[2]
-    chat_id = _get_chat_id(callback)
-    if not await _deny_if_not_admin(callback, chat_id, engine): return
-    gsm = GroupSettingsManager(engine.session_factory)
-    await gsm.set_game_mode(chat_id, mode)
-    label = MODE_LABELS.get(mode, mode)
-    await callback.message.edit_text(f"✅ O'yin modi: {label}", reply_markup=settings_mode_keyboard(mode))
-    await callback.answer()
+    preset = callback.data.rsplit(":", maxsplit=1)[-1]
+    if preset not in {"classic", "super", "mega", "zombie"}:
+        await callback.answer("❌ Noma'lum o'yin turi.", show_alert=True)
+        return
+    chat_id = await _ensure_chat_id(callback)
+    if not chat_id or not await _deny_if_not_admin(callback, chat_id, engine):
+        return
+    ok, notice = await engine.update_group_setting(chat_id, "role_preset", preset)
+    if not ok:
+        await callback.answer(notice, show_alert=True)
+        return
+    group = await engine.group_settings(chat_id)
+    await callback.message.edit_text(
+        _game_type_settings_text(group.role_preset, notice="✅ O'yin turi doimiy saqlandi."),
+        reply_markup=settings_game_type_keyboard(group.role_preset),
+    )
+    await callback.answer(f"✅ {role_preset_label(preset)} tanlandi.")
 
 
 # ── EXTRA ──
@@ -559,9 +644,10 @@ async def settings_panel(callback: CallbackQuery, engine: GameEngine) -> None:
     chat_id = _get_chat_id(callback)
     gsm = GroupSettingsManager(engine.session_factory)
     data = await gsm.get_panel_data(chat_id)
+    group = await engine.group_settings(chat_id)
     leave_status = "✅ Ruxsat" if data["leave_allowed"] else "🚫 Taqiqlangan"
     leave_lock_minutes = int(data.get("leave_lock_minutes", 30) or 0)
-    mode_label = MODE_LABELS.get(data["game_mode"], data["game_mode"])
+    game_type_label = role_preset_label(_normalized_game_type(group.role_preset))
     cmd_lines = []
     for ck in ["start", "stop", "game"]:
         perm = data["command_permissions"].get(ck, "user")
@@ -576,7 +662,7 @@ async def settings_panel(callback: CallbackQuery, engine: GameEngine) -> None:
         f"🚪 <b>Leave:</b> {leave_status}\n⏱ Blok: {leave_lock_minutes} daqiqa\n\n"
         "🔐 <b>Buyruqlar:</b>\n" + "\n".join(cmd_lines) + "\n\n"
         f"✍️ <b>Chat:</b>\n🌙 Tun: {night_label}\n☀️ Kun: {day_label}\n\n"
-        f"🎮 <b>O'yin modi:</b> {mode_label}"
+        f"🎮 <b>O'yin turi:</b> {game_type_label}"
     )
     await callback.message.edit_text(text, reply_markup=settings_panel_keyboard())
     await callback.answer()

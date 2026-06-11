@@ -538,7 +538,7 @@ def settings_keyboard(lang: str, game_id: Optional[int] = None) -> InlineKeyboar
         (callback("lang"), "🌍 Til sozlamasi"),
         (callback("timeout"), "⏳ Registration timeout"),
         (callback("minplayers"), "👥 Minimum players"),
-        (callback("roles"), "🎭 Role settings"),
+        (callback("roles"), "🎮 O'yin turlari"),
         (callback("welcome"), "👋 Salomlashuv"),
         (callback("premium"), "🎲 Premium status"),
         (callback("logs"), "🧾 Game logs"),
@@ -1175,6 +1175,7 @@ def _back_exit_row(back_to: str) -> list[InlineKeyboardButton]:
 
 def settings_main_keyboard() -> InlineKeyboardMarkup:
     items = [
+        ("🎮 O'yin turlari", "settings:game_types"),
         ("🎁 Giveawaylar", "settings:giveaway"),
         ("⏰ Vaqtlar", "settings:times"),
         ("🎭 Rollar", "settings:roles"),
@@ -1182,7 +1183,6 @@ def settings_main_keyboard() -> InlineKeyboardMarkup:
         ("🚪 Leave qilish", "settings:leave"),
         ("🔐 Buyruqlarga ruxsatlar", "settings:permissions"),
         ("✍️ Yozishni cheklash", "settings:chat"),
-        ("🎮 O'yin modi", "settings:mode"),
         ("⚙️ Boshqa sozlamalar", "settings:extra"),
         ("📊 Boshqaruv paneli", "settings:panel"),
     ]
@@ -1400,12 +1400,19 @@ def settings_admin_confirm_keyboard(enabled: bool = False) -> InlineKeyboardMark
     ])
 
 
-def settings_mode_keyboard(current: str = "normal") -> InlineKeyboardMarkup:
-    modes = [("🎲 Oddiy", "normal"), ("⚡ Tezkor", "fast"), ("🛡 Himoyali", "protected"), ("🔥 Qiyin", "hard")]
+def settings_game_type_keyboard(current: str = "classic") -> InlineKeyboardMarkup:
+    if current in {"black23", "extended35"}:
+        current = "classic"
+    game_types = [
+        ("🎭 Classic", "classic"),
+        ("⚡ Super", "super"),
+        ("🔥 Mega", "mega"),
+        ("🧟 Zombie", "zombie"),
+    ]
     rows = []
-    for label, val in modes:
+    for label, val in game_types:
         mark = "✅ " if val == current else ""
-        rows.append([_btn(f"{mark}{label}", f"settings:mode:{val}")])
+        rows.append([_btn(f"{mark}{label}", f"settings:game_type:{val}")])
     rows.append(_back_exit_row("main"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -6,7 +6,7 @@ from aiogram import Router
 
 from app.game_engine import GameEngine
 from app.enums import GameStatus
-from app.roles import role_preset_label
+from app.handlers.settings import send_game_types_to_private
 from app.texts import t
 
 router = Router()
@@ -18,10 +18,9 @@ GAMBLE_ONLY_GROUP_TEXT = (
 )
 
 
-async def _start_game_with_mode(
+async def _start_game_registration(
     message: Message,
     engine: GameEngine,
-    mode: str | None = None,
     *,
     tournament: bool = False,
     teamgame: bool = False,
@@ -46,17 +45,6 @@ async def _start_game_with_mode(
         await message.answer(t(lang, "bot_not_admin"))
         return
 
-    active_game = await engine.active_game_for_chat(message.chat.id)
-    if mode and active_game is not None and active_game.status != "registration":
-        await message.answer("🎮 Aktiv o'yin tugamaguncha mode almashtirib bo'lmaydi.")
-        return
-    
-    if mode:
-        ok, msg = await engine.update_group_setting(message.chat.id, "role_preset", mode)
-        if not ok:
-            await message.answer(msg)
-            return
-
     ok, text = await engine.create_game_registration(
         bot=message.bot,
         chat_id=message.chat.id,
@@ -65,12 +53,9 @@ async def _start_game_with_mode(
         tournament=tournament,
         teamgame=teamgame,
         regular=regular,
-        role_preset=mode,
     )
     if not ok:
         await message.answer(text)
-    elif mode:
-        await message.answer(f"✅ Mode tanlandi: <b>{role_preset_label(mode)}</b>")
     elif tournament:
         await message.answer("🏆 Turnir ro'yxatdan o'tishi boshlandi.")
     elif teamgame:
@@ -84,7 +69,7 @@ async def cmd_game(message: Message, engine: GameEngine) -> None:
         if not ok:
             await message.reply(err)
             return
-    await _start_game_with_mode(message, engine, regular=True)
+    await _start_game_registration(message, engine, regular=True)
 
 
 @router.message(Command("turnir"))
@@ -94,32 +79,27 @@ async def cmd_tournament_game(message: Message, engine: GameEngine) -> None:
         if not ok:
             await message.reply(err)
             return
-    await _start_game_with_mode(message, engine, tournament=True)
+    await _start_game_registration(message, engine, tournament=True)
 
 
 @router.message(Command("classic"))
 async def cmd_classic_game(message: Message, engine: GameEngine) -> None:
-    await _start_game_with_mode(message, engine, "classic")
+    await send_game_types_to_private(message, engine)
 
 
 @router.message(Command("super"))
 async def cmd_super_game(message: Message, engine: GameEngine) -> None:
-    await _start_game_with_mode(message, engine, "super")
+    await send_game_types_to_private(message, engine)
 
 
 @router.message(Command("mega"))
 async def cmd_mega_game(message: Message, engine: GameEngine) -> None:
-    await _start_game_with_mode(message, engine, "mega")
+    await send_game_types_to_private(message, engine)
 
 
 @router.message(Command("zombie"))
 async def cmd_zombie_game(message: Message, engine: GameEngine) -> None:
-    if message.from_user and message.chat.type != "private":
-        ok, err = await engine.check_command_permission(message.bot, message.chat.id, message.from_user.id, "game")
-        if not ok:
-            await message.reply(err)
-            return
-    await _start_game_with_mode(message, engine, "zombie")
+    await send_game_types_to_private(message, engine)
 
 
 @router.message(Command("leave"))
@@ -204,7 +184,7 @@ async def cmd_teamgame(message: Message, engine: GameEngine) -> None:
         if not ok:
             await message.reply(err)
             return
-    await _start_game_with_mode(message, engine, teamgame=True)
+    await _start_game_registration(message, engine, teamgame=True)
 
 
 @router.message(Command("lastwords"))

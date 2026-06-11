@@ -10358,7 +10358,7 @@ class GameEngine:
         return "\n".join(lines)
 
     async def update_group_setting(self, chat_id: int, field: str, value: object) -> tuple[bool, str]:
-        """Guruh sozlamalarini yangilash. Aktiv oyni davomida mode o'zgartirish mumkin emas."""
+        """Guruh sozlamalarini yangilash. Aktiv o'yin va registration o'zgartirilmaydi."""
         async with self.session_factory() as session:
             group = (await session.execute(select(Group).where(Group.chat_id == chat_id))).scalar_one_or_none()
             if group is None:
@@ -10388,32 +10388,43 @@ class GameEngine:
             elif field == "role_preset":
                 preset = str(value)
                 if preset not in GAME_MODES and preset not in {"black23", "extended35", "zombie"}:
-                    return False, "❌ Noma'lum role preset"
-                
-                # Registration vaqtida mode almashtirish mumkin, aktiv o'yinda esa mumkin emas.
+                    return False, "❌ Noma'lum o'yin turi."
+
                 active_game = await self.find_active_game(session, chat_id)
-                if active_game is not None and active_game.status == GameStatus.ACTIVE.value:
+                if active_game is not None:
                     current_preset = active_game.role_preset or "black23"
-                    if current_preset != preset:
-                        current_name = role_preset_label(current_preset)
-                        return False, f"❌ Aktiv oyin davomida mode o'zgartira olmaysiz!\nJoriy mode: <b>{current_name}</b>"
-                
+                    comparable_current = "classic" if current_preset in {"black23", "extended35"} else current_preset
+                    comparable_requested = "classic" if preset in {"black23", "extended35"} else preset
+                    if comparable_current != comparable_requested:
+                        current_name = role_preset_label(comparable_current)
+                        phase_name = (
+                            "ro'yxatdan o'tish"
+                            if active_game.status == GameStatus.REGISTRATION.value
+                            else "aktiv o'yin"
+                        )
+                        return (
+                            False,
+                            f"❌ {phase_name.capitalize()} davomida o'yin turini o'zgartirib bo'lmaydi.\n"
+                            f"Joriy tur: <b>{current_name}</b>",
+                        )
+
                 group.role_preset = preset
-                if active_game is not None and active_game.status == GameStatus.REGISTRATION.value:
-                    active_game.role_preset = preset
                 await session.commit()
-                return True, f"✅ Role preset: {role_preset_label(preset)}"
+                self._invalidate_group_cache(chat_id)
+                return True, f"✅ O'yin turi: {role_preset_label(preset)}"
             
             return False, "❌ Noma'lum sozlama"
 
     def format_role_preset_settings(self, group: Group) -> str:
         preset = group.role_preset or "black23"
+        display_preset = "classic" if preset in {"black23", "extended35"} else preset
         return (
-            "🎭 <b>Role settings</b>\n\n"
-            f"Joriy preset: <b>{role_preset_label(preset)}</b>\n"
-            f"Maksimal tavsiya qilingan o'yinchi: <b>{role_preset_max_players(preset)}</b>\n\n"
+            "🎮 <b>O'yin turlari</b>\n\n"
+            f"Joriy tur: <b>{role_preset_label(display_preset)}</b>\n"
+            f"O'yinchi limiti: <b>{role_preset_max_players(display_preset)}</b>\n\n"
             "<b>Classic</b> - eski klassik taqsimotni saqlaydi.\n"
             "<b>Super</b> - faol rollarni minimal o'yinchi soniga qarab ertaroq beradi, yetmasa Tinch aholi bilan to'ldiradi.\n"
             "<b>Mega</b> - faqat faol rollar, Tinch aholi hech qachon tushmaydi.\n"
-            "<b>Zombie</b> - /zombie orqali alohida virus rejimi sifatida boshlanadi."
+            "<b>Zombie</b> - virus tarqalishiga asoslangan alohida jamoaviy rejim.\n\n"
+            "Tanlov guruh uchun doimiy saqlanadi va keyingi o'yinlarda ishlaydi."
         )
