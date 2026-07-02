@@ -53,6 +53,7 @@ from app.models import (
     ActivityScoreEvent,
     BotSetting,
     CoupleRelationship,
+    CreditBlockedUser,
     DiamondGiveaway,
     DiamondTransaction,
     DollarTransaction,
@@ -9770,17 +9771,36 @@ class GameEngine:
 
     async def premium_blocked_users_text(self) -> str:
         async with self.session_factory() as session:
-            rows = (
+            premium_rows = (
                 await session.execute(
                     select(PremiumBlockedUser).order_by(PremiumBlockedUser.created_at.desc()).limit(50)
                 )
             ).scalars().all()
-        if not rows:
+            credit_rows = (
+                await session.execute(
+                    select(CreditBlockedUser).order_by(CreditBlockedUser.created_at.desc()).limit(50)
+                )
+            ).scalars().all()
+        if not premium_rows and not credit_rows:
             return "🚷 <b>Bloklangan userlar</b>\n\nHozircha bloklangan user yo'q."
-        lines = ["🚷 <b>Bloklangan userlar</b>\n"]
-        for idx, row in enumerate(rows, 1):
+        lines = ["🚷 <b>Bloklangan userlar</b>", ""]
+        idx = 1
+        if premium_rows:
+            lines.append("🎲 <b>Premium/Qimor bloklari</b>")
+        for row in premium_rows:
             reason = f" | {escape(row.reason)}" if row.reason else ""
             lines.append(f"{idx}. {self._tg_mention(row.telegram_id, row.display_name)} - <code>{row.telegram_id}</code>{reason}")
+            idx += 1
+        if premium_rows and credit_rows:
+            lines.append("")
+        if credit_rows:
+            lines.append("💳 <b>Kredit bloklari</b>")
+        for row in credit_rows:
+            reason = f" | {escape(row.reason)}" if row.reason else ""
+            loan = f" | Kredit #{row.loan_id}" if row.loan_id else ""
+            lines.append(f"{idx}. {self._tg_mention(row.telegram_id, row.display_name)} - <code>{row.telegram_id}</code>{loan}{reason}")
+            idx += 1
+        lines.extend(["", "Blokdan chiqarish uchun <b>✅ Blokdan chiqarish</b> tugmasini bosing va user ID yuboring."])
         return "\n".join(lines)
 
     async def bankrupt_premium_group(self, raw_group_id: str) -> tuple[bool, str]:
@@ -9871,15 +9891,23 @@ class GameEngine:
             telegram_id = user.telegram_id if user else int(raw) if raw.lstrip("-").isdigit() else None
             if telegram_id is None:
                 return False, "User topilmadi. ID yoki username'ni tekshiring."
-            row = (
+            premium_row = (
                 await session.execute(select(PremiumBlockedUser).where(PremiumBlockedUser.telegram_id == telegram_id))
             ).scalar_one_or_none()
-            if row is None:
+            credit_row = await session.get(CreditBlockedUser, telegram_id)
+            if premium_row is None and credit_row is None:
                 return False, "Bu user bloklanganlar ro'yxatida yo'q."
-            await session.delete(row)
+            removed_types: list[str] = []
+            if premium_row is not None:
+                await session.delete(premium_row)
+                removed_types.append("premium/qimor")
+            if credit_row is not None:
+                await session.delete(credit_row)
+                removed_types.append("kredit")
             await session.commit()
         self.invalidate_blocked_user_cache(telegram_id)
-        return True, f"✅ User blokdan chiqarildi: <code>{telegram_id}</code>"
+        types_text = ", ".join(removed_types)
+        return True, f"✅ User blokdan chiqarildi: <code>{telegram_id}</code>\nOchilgan blok: <b>{types_text}</b>"
 
     async def is_premium_user_blocked(self, telegram_id: int) -> bool:
         now = self._monotonic()

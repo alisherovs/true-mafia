@@ -491,7 +491,8 @@ async def owner_premium_unblock_user_callback(callback: CallbackQuery, settings:
     PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_unblock_user"
     await _safe_edit(
         callback,
-        "✅ <b>Premium userni blokdan chiqarish</b>\n\n"
+        "✅ <b>Userni blokdan chiqarish</b>\n\n"
+        "Premium/qimor bloki va kredit bloki shu yerdan ochiladi.\n"
         "Telegram ID, @username yoki username yuboring.\n\n"
         "Masalan:\n<code>123456789</code>",
         reply_markup=owner_wait_keyboard(),
