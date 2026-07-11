@@ -11,6 +11,7 @@ from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
     owner_admin_group_keyboard,
+    owner_blacklist_keyboard,
     owner_channel_gift_mode_keyboard,
     owner_channel_gifts_keyboard,
     owner_diamond_audit_keyboard,
@@ -98,7 +99,7 @@ OWNER_COMMANDS_TEXT = (
     "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
     "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
     "🎲 Premium guruhlar - premium guruhlarni boshqarish\n"
-    "🚷 Blacklist - bloklangan foydalanuvchilar bo'limi\n"
+    "🚷 Blacklist - bloklangan foydalanuvchi va guruhlar bo'limi\n"
     "Xarid admini - almaz xaridi uchun admin username sozlash\n"
     "Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqarish\n"
     "Geroy savdo kanali - geroy marketplace kanalini ulash\n"
@@ -475,7 +476,7 @@ async def owner_premium_block_user_callback(callback: CallbackQuery, settings: S
     PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_block_user"
     await _safe_edit(
         callback,
-        "🚫 <b>Premium user bloklash</b>\n\n"
+        "🚫 <b>Userni bloklash</b>\n\n"
         "Telegram ID, @username yoki username yuboring. Sabab yozish ixtiyoriy.\n\n"
         "Masalan:\n<code>123456789 reklama</code>",
         reply_markup=owner_wait_keyboard(),
@@ -500,13 +501,45 @@ async def owner_premium_unblock_user_callback(callback: CallbackQuery, settings:
     await callback.answer()
 
 
-@router.callback_query(F.data == "owner:premium_blocked_list")
+@router.callback_query(F.data.in_({"owner:blocked_list", "owner:premium_blocked_list"}))
 async def owner_premium_blocked_list_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    groups = await engine.premium_groups(include_inactive=True)
-    await _safe_edit(callback, await engine.premium_blocked_users_text(), reply_markup=owner_premium_groups_keyboard(groups))
+    await _safe_edit(callback, await engine.premium_blocked_users_text(), reply_markup=owner_blacklist_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:group_block")
+async def owner_group_block_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "group_block"
+    await _safe_edit(
+        callback,
+        "🏠 <b>Guruhni bloklash</b>\n\n"
+        "Guruh ID yuboring. Sabab yozish ixtiyoriy.\n\n"
+        "Masalan:\n<code>-1001234567890 qoida buzildi</code>\n\n"
+        "Bloklangan guruhda bot buyruqlari ishlamaydi va guruhga cheklov xabari chiqadi.",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "owner:group_unblock")
+async def owner_group_unblock_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "group_unblock"
+    await _safe_edit(
+        callback,
+        "🔓 <b>Guruhni blokdan chiqarish</b>\n\n"
+        "Guruh ID yuboring.\n\n"
+        "Masalan:\n<code>-1001234567890</code>",
+        reply_markup=owner_wait_keyboard(),
+    )
     await callback.answer()
 
 
@@ -783,7 +816,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulaydi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
-            "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
+            "🚷 Blacklist - user va guruh bloklarini boshqarish.\n"
             " Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
             "📺 Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqaradi.\n"
@@ -1238,18 +1271,30 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
 
     if action == "premium_block_user":
         ok, text = await engine.block_premium_user(message.text or "", blocked_by=message.from_user.id)
-        groups = await engine.premium_groups(include_inactive=True) if ok else []
-        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
+        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_block_user"
         return True
 
     if action == "premium_unblock_user":
         ok, text = await engine.unblock_premium_user(message.text or "")
-        groups = await engine.premium_groups(include_inactive=True) if ok else []
-        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
+        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_unblock_user"
+        return True
+
+    if action == "group_block":
+        ok, text = await engine.block_group(message.text or "", blocked_by=message.from_user.id)
+        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "group_block"
+        return True
+
+    if action == "group_unblock":
+        ok, text = await engine.unblock_group(message.text or "")
+        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
+        if not ok:
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "group_unblock"
         return True
 
     if action in {"broadcast_users", "broadcast_groups"}:

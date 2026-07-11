@@ -61,6 +61,7 @@ from app.models import (
     GameLog,
     GamePlayer,
     Group,
+    GroupBlacklist,
     HangVote,
     Hero,
     NightAction,
@@ -202,10 +203,12 @@ class GameEngine:
         self._active_participants_cache: dict[int, tuple[float, Optional[int], frozenset[int]]] = {}
         self._chat_permission_cache: dict[tuple[int, str], tuple[float, str]] = {}
         self._blocked_users_cache: dict[int, tuple[float, bool]] = {}
+        self._blocked_groups_cache: dict[int, tuple[float, bool]] = {}
         self._cache_ttl_seconds = 10.0
         self._return_url_cache_ttl_seconds = 3600.0
         self._chat_permission_cache_ttl = 5.0
         self._blocked_users_cache_ttl = 30.0
+        self._blocked_groups_cache_ttl = 30.0
         self._cache_limit = 20000
         self._inactive_elimination_rounds = 2
         self._night_inactivity_exempt_roles = {
@@ -9781,9 +9784,14 @@ class GameEngine:
                     select(CreditBlockedUser).order_by(CreditBlockedUser.created_at.desc()).limit(50)
                 )
             ).scalars().all()
-        if not premium_rows and not credit_rows:
-            return "🚷 <b>Bloklangan userlar</b>\n\nHozircha bloklangan user yo'q."
-        lines = ["🚷 <b>Bloklangan userlar</b>", ""]
+            group_rows = (
+                await session.execute(
+                    select(GroupBlacklist).order_by(GroupBlacklist.created_at.desc()).limit(50)
+                )
+            ).scalars().all()
+        if not premium_rows and not credit_rows and not group_rows:
+            return "🚷 <b>Blacklist</b>\n\nHozircha bloklangan user yoki guruh yo'q."
+        lines = ["🚷 <b>Blacklist</b>", ""]
         idx = 1
         if premium_rows:
             lines.append("🎲 <b>Premium/Qimor bloklari</b>")
@@ -9800,8 +9808,95 @@ class GameEngine:
             loan = f" | Kredit #{row.loan_id}" if row.loan_id else ""
             lines.append(f"{idx}. {self._tg_mention(row.telegram_id, row.display_name)} - <code>{row.telegram_id}</code>{loan}{reason}")
             idx += 1
-        lines.extend(["", "Blokdan chiqarish uchun <b>✅ Blokdan chiqarish</b> tugmasini bosing va user ID yuboring."])
+        if (premium_rows or credit_rows) and group_rows:
+            lines.append("")
+        if group_rows:
+            lines.append("🏠 <b>Guruh bloklari</b>")
+        for row in group_rows:
+            title = escape(row.title or row.username or "Nomsiz guruh")
+            username = f" | @{escape(row.username.lstrip('@'))}" if row.username else ""
+            reason = f" | {escape(row.reason)}" if row.reason else ""
+            lines.append(f"{idx}. <b>{title}</b> - <code>{row.chat_id}</code>{username}{reason}")
+            idx += 1
+        lines.extend(["", "Kerakli blok turini pastdagi tugmalar orqali boshqaring."])
         return "\n".join(lines)
+
+    @staticmethod
+    def _parse_group_block_input(raw: str) -> tuple[Optional[int], Optional[str]]:
+        parts = raw.strip().split(maxsplit=1)
+        if not parts:
+            return None, None
+        group_id_raw = parts[0].strip()
+        if not group_id_raw.lstrip("-").isdigit():
+            return None, None
+        reason = parts[1].strip() if len(parts) > 1 else None
+        return int(group_id_raw), reason or None
+
+    async def block_group(self, raw: str, blocked_by: int) -> tuple[bool, str]:
+        chat_id, reason = self._parse_group_block_input(raw)
+        if chat_id is None:
+            return False, "Guruh ID raqam bo'lishi kerak. Masalan: <code>-1001234567890 sabab</code>"
+        cancelled_game_ids: list[int] = []
+        async with self.session_factory() as session:
+            group = (
+                await session.execute(select(Group).where(Group.chat_id == chat_id))
+            ).scalar_one_or_none()
+            row = (
+                await session.execute(select(GroupBlacklist).where(GroupBlacklist.chat_id == chat_id))
+            ).scalar_one_or_none()
+            title = group.title if group else f"Guruh {chat_id}"
+            if row is None:
+                row = GroupBlacklist(
+                    chat_id=chat_id,
+                    title=title,
+                    reason=reason,
+                    blocked_by=blocked_by,
+                )
+                session.add(row)
+            else:
+                row.title = title
+                row.reason = reason
+                row.blocked_by = blocked_by
+            active_games = (
+                await session.execute(
+                    select(Game).where(
+                        Game.chat_id == chat_id,
+                        Game.status.in_((GameStatus.REGISTRATION.value, GameStatus.ACTIVE.value)),
+                    )
+                )
+            ).scalars().all()
+            now = self._now_utc()
+            for game in active_games:
+                game.status = GameStatus.CANCELLED.value
+                game.phase = GamePhase.ENDED.value
+                game.active_key = None
+                game.ended_at = now
+                cancelled_game_ids.append(int(game.id))
+                self._add_game_log(session, game, "game_cancelled", reason="group_blacklisted")
+            await session.commit()
+        self.invalidate_blocked_group_cache(chat_id)
+        self._invalidate_game_cache(chat_id)
+        for game_id in cancelled_game_ids:
+            self._cleanup_jobs(game_id)
+        reason_text = f"\nSabab: <b>{escape(reason)}</b>" if reason else ""
+        cancelled_text = f"\nBekor qilingan aktiv o'yinlar: <b>{len(cancelled_game_ids)}</b>" if cancelled_game_ids else ""
+        return True, f"🏠 <b>Guruh bloklandi</b>\n\nID: <code>{chat_id}</code>{reason_text}{cancelled_text}\n\nEndi bu guruhda bot buyruqlari ishlamaydi."
+
+    async def unblock_group(self, raw: str) -> tuple[bool, str]:
+        chat_id, _ = self._parse_group_block_input(raw)
+        if chat_id is None:
+            return False, "Blokdan chiqarish uchun guruh ID yuboring. Masalan: <code>-1001234567890</code>"
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(select(GroupBlacklist).where(GroupBlacklist.chat_id == chat_id))
+            ).scalar_one_or_none()
+            if row is None:
+                return False, "Bu guruh bloklanganlar ro'yxatida yo'q."
+            title = row.title or f"Guruh {chat_id}"
+            await session.delete(row)
+            await session.commit()
+        self.invalidate_blocked_group_cache(chat_id)
+        return True, f"🔓 <b>Guruh blokdan chiqarildi</b>\n\n<b>{escape(title)}</b>\nID: <code>{chat_id}</code>"
 
     async def bankrupt_premium_group(self, raw_group_id: str) -> tuple[bool, str]:
         raw_group_id = raw_group_id.strip()
@@ -9927,6 +10022,25 @@ class GameEngine:
 
     def invalidate_blocked_user_cache(self, telegram_id: int) -> None:
         self._blocked_users_cache.pop(telegram_id, None)
+
+    async def is_group_blocked(self, chat_id: int) -> bool:
+        now = self._monotonic()
+        cached = self._blocked_groups_cache.get(chat_id)
+        if cached is not None:
+            expire_time, result = cached
+            if expire_time > now:
+                return result
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(select(GroupBlacklist.chat_id).where(GroupBlacklist.chat_id == chat_id))
+            ).scalar_one_or_none()
+        is_blocked = row is not None
+        self._blocked_groups_cache[chat_id] = (now + self._blocked_groups_cache_ttl, is_blocked)
+        self._prune_cache_if_needed(self._blocked_groups_cache)  # type: ignore[arg-type]
+        return is_blocked
+
+    def invalidate_blocked_group_cache(self, chat_id: int) -> None:
+        self._blocked_groups_cache.pop(chat_id, None)
 
     async def contribute_premium_group(
         self,

@@ -946,7 +946,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
-            [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
+            [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:blocked_list")],
             [InlineKeyboardButton(text=" Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
             [InlineKeyboardButton(text="📺 Kanal sovg'a balansi", callback_data="owner:channel_gifts")],
@@ -958,6 +958,23 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📋 Barcha buyruqlar", callback_data="owner:commands")],
             [InlineKeyboardButton(text="🧾 Yordam", callback_data="owner:help")],
             [InlineKeyboardButton(text="◀️ User panel", callback_data="start:back")],
+        ]
+    )
+
+
+def owner_blacklist_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
+                InlineKeyboardButton(text="✅ Userni ochish", callback_data="owner:premium_unblock_user"),
+            ],
+            [
+                InlineKeyboardButton(text="🏠 Guruhni bloklash", callback_data="owner:group_block"),
+                InlineKeyboardButton(text="🔓 Guruhni ochish", callback_data="owner:group_unblock"),
+            ],
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:blocked_list")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
 
@@ -1134,7 +1151,7 @@ def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineK
                 InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
                 InlineKeyboardButton(text="✅ Blokdan chiqarish", callback_data="owner:premium_unblock_user"),
             ],
-            [InlineKeyboardButton(text="🚷 Bloklanganlar", callback_data="owner:premium_blocked_list")],
+            [InlineKeyboardButton(text="🚷 Bloklanganlar", callback_data="owner:blocked_list")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )

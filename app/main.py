@@ -26,6 +26,60 @@ from app.scheduler import scheduler, shutdown_scheduler, start_scheduler
 from app.treasure_hunt import TreasureHuntEngine
 
 
+GROUP_BLOCKED_TEXT = (
+    "🚫 <b>Bu guruh admin tomonidan cheklangan.</b>\n\n"
+    "Bot buyruqlari ushbu guruhda vaqtincha ishlamaydi.\n"
+    "Agar bu xato bo'lsa, bot administratsiyasiga murojaat qiling."
+)
+
+
+def _is_group_command(message: Message) -> bool:
+    if message.chat.type not in {"group", "supergroup"}:
+        return False
+
+    entities = list(message.entities or []) + list(message.caption_entities or [])
+    if any(entity.type == "bot_command" and entity.offset == 0 for entity in entities):
+        return True
+
+    text = message.text or message.caption or ""
+    return text.lstrip().startswith("/")
+
+
+class GroupBlockMessageMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: dict[str, Any],
+    ) -> Any:
+        if event.chat.type in {"group", "supergroup"}:
+            engine: GameEngine = data["engine"]
+            if await engine.is_group_blocked(event.chat.id):
+                if _is_group_command(event):
+                    try:
+                        await event.answer(GROUP_BLOCKED_TEXT)
+                    except (TelegramBadRequest, TelegramForbiddenError):
+                        pass
+                return None
+        return await handler(event, data)
+
+
+class GroupBlockCallbackMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[CallbackQuery, dict[str, Any]], Awaitable[Any]],
+        event: CallbackQuery,
+        data: dict[str, Any],
+    ) -> Any:
+        message = event.message
+        if message is not None and message.chat.type in {"group", "supergroup"}:
+            engine: GameEngine = data["engine"]
+            if await engine.is_group_blocked(message.chat.id):
+                await event.answer("🚫 Bu guruh admin tomonidan cheklangan.", show_alert=True)
+                return None
+        return await handler(event, data)
+
+
 class PremiumBlockMessageMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -107,15 +161,7 @@ class CreditBlockCallbackMiddleware(BaseMiddleware):
 class DeleteGroupCommandMiddleware(BaseMiddleware):
     @staticmethod
     def _is_group_command(message: Message) -> bool:
-        if message.chat.type not in {"group", "supergroup"}:
-            return False
-
-        entities = list(message.entities or []) + list(message.caption_entities or [])
-        if any(entity.type == "bot_command" and entity.offset == 0 for entity in entities):
-            return True
-
-        text = message.text or message.caption or ""
-        return text.lstrip().startswith("/")
+        return _is_group_command(message)
 
     async def __call__(
         self,
@@ -236,6 +282,8 @@ async def main() -> None:
         settings.bot_username = me.username
         logging.info("Using bot username from Telegram: @%s", me.username)
     dp = Dispatcher()
+    dp.message.middleware(GroupBlockMessageMiddleware())
+    dp.callback_query.middleware(GroupBlockCallbackMiddleware())
     dp.message.middleware(PremiumBlockMessageMiddleware())
     dp.callback_query.middleware(PremiumBlockCallbackMiddleware())
     dp.message.middleware(CreditBlockMessageMiddleware())
