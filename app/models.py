@@ -405,6 +405,91 @@ class GambleUserStats(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class CoinFlipGame(Base):
+    """Audit log for CoinFlip rounds (instant settle)."""
+
+    __tablename__ = "coin_flip_games"
+    __table_args__ = (
+        Index("ix_coin_flip_user_created", "user_telegram_id", "created_at"),
+        Index("ix_coin_flip_user_won", "user_telegram_id", "won"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    bet_amount: Mapped[int] = mapped_column(Integer)
+    choice: Mapped[str] = mapped_column(String(16))
+    result: Mapped[str] = mapped_column(String(16))
+    won: Mapped[bool] = mapped_column(Boolean, default=False)
+    payout: Mapped[int] = mapped_column(Integer, default=0)
+    profit: Mapped[int] = mapped_column(Integer, default=0)
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="completed")
+    token: Mapped[str] = mapped_column(String(32), default="", index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CoinFlipUserStats(Base):
+    __tablename__ = "coin_flip_user_stats"
+
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    games_played: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    total_profit: Mapped[int] = mapped_column(Integer, default=0)
+    total_wagered: Mapped[int] = mapped_column(Integer, default=0)
+    biggest_win: Mapped[int] = mapped_column(Integer, default=0)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0)
+    best_streak: Mapped[int] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class JokerCardsGame(Base):
+    __tablename__ = "joker_cards_games"
+    __table_args__ = (
+        Index("ix_joker_user_created", "user_telegram_id", "created_at"),
+        Index("ix_joker_user_won", "user_telegram_id", "won"),
+        Index("ix_joker_diff_created", "difficulty", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    bet_amount: Mapped[int] = mapped_column(Integer)
+    difficulty: Mapped[str] = mapped_column(String(16), default="normal")
+    pick_index: Mapped[int] = mapped_column(Integer, default=0)
+    multiplier: Mapped[float] = mapped_column(Float, default=0.0)
+    won: Mapped[bool] = mapped_column(Boolean, default=False)
+    payout: Mapped[int] = mapped_column(Integer, default=0)
+    profit: Mapped[int] = mapped_column(Integer, default=0)
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    deck_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="completed")
+    token: Mapped[str] = mapped_column(String(32), default="", index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class JokerCardsUserStats(Base):
+    __tablename__ = "joker_cards_user_stats"
+
+    user_telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    games_played: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+    losses: Mapped[int] = mapped_column(Integer, default=0)
+    total_profit: Mapped[int] = mapped_column(Integer, default=0)
+    total_wagered: Mapped[int] = mapped_column(Integer, default=0)
+    biggest_win: Mapped[int] = mapped_column(Integer, default=0)
+    current_streak: Mapped[int] = mapped_column(Integer, default=0)
+    best_streak: Mapped[int] = mapped_column(Integer, default=0)
+
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class FrogGameSession(Base):
     __tablename__ = "frog_game_sessions"
     __table_args__ = (

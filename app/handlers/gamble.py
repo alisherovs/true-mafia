@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, time, timedelta, timezone
 
 from aiogram import F, Router
@@ -14,9 +15,26 @@ from app.chicken_road import (
     CHICKEN_MAX_BET,
     CHICKEN_MIN_BET,
     ChickenRoadEngine,
+    ChickenView,
     build_chicken_start_keyboard,
     chicken_start_text,
     parse_chicken_callback,
+)
+from app.coin_flip import (
+    COIN_MAX_BET,
+    COIN_MIN_BET,
+    CoinFlipEngine,
+    CoinView,
+    flipping_text,
+    parse_coin_callback,
+)
+from app.joker_cards import (
+    JOKER_MAX_BET,
+    JOKER_MIN_BET,
+    JokerCardsEngine,
+    JokerView,
+    flipping_card_text,
+    parse_joker_callback,
 )
 from app.database import SessionLocal
 from app.frog_road import (
@@ -52,7 +70,7 @@ from app.treasure_hunt import (
 
 router = Router()
 ROULETTE_ENABLED = False
-CHICKEN_ROAD_ENABLED = False
+CHICKEN_ROAD_ENABLED = True
 DAILY_GAMBLE_WIN_LIMIT = 30_000
 UZ_TZ = timezone(timedelta(hours=5))
 
@@ -74,6 +92,14 @@ class RouletteBetState(StatesGroup):
 
 
 class ChickenBetState(StatesGroup):
+    waiting_amount = State()
+
+
+class CoinBetState(StatesGroup):
+    waiting_amount = State()
+
+
+class JokerBetState(StatesGroup):
     waiting_amount = State()
 
 
@@ -131,24 +157,60 @@ async def _send_voice_result(message: Message, file_id: str, caption: str) -> bo
 
 
 def _gamble_menu_text() -> str:
-    return (
-        "🎰 <b>Qimor o'yinlari</b>\n\n"
-        "O'ynamoqchi bo'lgan mini-o'yinni tanlang:\n\n"
-        "🐸 <b>Qurbaqa Yo'li</b> - 5x8 yo'lda xavfli kataklardan qoching.\n"
-        "💣 <b>Mines</b> - klassik mines va 2 kishilik qimor.\n"
-        "💎 <b>Treasure Hunt</b> - 2-10 kishilik survival xazina o'yini."
+    """Single hub for all casino games — only opened via /qimor."""
+    lines = [
+        "━━━━━━━━━━━━━━━",
+        "🎰 <b>QIMOR MARKAZI</b>",
+        "━━━━━━━━━━━━━━━",
+        "",
+        "Barcha o‘yinlar shu yerdan ochiladi.",
+        "Alohida buyruq kerak emas — faqat <b>/qimor</b>.",
+        "",
+        "🃏 <b>Joker Cards</b> — karta tanlash · 4 daraja",
+        "🪙 <b>Coin Flip</b> — gerb / raqam · x2",
+        "🐔 <b>Chicken Road</b> — 8 qadam risk ladder",
+        "🐸 <b>Qurbaqa Yo‘li</b> — 5×8 yo‘l · multi",
+        "💣 <b>Mines</b> — solo yoki 2 kishilik duel",
+        "💎 <b>Treasure Hunt</b> — 2–10 kishi survival",
+    ]
+    if ROULETTE_ENABLED:
+        lines.append("🎡 <b>Ruletka</b> — qizil / qora / yashil")
+    lines.extend(
+        [
+            "",
+            "📊 <b>TOP</b> — haftalik qimor reytingi",
+            "",
+            "O‘yinni tanlang 👇",
+        ]
     )
+    return "\n".join(lines)
 
 
 def _gamble_menu_keyboard(owner_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [_button("🐸 Qurbaqa Yo'li", f"qmenu:frog:{owner_id}", "success")],
-            [_button("💣 Mines", f"qmenu:mines:{owner_id}", "primary")],
-            [_button("💎 Treasure Hunt", f"qmenu:treasure:{owner_id}", "success")],
-            [_button("❌ Bekor qilish", f"qmenu:cancel:{owner_id}", "danger")],
+    o = int(owner_id)
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            _button("🃏 Joker", f"qmenu:joker:{o}", "success"),
+            _button("🪙 Coin", f"qmenu:coin:{o}", "success"),
+        ],
+        [
+            _button("🐔 Chicken", f"qmenu:chicken:{o}", "success"),
+            _button("🐸 Qurbaqa", f"qmenu:frog:{o}", "success"),
+        ],
+        [
+            _button("💣 Mines", f"qmenu:mines:{o}", "primary"),
+            _button("💎 Treasure", f"qmenu:treasure:{o}", "primary"),
+        ],
+    ]
+    if ROULETTE_ENABLED:
+        rows.append([_button("🎡 Ruletka", f"qmenu:roulette:{o}", "primary")])
+    rows.append(
+        [
+            _button("📊 TOP", f"qmenu:topq:{o}", "primary"),
+            _button("❌ Yopish", f"qmenu:cancel:{o}", "danger"),
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _disabled_game_text(game_name: str) -> str:
@@ -337,12 +399,55 @@ def _parse_chicken_bet(raw: str | None) -> tuple[bool, int, str]:
     return True, amount, ""
 
 
-async def _edit_or_answer(message: Message, view: FrogView) -> None:
+def _parse_coin_bet(raw: str | None) -> tuple[bool, int, str]:
+    try:
+        amount = int((raw or "").strip().split()[0])
+    except (AttributeError, IndexError, ValueError):
+        return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
+    if amount < COIN_MIN_BET or amount > COIN_MAX_BET:
+        return False, 0, f"❌ Stavka <b>{COIN_MIN_BET}</b> dan <b>{COIN_MAX_BET}</b> gacha bo'lishi kerak."
+    return True, amount, ""
+
+
+async def _edit_or_answer(message: Message, view: FrogView | CoinView | ChickenView | JokerView) -> None:
     try:
         await message.edit_text(view.text, reply_markup=view.keyboard)
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc).lower():
             await message.answer(view.text, reply_markup=view.keyboard)
+
+
+async def _edit_text_safe(message: Message, text: str, keyboard=None) -> None:
+    try:
+        await message.edit_text(text, reply_markup=keyboard)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            try:
+                await message.answer(text, reply_markup=keyboard)
+            except (TelegramBadRequest, TelegramForbiddenError):
+                pass
+
+
+async def _coin_flip_animation(message: Message) -> None:
+    for frame in range(4):
+        await _edit_text_safe(message, flipping_text(frame))
+        await asyncio.sleep(0.38)
+
+
+async def _joker_card_animation(message: Message) -> None:
+    for frame in range(4):
+        await _edit_text_safe(message, flipping_card_text(frame))
+        await asyncio.sleep(0.36)
+
+
+def _parse_joker_bet(raw: str | None) -> tuple[bool, int, str]:
+    try:
+        amount = int((raw or "").strip().split()[0])
+    except (AttributeError, IndexError, ValueError):
+        return False, 0, "❌ To'g'ri summa kiriting. Masalan: 1000"
+    if amount < JOKER_MIN_BET or amount > JOKER_MAX_BET:
+        return False, 0, f"❌ Stavka <b>{JOKER_MIN_BET}</b> dan <b>{JOKER_MAX_BET}</b> gacha."
+    return True, amount, ""
 
 
 async def _gamble_allowed_or_reply(message: Message, engine: GameEngine) -> bool:
@@ -363,28 +468,20 @@ async def _gamble_allowed_or_reply(message: Message, engine: GameEngine) -> bool
     return True
 
 
-@router.message(Command("qimor", "frog"))
+@router.message(Command("qimor"))
 async def cmd_qimor(message: Message, command: CommandObject, engine: GameEngine, state: FSMContext) -> None:
+    """Yagona qimor kirish nuqtasi — barcha o'yinlar shu menyuda."""
+    if message.from_user is None:
+        return
     if not await _gamble_allowed_or_reply(message, engine):
         return
     await state.clear()
-    command_name = (command.command or "").lower()
-    if command_name == "qimor":
-        await message.answer(_gamble_menu_text(), reply_markup=_gamble_menu_keyboard(message.from_user.id))
-        return
-
-    frog = FrogRoadEngine(SessionLocal)
-    if command.args:
-        ok, amount, error = _parse_frog_bet(command.args)
-        if not ok:
-            await message.answer(error, reply_markup=build_frog_start_keyboard(message.from_user.id))
-            return
-        view = await frog.start_frog_game(message.from_user, message.chat.id, amount)
-        sent = await message.answer(view.text, reply_markup=view.keyboard)
-        if view.session_id:
-            await frog.set_message_id(view.session_id, sent.message_id)
-        return
-    await message.answer(frog_start_text(), reply_markup=build_frog_start_keyboard(message.from_user.id))
+    # Ignore accidental args like /qimor 100 — always show full hub
+    _ = command.args
+    await message.answer(
+        _gamble_menu_text(),
+        reply_markup=_gamble_menu_keyboard(message.from_user.id),
+    )
 
 
 @router.message(FrogBetState.waiting_amount)
@@ -442,6 +539,43 @@ async def roulette_custom_bet_amount(message: Message, state: FSMContext, engine
         return
     await state.clear()
     await message.answer(roulette_color_text(amount), reply_markup=roulette_color_keyboard(message.from_user.id, amount))
+
+
+@router.message(CoinBetState.waiting_amount)
+async def coin_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not await _gamble_allowed_or_reply(message, engine):
+        await state.clear()
+        return
+    ok, amount, error = _parse_coin_bet(message.text)
+    if not ok:
+        await message.answer(error or "❌ To'g'ri summa kiriting. Masalan: 1000")
+        return
+    await state.clear()
+    coin = CoinFlipEngine(SessionLocal)
+    view = await coin.resolve_preset_bet(message.from_user.id, message.from_user.id, "bet", base_amount=amount)
+    await message.answer(view.text, reply_markup=view.keyboard)
+    if view.alert and view.show_alert:
+        # soft notice already in text
+        pass
+
+
+@router.message(JokerBetState.waiting_amount)
+async def joker_custom_bet_amount(message: Message, state: FSMContext, engine: GameEngine) -> None:
+    if message.from_user is None:
+        return
+    if not await _gamble_allowed_or_reply(message, engine):
+        await state.clear()
+        return
+    ok, amount, error = _parse_joker_bet(message.text)
+    if not ok:
+        await message.answer(error or "❌ To'g'ri summa kiriting. Masalan: 1000")
+        return
+    await state.clear()
+    joker = JokerCardsEngine(SessionLocal)
+    view = await joker.resolve_bet(message.from_user.id, message.from_user.id, "bet", amount=amount)
+    await message.answer(view.text, reply_markup=view.keyboard)
 
 
 @router.message(ChickenBetState.waiting_amount)
@@ -504,33 +638,63 @@ async def gamble_menu_callback(callback: CallbackQuery, engine: GameEngine, stat
         await callback.answer("❌ Bu menyu sizniki emas.", show_alert=True)
         return
     await state.clear()
-    if action == "frog":
+    if action == "joker":
+        joker = JokerCardsEngine(SessionLocal)
+        view = await joker.home(callback.from_user.id, owner_id)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Joker Cards")
+    elif action == "coin":
+        coin = CoinFlipEngine(SessionLocal)
+        view = await coin.home(callback.from_user.id, owner_id)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Coin Flip")
+    elif action == "frog":
         await _edit_or_answer(callback.message, FrogView(frog_start_text(), build_frog_start_keyboard(owner_id)))
-        await callback.answer("Qurbaqa Yo'li tanlandi.")
+        await callback.answer("Qurbaqa Yo'li")
     elif action == "mines":
         await callback.message.edit_text(_mines_start_text(), reply_markup=_mines_bet_keyboard(owner_id))
-        await callback.answer("Mines tanlandi.")
+        await callback.answer("Mines")
     elif action == "treasure":
         await callback.message.edit_text(treasure_start_text(), reply_markup=build_treasure_start_keyboard(owner_id))
-        await callback.answer("Treasure Hunt tanlandi.")
+        await callback.answer("Treasure Hunt")
     elif action == "roulette":
         if not ROULETTE_ENABLED:
             await callback.answer(_disabled_game_text("Ruletka"), show_alert=True)
             return
         await callback.message.edit_text(roulette_start_text(), reply_markup=roulette_bet_keyboard(owner_id))
-        await callback.answer("Ruletka tanlandi.")
+        await callback.answer("Ruletka")
     elif action == "chicken":
         if not CHICKEN_ROAD_ENABLED:
             await callback.answer(_disabled_game_text("Chicken Road"), show_alert=True)
             return
-        await callback.message.edit_text(chicken_start_text(), reply_markup=build_chicken_start_keyboard(owner_id))
-        await callback.answer("Chicken Road tanlandi.")
+        chicken = ChickenRoadEngine(SessionLocal)
+        view = await chicken.home(callback.from_user.id, owner_id)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Chicken Road")
+    elif action == "topq":
+        mines = MinesEngine(SessionLocal)
+        text = await mines.weekly_top_text(limit=10)
+        await _edit_text_safe(
+            callback.message,
+            text,
+            InlineKeyboardMarkup(
+                inline_keyboard=[[_button("⬅️ Qimor menyu", f"qmenu:back:{owner_id}", "danger")]]
+            ),
+        )
+        await callback.answer("TOP")
     elif action == "back":
-        await callback.message.edit_text(_gamble_menu_text(), reply_markup=_gamble_menu_keyboard(owner_id))
-        await callback.answer("Menyu.")
+        await _edit_text_safe(
+            callback.message,
+            _gamble_menu_text(),
+            _gamble_menu_keyboard(owner_id),
+        )
+        await callback.answer("Menyu")
     elif action == "cancel":
-        await callback.message.edit_text("❌ Qimor menyusi bekor qilindi.")
-        await callback.answer("Bekor qilindi.")
+        await _edit_text_safe(
+            callback.message,
+            "🎰 Qimor markazi yopildi.\n\nQayta ochish: <b>/qimor</b>",
+        )
+        await callback.answer("Yopildi")
     else:
         await callback.answer("Callback noto'g'ri.", show_alert=True)
 
@@ -831,7 +995,7 @@ async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: F
     if await _check_daily_limit_callback(callback):
         return
     try:
-        action, value, owner_id = parse_chicken_callback(callback.data or "")
+        action, value, owner_id, extra = parse_chicken_callback(callback.data or "")
     except ValueError:
         await callback.answer("Callback noto'g'ri.", show_alert=True)
         return
@@ -840,44 +1004,63 @@ async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: F
         return
 
     chicken = ChickenRoadEngine(SessionLocal)
-    if action == "menu":
+    uid = int(callback.from_user.id)
+    oid = int(owner_id or uid)
+
+    if action in {"menu", "again"}:
         await state.clear()
-        await callback.message.edit_text(chicken_start_text(), reply_markup=build_chicken_start_keyboard(callback.from_user.id))
-        await callback.answer("Chicken Road.")
+        view = await chicken.home(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Chicken Road")
         return
+
+    if action == "diff":
+        if not extra:
+            await callback.answer("Daraja noto‘g‘ri.", show_alert=True)
+            return
+        chicken.set_difficulty_pref(uid, extra)
+        view = await chicken.home(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer(f"Daraja: {extra}")
+        return
+
     if action == "back":
         await state.clear()
-        await callback.message.edit_text(
+        await _edit_text_safe(
+            callback.message,
             _gamble_menu_text(),
-            reply_markup=_gamble_menu_keyboard(callback.from_user.id),
+            _gamble_menu_keyboard(oid),
         )
         await callback.answer("Menyu.")
         return
+
     if action == "custom_bet":
         await state.set_state(ChickenBetState.waiting_amount)
         await callback.message.answer(
-            f"✍️ Chicken Road stavkasini kiriting.\nMinimal: <b>{CHICKEN_MIN_BET}</b> coin\nMaksimal: <b>{CHICKEN_MAX_BET}</b> coin"
+            f"✍️ <b>Chicken Road stavka</b>\n\n"
+            f"Summani yozing.\n"
+            f"Min <b>{CHICKEN_MIN_BET}</b> · Max <b>{CHICKEN_MAX_BET}</b>\n\n"
+            f"⚠️ 1-qadam ham xavfli bo‘lishi mumkin."
         )
         await callback.answer("Summani yozing.")
         return
+
     if action == "noop":
         await callback.answer()
         return
+
     if action == "bet":
         if value is None:
             await callback.answer("Stavka noto'g'ri.", show_alert=True)
             return
         await state.clear()
         view = await chicken.start_chicken_game(callback.from_user, callback.message.chat.id, int(value))
-        try:
-            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
-        except TelegramBadRequest as exc:
-            if "message is not modified" not in str(exc).lower():
-                await callback.message.answer(view.text, reply_markup=view.keyboard)
+        await _edit_or_answer(callback.message, view)
         if view.session_id:
             await chicken.set_message_id(view.session_id, callback.message.message_id)
         await callback.answer(view.alert or "O'yin boshlandi.", show_alert=view.show_alert)
         return
+
     if action == "go":
         if value is None:
             await callback.answer("Callback noto'g'ri.", show_alert=True)
@@ -898,11 +1081,7 @@ async def chicken_callback(callback: CallbackQuery, engine: GameEngine, state: F
         return
 
     if view.text:
-        try:
-            await callback.message.edit_text(view.text, reply_markup=view.keyboard)
-        except TelegramBadRequest as exc:
-            if "message is not modified" not in str(exc).lower():
-                await callback.message.answer(view.text, reply_markup=view.keyboard)
+        await _edit_or_answer(callback.message, view)
     if action in {"go", "cashout"}:
         await _enforce_overwin_for_user(callback)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
@@ -976,6 +1155,227 @@ async def gamble_mines_callback(callback: CallbackQuery, engine: GameEngine) -> 
     if action in {"o", "p", "open", "c", "cashout"}:
         await _enforce_overwin_for_mines_game(callback, game_id)
     await callback.answer(view.alert or "OK", show_alert=view.show_alert)
+
+
+@router.callback_query(F.data.startswith("jk:"))
+async def joker_cards_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
+        return
+
+    try:
+        action, owner_id, amount, extra = parse_joker_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto‘g‘ri.", show_alert=True)
+        return
+
+    if owner_id is not None and not _callback_owner_ok(callback, owner_id):
+        await callback.answer("❌ Bu o‘yin sizniki emas.", show_alert=True)
+        return
+
+    oid = int(owner_id or callback.from_user.id)
+    uid = int(callback.from_user.id)
+    joker = JokerCardsEngine(SessionLocal)
+
+    if action == "back":
+        await state.clear()
+        await _edit_text_safe(callback.message, _gamble_menu_text(), _gamble_menu_keyboard(oid))
+        await callback.answer("Menyu.")
+        return
+
+    if action in {"menu", "again"}:
+        await state.clear()
+        view = await joker.home(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Joker Cards")
+        return
+
+    if action == "stats":
+        view = await joker.show_stats(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Statistika")
+        return
+
+    if action == "hist":
+        view = await joker.show_history(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Tarix")
+        return
+
+    if action == "diff":
+        if not extra:
+            await callback.answer("Daraja noto‘g‘ri.", show_alert=True)
+            return
+        joker.set_difficulty_pref(uid, extra)
+        view = await joker.home(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer(f"Daraja: {extra}")
+        return
+
+    if action == "custom":
+        await state.set_state(JokerBetState.waiting_amount)
+        await _edit_text_safe(
+            callback.message,
+            f"✍️ <b>Joker Cards stavka</b>\n\n"
+            f"Summani yozing.\n"
+            f"Min <b>{JOKER_MIN_BET}</b> · Max <b>{JOKER_MAX_BET}</b>",
+        )
+        await callback.answer("Summani yozing")
+        return
+
+    if action in {"bet", "min", "max", "half", "all"}:
+        view = await joker.resolve_bet(uid, oid, action, amount=amount)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer(view.alert or "Kartani tanlang", show_alert=bool(view.show_alert and view.alert))
+        return
+
+    if action == "pick":
+        if amount is None or not extra or ":" not in extra:
+            await callback.answer("Tanlov noto‘g‘ri.", show_alert=True)
+            return
+        diff_s, idx_s = extra.split(":", 1)
+        if not idx_s.isdigit():
+            await callback.answer("Karta noto‘g‘ri.", show_alert=True)
+            return
+        await callback.answer("🃏 Ochilmoqda…")
+        view = await joker.play(
+            callback.from_user,
+            callback.message.chat.id,
+            int(amount),
+            diff_s,
+            int(idx_s),
+        )
+        if not view.played:
+            await _edit_or_answer(callback.message, view)
+            return
+        await _joker_card_animation(callback.message)
+        await _edit_or_answer(callback.message, view)
+        await _enforce_overwin_for_user(callback, uid)
+        return
+
+    await callback.answer("Callback noto‘g‘ri.", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("cf:"))
+async def coin_flip_callback(callback: CallbackQuery, engine: GameEngine, state: FSMContext) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    if not await engine.is_gamble_enabled():
+        await callback.answer("Bu xizmat vaqtinchalik ishlamaydi. Admin tomonidan cheklangan.", show_alert=True)
+        return
+    allowed, _link = await engine.gamble_chat_check(callback.message.chat.id)
+    if not allowed:
+        await callback.answer("🎰 Qimor bu guruhda ochilmagan. /qimor yozib to'lov qiling.", show_alert=True)
+        return
+    if await _check_daily_limit_callback(callback):
+        return
+
+    try:
+        action, owner_id, amount, extra = parse_coin_callback(callback.data or "")
+    except ValueError:
+        await callback.answer("Callback noto‘g‘ri.", show_alert=True)
+        return
+
+    if owner_id is not None and not _callback_owner_ok(callback, owner_id):
+        await callback.answer("❌ Bu o‘yin sizniki emas.", show_alert=True)
+        return
+
+    oid = int(owner_id or callback.from_user.id)
+    coin = CoinFlipEngine(SessionLocal)
+    uid = int(callback.from_user.id)
+
+    if action == "back":
+        await state.clear()
+        await _edit_text_safe(
+            callback.message,
+            _gamble_menu_text(),
+            _gamble_menu_keyboard(oid),
+        )
+        await callback.answer("Menyu.")
+        return
+
+    if action in {"menu", "again"}:
+        await state.clear()
+        view = await coin.home(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Coin Flip")
+        return
+
+    if action == "stats":
+        view = await coin.show_stats(uid, oid)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Statistika")
+        return
+
+    if action == "custom":
+        await state.set_state(CoinBetState.waiting_amount)
+        await _edit_text_safe(
+            callback.message,
+            f"✍️ <b>Custom stavka</b>\n\n"
+            f"Summani yozing.\n"
+            f"Min <b>{COIN_MIN_BET}</b> · Max <b>{COIN_MAX_BET}</b>\n\n"
+            f"/cancel — bekor",
+        )
+        await callback.answer("Summani yozing")
+        return
+
+    if action in {"bet", "min", "max", "half", "all"}:
+        mul = None
+        base = amount
+        view = await coin.resolve_preset_bet(uid, oid, action, base_amount=base, mul=mul)
+        await _edit_or_answer(callback.message, view)
+        await callback.answer(view.alert or "OK", show_alert=bool(view.show_alert and view.alert))
+        return
+
+    if action == "x":
+        if amount is None or not extra or not str(extra).isdigit():
+            await callback.answer("Stavka noto‘g‘ri.", show_alert=True)
+            return
+        view = await coin.resolve_preset_bet(uid, oid, "x", base_amount=amount, mul=int(extra))
+        await _edit_or_answer(callback.message, view)
+        await callback.answer(view.alert or "OK", show_alert=bool(view.show_alert and view.alert))
+        return
+
+    if action == "side":
+        if amount is None or not extra:
+            await callback.answer("Tanlov noto‘g‘ri.", show_alert=True)
+            return
+        view = await coin.show_confirm(uid, oid, int(amount), str(extra))
+        await _edit_or_answer(callback.message, view)
+        await callback.answer("Tasdiqlang")
+        return
+
+    if action == "go":
+        if amount is None or not extra:
+            await callback.answer("Stavka noto‘g‘ri.", show_alert=True)
+            return
+        await callback.answer("🪙 Aylanmoqda…")
+        # Settle first (server truth), then animate reveal
+        view = await coin.play(callback.from_user, callback.message.chat.id, int(amount), str(extra))
+        if not view.played:
+            await _edit_or_answer(callback.message, view)
+            if view.alert:
+                try:
+                    await callback.answer(view.alert, show_alert=view.show_alert)
+                except TelegramBadRequest:
+                    pass
+            return
+        await _coin_flip_animation(callback.message)
+        await _edit_or_answer(callback.message, view)
+        await _enforce_overwin_for_user(callback, uid)
+        return
+
+    await callback.answer("Callback noto‘g‘ri.", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("gpay:"))

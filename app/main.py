@@ -254,7 +254,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="lang", description="Tilni o'zgartirish"),
         BotCommand(command="profile", description="Profilingiz"),
         BotCommand(command="shop", description="Do'kon"),
-        BotCommand(command="qimor", description="Qimor o'yinlari"),
+        BotCommand(command="qimor", description="Qimor markazi — barcha o'yinlar"),
         BotCommand(command="topq", description="Haftalik qimor TOP"),
         BotCommand(command="give", description="Almaz berish"),
         BotCommand(command="gsend", description="Premium guruh reytingi"),
