@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject
+from aiogram.filters import BaseFilter, Command, CommandObject
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.formatting import CustomEmoji, Text, TextLink
@@ -31,11 +31,24 @@ from app.keyboards import (
     role_shop_keyboard,
     my_roles_keyboard,
     shop_keyboard,
+    vip_badge_presets_keyboard,
     vip_keyboard,
 )
 from app.models import DiamondGiveaway, DiamondTransaction, DollarTransaction, User
 from app.models import BotSetting
 from app.texts import t
+from app.vip_display import (
+    BADGE_POSITION_AFTER,
+    BADGE_POSITION_BEFORE,
+    DEFAULT_VIP_BADGE,
+    VIP_BADGE_PRESETS,
+    preview_line,
+    sanitize_vip_nickname,
+    style_from_user,
+    validate_badge_unicode,
+    validate_custom_emoji_id,
+    vip_days_left,
+)
 
 router = Router()
 DIAMOND_EMOJI_ID = "5427168083074628963"
@@ -47,6 +60,8 @@ BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
 BOXES_ENABLED = False
 TELEGRAM_GIFTS_ENABLED = True
+# In-memory VIP panel waits: "nick" | "badge_custom"
+PENDING_VIP_INPUT: dict[int, str] = {}
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
@@ -1302,8 +1317,16 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
                 user.vip_until = current_vip_until + timedelta(days=30)
             else:
                 user.vip_until = now + timedelta(days=30)
+            if not user.vip_badge:
+                user.vip_badge = DEFAULT_VIP_BADGE
+            if not user.vip_badge_position:
+                user.vip_badge_position = BADGE_POSITION_BEFORE
             await session.commit()
-        await message.answer("✅ <b>VIP User faollashtirildi!</b>\n\nMuddat: <b>30 kun</b>")
+        await message.answer(
+            "✅ <b>VIP User faollashtirildi!</b>\n\n"
+            "Muddat: <b>30 kun</b>\n"
+            "VIP panel: Do'kon → 👑 VIP yoki profil → VIP panel"
+        )
         return
 
     if not payload.startswith("diamonds:"):
@@ -1762,25 +1785,325 @@ def _user_is_vip(user: User) -> bool:
     return _vip_expires_after(user.vip_until, _utc_now())
 
 
+def _vip_panel_text(user: User) -> str:
+    style = style_from_user(user)
+    sample = style.nickname or user.display_name or "Ismingiz"
+    preview = preview_line(style, sample_name=sample)
+    if style.active:
+        days = vip_days_left(user.vip_until)
+        status = f"✅ <b>Faol</b> · {days} kun qoldi"
+        pos = "ismdan <b>oldin</b>" if style.position == BADGE_POSITION_BEFORE else "ismdan <b>keyin</b>"
+        hide = "yashirilgan" if style.hidden else "ko'rinadi"
+        nick = escape(style.nickname) if style.nickname else "—"
+        return (
+            "👑 <b>VIP panel</b>\n\n"
+            f"Status: {status}\n"
+            f"Ko'rinish: {preview}\n"
+            f"Badge joylashuvi: {pos}\n"
+            f"Badge: {hide}\n"
+            f"VIP nickname: <b>{nick}</b>\n\n"
+            "<b>Imtiyozlar</b> (o'yin qoidasiga ta'sir qilmaydi):\n"
+            "• O'yinda ism yonida badge\n"
+            "• Shaxsiy VIP nickname\n"
+            "• Telegram sovg'a / Premium\n"
+            "• Super / Mega qutilar\n\n"
+            "📦 Qutilar va sozlamalar pastda."
+        )
+    return (
+        "👑 <b>VIP panel</b>\n\n"
+        "Status: ❌ <b>Faol emas</b>\n\n"
+        "VIP bilan:\n"
+        "• O'yinda ism yonida badge (oldin/keyin)\n"
+        "• Shaxsiy VIP nickname\n"
+        "• Premium custom emoji badge\n"
+        "• Telegram sovg'a / Premium\n"
+        "• Super / Mega qutilar\n\n"
+        "Muddat: <b>30 kun</b>\n"
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>\n\n"
+        "⚠️ Badge va nickname faqat <b>ko'rinish</b> — ovoz, rol yoki yutishga ta'sir qilmaydi."
+    )
+
+
+async def _render_vip_panel(callback: CallbackQuery, user: User) -> None:
+    if callback.message is None:
+        return
+    style = style_from_user(user)
+    try:
+        await callback.message.edit_text(
+            _vip_panel_text(user),
+            reply_markup=vip_keyboard(is_active=style.active, badge_hidden=style.hidden),
+        )
+    except TelegramBadRequest:
+        pass
+
+
 @router.callback_query(F.data == "vip:open")
 async def vip_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
+    PENDING_VIP_INPUT.pop(callback.from_user.id, None)
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        await _render_vip_panel(callback, user)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "vip:badge:menu")
+async def vip_badge_menu(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
     text = (
-        "👑 <b>VIP User</b>\n\n"
-        "VIP User faollashtirish orqali siz:\n"
-        "• Telegram sovg'alarini sotib olish\n"
-        "• Telegram Premium sotib olish\n"
-        "imkoniyatiga ega bo'lasiz.\n\n"
-        "Muddat: <b>30 kun</b>\n"
-        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
+        "🏷 <b>Badge tanlash</b>\n\n"
+        "Presetlardan birini bosing.\n"
+        "Premium emoji uchun VIP paneldan «✨ Premium emoji badge» ni tanlang.\n\n"
+        "Bu faqat ism yonida ko'rinadi — o'yin mantiqiga ta'sir qilmaydi."
     )
     try:
-        await callback.message.edit_text(text, reply_markup=vip_keyboard())
+        await callback.message.edit_text(text, reply_markup=vip_badge_presets_keyboard())
     except TelegramBadRequest:
         pass
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("vip:badge:pick:"))
+async def vip_badge_pick(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    try:
+        idx = int(callback.data.rsplit(":", 1)[-1])
+        badge = VIP_BADGE_PRESETS[idx]
+    except (ValueError, IndexError):
+        await callback.answer("Noto'g'ri badge.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+        user.vip_badge = badge
+        user.vip_badge_emoji_id = None
+        await session.commit()
+        await session.refresh(user)
+        await _render_vip_panel(callback, user)
+    await callback.answer(f"Badge: {badge}", show_alert=True)
+
+
+@router.callback_query(F.data.in_({"vip:pos:before", "vip:pos:after"}))
+async def vip_badge_position(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    position = BADGE_POSITION_BEFORE if callback.data.endswith("before") else BADGE_POSITION_AFTER
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+        user.vip_badge_position = position
+        await session.commit()
+        await session.refresh(user)
+        await _render_vip_panel(callback, user)
+    await callback.answer(
+        "Badge ismdan oldinda." if position == BADGE_POSITION_BEFORE else "Badge ismdan keyin.",
+        show_alert=True,
+    )
+
+
+@router.callback_query(F.data == "vip:badge:toggle_hide")
+async def vip_badge_toggle_hide(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+        user.vip_badge_hidden = not bool(user.vip_badge_hidden)
+        await session.commit()
+        await session.refresh(user)
+        await _render_vip_panel(callback, user)
+    await callback.answer("Yangilandi.", show_alert=True)
+
+
+@router.callback_query(F.data == "vip:nick:set")
+async def vip_nick_set(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+    PENDING_VIP_INPUT[callback.from_user.id] = "nick"
+    try:
+        await callback.message.edit_text(
+            "✍️ <b>VIP nickname</b>\n\n"
+            "O'yinda shu ism ishlatiladi (badge bilan).\n"
+            "2–24 belgi. <code>&lt; &gt; @ #</code> taqiqlangan.\n\n"
+            "Yangi nikingizni shu chatga yuboring.\n"
+            "Bekor: /cancel",
+            reply_markup=vip_keyboard(is_active=True, badge_hidden=bool(user.vip_badge_hidden)),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+@router.callback_query(F.data == "vip:nick:clear")
+async def vip_nick_clear(callback: CallbackQuery) -> None:
+    if callback.from_user is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+        user.vip_nickname = None
+        await session.commit()
+        await session.refresh(user)
+        await _render_vip_panel(callback, user)
+    await callback.answer("Nickname tozalandi. Telegram ismingiz ishlatiladi.", show_alert=True)
+
+
+@router.callback_query(F.data == "vip:badge:custom")
+async def vip_badge_custom_prompt(callback: CallbackQuery) -> None:
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Callback eskirgan.", show_alert=True)
+        return
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            await callback.answer("Faqat VIP User uchun.", show_alert=True)
+            return
+    PENDING_VIP_INPUT[callback.from_user.id] = "badge_custom"
+    try:
+        await callback.message.edit_text(
+            "✨ <b>Premium / custom badge</b>\n\n"
+            "Shu chatga <b>bitta</b> emoji yuboring:\n"
+            "• Oddiy Unicode emoji, yoki\n"
+            "• Premium custom emoji (Telegram Premium)\n\n"
+            "O'yin rollari bilan chalkashadigan belgilar rad etiladi.\n"
+            "Bekor: /cancel",
+            reply_markup=vip_keyboard(is_active=True, badge_hidden=bool(user.vip_badge_hidden)),
+        )
+    except TelegramBadRequest:
+        pass
+    await callback.answer()
+
+
+class _VipPendingFilter(BaseFilter):
+    """Only match private messages while user is configuring VIP nick/badge."""
+
+    async def __call__(self, message: Message) -> bool:
+        if message.chat.type != "private" or message.from_user is None:
+            return False
+        return message.from_user.id in PENDING_VIP_INPUT
+
+
+@router.message(Command("cancel"), F.chat.type == "private")
+async def vip_cancel_input(message: Message) -> None:
+    if message.from_user is None:
+        return
+    if PENDING_VIP_INPUT.pop(message.from_user.id, None):
+        await message.answer("Bekor qilindi. VIP panel: Do'kon → 👑 VIP yoki profil tugmasi.")
+
+
+@router.message(_VipPendingFilter(), F.chat.type == "private")
+async def vip_pending_input(message: Message) -> None:
+    """Handle VIP nickname / custom badge text."""
+    if message.from_user is None:
+        return
+    mode = PENDING_VIP_INPUT.get(message.from_user.id)
+    if not mode:
+        return
+    if message.text and message.text.startswith("/"):
+        return
+
+    async with SessionLocal() as session:
+        user = (
+            await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        ).scalar_one_or_none()
+        if user is None or not _user_is_vip(user):
+            PENDING_VIP_INPUT.pop(message.from_user.id, None)
+            await message.answer("VIP muddati tugagan yoki topilmadi.")
+            return
+
+        if mode == "nick":
+            ok, result = sanitize_vip_nickname(message.text or "")
+            if not ok:
+                await message.answer(f"❌ {result}")
+                return
+            user.vip_nickname = result
+            await session.commit()
+            PENDING_VIP_INPUT.pop(message.from_user.id, None)
+            await message.answer(
+                f"✅ VIP nickname saqlandi: <b>{escape(result)}</b>\n"
+                "Keyingi o'yinga qo'shilganingizda shu ism + badge ishlatiladi."
+            )
+            return
+
+        if mode == "badge_custom":
+            entities = list(message.entities or [])
+            custom = next((e for e in entities if e.type == "custom_emoji" and e.custom_emoji_id), None)
+            if custom is not None:
+                text = message.text or message.caption or DEFAULT_VIP_BADGE
+                try:
+                    fallback = text[custom.offset : custom.offset + custom.length] or DEFAULT_VIP_BADGE
+                except Exception:
+                    fallback = DEFAULT_VIP_BADGE
+                ok, eid, fb = validate_custom_emoji_id(str(custom.custom_emoji_id), fallback)
+                if not ok:
+                    await message.answer("❌ Premium emoji qabul qilinmadi.")
+                    return
+                user.vip_badge = fb
+                user.vip_badge_emoji_id = eid
+                await session.commit()
+                PENDING_VIP_INPUT.pop(message.from_user.id, None)
+                await message.answer(
+                    f"✅ Premium badge saqlandi.\n"
+                    f"Ko'rinish: <tg-emoji emoji-id=\"{escape(eid)}\">{escape(fb)}</tg-emoji>"
+                )
+                return
+            ok, badge = validate_badge_unicode(message.text or "")
+            if not ok:
+                await message.answer(f"❌ {badge}")
+                return
+            user.vip_badge = badge
+            user.vip_badge_emoji_id = None
+            await session.commit()
+            PENDING_VIP_INPUT.pop(message.from_user.id, None)
+            await message.answer(f"✅ Badge saqlandi: {badge}")
+            return
 
 
 @router.callback_query(F.data.startswith("box:info:"))
@@ -2110,6 +2433,10 @@ async def vip_buy_diamonds(callback: CallbackQuery) -> None:
             user.vip_until = current_vip_until + timedelta(days=30)
         else:
             user.vip_until = now + timedelta(days=30)
+        if not user.vip_badge:
+            user.vip_badge = DEFAULT_VIP_BADGE
+        if not user.vip_badge_position:
+            user.vip_badge_position = BADGE_POSITION_BEFORE
         _record_diamond_transaction(
             session,
             user,
@@ -2118,6 +2445,8 @@ async def vip_buy_diamonds(callback: CallbackQuery) -> None:
             note="VIP User 30 kun",
         )
         await session.commit()
+        await session.refresh(user)
+        await _render_vip_panel(callback, user)
     await callback.answer("✅ VIP User faollashtirildi!", show_alert=True)
 
 

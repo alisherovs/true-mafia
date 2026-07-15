@@ -619,14 +619,62 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
     )
 
 
-def vip_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [diamond_icon_button("30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
-            [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
+def vip_keyboard(*, is_active: bool = False, badge_hidden: bool = False) -> InlineKeyboardMarkup:
+    """VIP hub: status, cosmetics, boxes. Display-only options do not affect game rules."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if not is_active:
+        rows.extend(
+            [
+                [InlineKeyboardButton(text="💎 30 almaz — 30 kun VIP", callback_data="vip:buy:diamonds")],
+                [InlineKeyboardButton(text="⭐ 190 stars — 30 kun VIP", callback_data="vip:buy:stars")],
+            ]
+        )
+    else:
+        rows.extend(
+            [
+                [InlineKeyboardButton(text="⏳ VIP ni uzaytirish (30💎)", callback_data="vip:buy:diamonds")],
+                [InlineKeyboardButton(text="⏳ VIP ni uzaytirish (190⭐)", callback_data="vip:buy:stars")],
+                [InlineKeyboardButton(text="🏷 Badge tanlash", callback_data="vip:badge:menu")],
+                [
+                    InlineKeyboardButton(text="◀️ Badge oldinda", callback_data="vip:pos:before"),
+                    InlineKeyboardButton(text="Badge orqada ▶️", callback_data="vip:pos:after"),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text=("👁 Badge yashirish" if not badge_hidden else "👁 Badge ko'rsatish"),
+                        callback_data="vip:badge:toggle_hide",
+                    )
+                ],
+                [InlineKeyboardButton(text="✍️ VIP nickname", callback_data="vip:nick:set")],
+                [InlineKeyboardButton(text="🗑 Nickname tozalash", callback_data="vip:nick:clear")],
+                [InlineKeyboardButton(text="✨ Premium emoji badge", callback_data="vip:badge:custom")],
+            ]
+        )
+    rows.extend(
+        [
+            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
+            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
+            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def vip_badge_presets_keyboard() -> InlineKeyboardMarkup:
+    from app.vip_display import VIP_BADGE_PRESETS
+
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for idx, badge in enumerate(VIP_BADGE_PRESETS, 1):
+        row.append(InlineKeyboardButton(text=badge, callback_data=f"vip:badge:pick:{idx - 1}"))
+        if len(row) == 4:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="◀️ VIP panel", callback_data="vip:open")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def box_info_keyboard(

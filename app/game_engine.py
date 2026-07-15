@@ -108,6 +108,16 @@ from app.hero import (
 from app.group_settings import GroupSettingsManager
 from app.scheduler import scheduler
 from app.texts import t
+from app.vip_display import (
+    format_mention,
+    format_player_button,
+    format_player_mention,
+    format_user_mention,
+    player_choice_tuple,
+    snapshot_fields,
+    style_from_user,
+    vip_days_left,
+)
 
 WELCOME_ENABLED_KEY = "welcome_enabled"
 WELCOME_TEXT_KEY = "welcome_text"
@@ -257,9 +267,23 @@ class GameEngine:
         return dt.astimezone(timezone.utc)
 
     @staticmethod
-    def _tg_mention(user_id: int, display_name: str) -> str:
-        safe_name = escape(display_name or "Unknown")
-        return f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+    def _tg_mention(user_id: int, display_name: str, player: Optional[GamePlayer] = None) -> str:
+        """HTML mention. Pass player for VIP badge (display only)."""
+        if player is not None:
+            return format_player_mention(player)
+        return format_mention(user_id, display_name or "Unknown", None)
+
+    @staticmethod
+    def _player_mention(player: GamePlayer) -> str:
+        return format_player_mention(player)
+
+    @staticmethod
+    def _player_button_label(player: GamePlayer) -> str:
+        return format_player_button(player)
+
+    @staticmethod
+    def _player_choice(player: GamePlayer) -> tuple[int, str]:
+        return player_choice_tuple(player)
 
     @staticmethod
     def _activity_now_text() -> str:
@@ -697,9 +721,9 @@ class GameEngine:
         if not players:
             return "-"
         return "\n".join(
-            f"{idx}. {self._tournament_team_emoji(player.transformed_to_team)} {self._tg_mention(player.telegram_id, player.display_name)}"
+            f"{idx}. {self._tournament_team_emoji(player.transformed_to_team)} {self._player_mention(player)}"
             if tournament and self._tournament_team_emoji(player.transformed_to_team)
-            else f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)}"
+            else f"{idx}. {self._player_mention(player)}"
             for idx, player in enumerate(players, 1)
         )
 
@@ -746,7 +770,7 @@ class GameEngine:
         return roles[:player_count]
 
     def _format_death_line(self, player: GamePlayer, cause: Optional[str] = None) -> str:
-        name = self._tg_mention(player.telegram_id, player.display_name)
+        name = self._player_mention(player)
         base = f"Tunda {role_label(player.role)} {name}"
         if cause == "mafia":
             return f"{base} Mafiya tomonidan vaxshiylarcha o'ldirildi..."
@@ -772,7 +796,7 @@ class GameEngine:
         cause: Optional[str] = None,
         visitor_label: Optional[str] = None,
     ) -> str:
-        name = self._tg_mention(player.telegram_id, player.display_name)
+        name = self._player_mention(player)
         role = role_label(player.role)
         if visitor_label:
             visitor = visitor_label
@@ -956,7 +980,7 @@ class GameEngine:
         return "\n".join(lines)
 
     def _commissar_check_result_text(self, target: GamePlayer, seen_role: Role) -> str:
-        return f"{self._tg_mention(target.telegram_id, target.display_name)} - {role_label(seen_role)}"
+        return f"{self._player_mention(target)} - {role_label(seen_role)}"
 
     @staticmethod
     def _is_day_blocked(player: GamePlayer, game: Game) -> bool:
@@ -1063,7 +1087,7 @@ class GameEngine:
 
     def _last_words_line(self, player: GamePlayer, words: str) -> str:
         safe_words = escape(words.strip()[:500])
-        name = self._tg_mention(player.telegram_id, player.display_name)
+        name = self._player_mention(player)
         return f"O'limidan oldin {name} qichqirganini eshitdi:\n{safe_words}"
 
     def _apply_role_successions(self, players: list[GamePlayer], dead_ids: set[int]) -> list[tuple[str, int, Role]]:
@@ -1647,7 +1671,7 @@ class GameEngine:
         def team_block(team_key: str) -> str:
             emoji = self._tournament_team_emoji(team_key)
             lines = [
-                f"{idx}. {emoji} {self._tg_mention(player.telegram_id, player.display_name)}"
+                f"{idx}. {emoji} {self._player_mention(player)}"
                 for idx, player in numbered_players
                 if player.transformed_to_team == team_key
             ]
@@ -1793,7 +1817,7 @@ class GameEngine:
             names = await self._format_couple_tournament_lobby_players(session, chat_id, players)
         elif players:
             names = ", ".join(
-                self._tg_mention(p.telegram_id, p.display_name)
+                self._player_mention(p)
                 for p in players
             )
         else:
@@ -1974,11 +1998,16 @@ class GameEngine:
                     return True, f"{emoji} Komandangiz o'zgartirildi."
                 return False, t(lang, "already_joined")
 
+            vip_snap = snapshot_fields(user, user.display_name or self._display_name_from_tg(tg_user))
             player = GamePlayer(
                 game_id=game_id,
                 user_id=user.id,
                 telegram_id=tg_user.id,
-                display_name=user.display_name,
+                display_name=vip_snap["display_name"],
+                vip_badge=vip_snap["vip_badge"],
+                vip_badge_emoji_id=vip_snap["vip_badge_emoji_id"],
+                vip_badge_position=vip_snap["vip_badge_position"],
+                vip_show_badge=vip_snap["vip_show_badge"],
                 transformed_to_team=tournament_team if (is_tournament or is_teamgame) else None,
             )
             session.add(player)
@@ -2189,7 +2218,7 @@ class GameEngine:
             succession_events = self._apply_role_successions(all_players, {target.telegram_id})
             await session.commit()
             game_id = game.id
-            target_mention = self._tg_mention(target.telegram_id, target.display_name)
+            target_mention = self._player_mention(target)
 
         self._invalidate_game_cache(chat_id)
         await self._safe_send_message(
@@ -2626,7 +2655,7 @@ class GameEngine:
         mafia_team = [player for player in players if player.team == Team.MAFIA.value]
         if mafia_team:
             mafia_lines = [
-                f"{idx}. {role_label(player.role)} - {self._tg_mention(player.telegram_id, player.display_name)}"
+                f"{idx}. {role_label(player.role)} - {self._player_mention(player)}"
                 for idx, player in enumerate(mafia_team, 1)
             ]
             mafia_text = "<b>Mafia jamoasi:</b>\n" + "\n".join(mafia_lines)
@@ -2642,7 +2671,7 @@ class GameEngine:
         doctors = [player for player in players if Role(player.role) == Role.DOCTOR]
         if doctors and len(doctors) > 1:
             doctor_lines = [
-                f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)}"
+                f"{idx}. {self._player_mention(player)}"
                 for idx, player in enumerate(doctors, 1)
             ]
             doctor_text = "<b>👨🏼‍⚕️ Doktor jamoasi:</b>\n" + "\n".join(doctor_lines)
@@ -2660,9 +2689,9 @@ class GameEngine:
         if commissars and sergeants:
             commissar_text = "<b>🕵🏼 Komissar Katani va Serjantlar:</b>\n"
             lines = [
-                f"🕵🏼 {self._tg_mention(c.telegram_id, c.display_name)}" for c in commissars
+                f"🕵🏼 {self._player_mention(c)}" for c in commissars
             ] + [
-                f"👮🏼 {self._tg_mention(s.telegram_id, s.display_name)}" for s in sergeants
+                f"👮🏼 {self._player_mention(s)}" for s in sergeants
             ]
             commissar_text += "\n".join(lines)
             
@@ -2684,10 +2713,10 @@ class GameEngine:
         arson_marks: Optional[dict[int, set[int]]] = None,
     ) -> Optional[tuple[str, object]]:
         role = Role(player.role)
-        all_choices = [(p.telegram_id, p.display_name) for p in alive_players]
+        all_choices = [self._player_choice(p) for p in alive_players]
         targets = [(tid, name) for tid, name in all_choices if tid != player.telegram_id]
         mafia_targets = [
-            (p.telegram_id, p.display_name)
+            self._player_choice(p)
             for p in alive_players
             if p.telegram_id != player.telegram_id and p.team != Team.MAFIA.value
         ]
@@ -3628,7 +3657,7 @@ class GameEngine:
                 )
                 await session.commit()
                 alive = await self._alive_players(session, game_id)
-                target_choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != actor_id]
+                target_choices = [self._player_choice(p) for p in alive if p.telegram_id != actor_id]
                 try:
                     await bot.send_message(
                         actor_id,
@@ -3831,7 +3860,7 @@ class GameEngine:
                 return False, t(self.settings.default_language, "action_already"), None
             alive = await self._alive_players(session, game_id)
 
-        choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != actor_id]
+        choices = [self._player_choice(p) for p in alive if p.telegram_id != actor_id]
         title = "Tekshirish" if action_key == "check" else "Otish"
         return True, title, commissar_target_keyboard(action_key, game_id, actor_id, choices)
 
@@ -3998,7 +4027,7 @@ class GameEngine:
             self._add_game_log(session, game, f"{scope}_skipped", actor=player)
             await session.commit()
             chat_id = game.chat_id
-            player_name = self._tg_mention(player.telegram_id, player.display_name)
+            player_name = self._player_mention(player)
 
         if scope == "night":
             if Role(player.role) == Role.COMMISSAR:
@@ -4236,17 +4265,17 @@ class GameEngine:
                 if target_role in {Role.DON, Role.MAFIA, Role.KILLER}:
                     snitch_group_lines.append(f"{_ce('🤓', SNITCH_EMOJI_ID)} Sotqinning izlanishlari samara berdi!")
                     snitch_group_lines.append(
-                        f"{_ce('🤓', SNITCH_EMOJI_ID)} Sotqin odamlarga {self._tg_mention(target.telegram_id, target.display_name)}ning {role_label(target_role)} ekanini sotib berdi."
+                        f"{_ce('🤓', SNITCH_EMOJI_ID)} Sotqin odamlarga {self._player_mention(target)}ning {role_label(target_role)} ekanini sotib berdi."
                     )
                     snitch_notices.append((
                         act.actor_telegram_id,
-                        f"🤓 Siz {self._tg_mention(target.telegram_id, target.display_name)}ni tekshirdingiz. U {role_label(target_role)} ekan! Odamlarga bu haqida xabar berildi.",
+                        f"🤓 Siz {self._player_mention(target)}ni tekshirdingiz. U {role_label(target_role)} ekan! Odamlarga bu haqida xabar berildi.",
                     ))
                 else:
                     snitch_group_lines.append(f"{_ce('🤓', SNITCH_EMOJI_ID)} Sotqinning izlanishlari zoya ketdi!")
                     snitch_notices.append((
                         act.actor_telegram_id,
-                        f"🤓 Siz {self._tg_mention(target.telegram_id, target.display_name)}ni tekshirdingiz. U oddiy o'yinchi ekan.",
+                        f"🤓 Siz {self._player_mention(target)}ni tekshirdingiz. U oddiy o'yinchi ekan.",
                     ))
 
             if mine_actions or miner_protectors:
@@ -4370,13 +4399,13 @@ class GameEngine:
                         gift_label = title
 
                     hojiaka_notices.append(
-                        (actor_id, f"🕌 Siz {self._tg_mention(target_player.telegram_id, target_player.display_name)}ga {gift_label} ehson qildingiz.")
+                        (actor_id, f"🕌 Siz {self._player_mention(target_player)}ga {gift_label} ehson qildingiz.")
                     )
                     hojiaka_target_notices.append(
                         (target_id, f"🕌 Hojiaka sizga {gift_label} ehson ulashdi!")
                     )
                     hojiaka_group_lines.append(
-                        f"🕌 Hojiaka {self._tg_mention(target_player.telegram_id, target_player.display_name)}ga "
+                        f"🕌 Hojiaka {self._player_mention(target_player)}ga "
                         f"{gift_label} ehson ulashdi."
                     )
 
@@ -4431,7 +4460,7 @@ class GameEngine:
                             mashka_notices.append(
                                 (
                                     actor_id,
-                                    f"🧤 Balans yo'qligi sabab {self._tg_mention(target_player.telegram_id, target_player.display_name)}dan "
+                                    f"🧤 Balans yo'qligi sabab {self._player_mention(target_player)}dan "
                                     f"♥️ {hp_loss} jon oldingiz. Qolgan jon: ♥️ {int(target_player.hero_hp or 0)}/{target_max_hp}",
                                 )
                             )
@@ -4443,7 +4472,7 @@ class GameEngine:
                                 )
                             )
                             mashka_group_lines.append(
-                                f"🧤 Mashka {self._tg_mention(target_player.telegram_id, target_player.display_name)}ning 50% jonini oldi."
+                                f"🧤 Mashka {self._player_mention(target_player)}ning 50% jonini oldi."
                             )
                             continue
                         amount = rng.choice(possible)
@@ -4470,7 +4499,7 @@ class GameEngine:
                         stolen_label = f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {amount} dollar"
 
                     mashka_notices.append(
-                        (actor_id, f"🧤 Siz {self._tg_mention(target_player.telegram_id, target_player.display_name)}dan {stolen_label} o'g'irladingiz.")
+                        (actor_id, f"🧤 Siz {self._player_mention(target_player)}dan {stolen_label} o'g'irladingiz.")
                     )
                     mashka_target_notices.append(
                         (target_id, f"🧤 Mashka sizdan {stolen_label} o'g'irladi.")
@@ -4542,7 +4571,7 @@ class GameEngine:
                 actor_player.won = True
                 arsonist_inferno_triggered = True
                 arson_group_lines.append(
-                    f"{_ce('🧟', ZOMBIE_EMOJI_ID)} G'azabkor {self._tg_mention(actor_player.telegram_id, actor_player.display_name)} alangani yoqdi!"
+                    f"{_ce('🧟', ZOMBIE_EMOJI_ID)} G'azabkor {self._player_mention(actor_player)} alangani yoqdi!"
                 )
                 for marked_id in marked_ids:
                     marked_player = player_map.get(marked_id)
@@ -4553,7 +4582,7 @@ class GameEngine:
                     death_visitors[marked_id] = role_label(Role.ARSONIST)
                     marked_player.won = False
                     arson_group_lines.append(
-                        f"🔥 {self._tg_mention(marked_player.telegram_id, marked_player.display_name)} G'azabkor alangasida yonib ketdi."
+                        f"🔥 {self._player_mention(marked_player)} G'azabkor alangasida yonib ketdi."
                     )
 
             mafia_fallback_as_don = False
@@ -4732,7 +4761,7 @@ class GameEngine:
                             (
                                 observer.telegram_id,
                                 f"{_ce('🍾', BOTTLE_EMOJI_ID)} Siz kimningdir jonsiz jasadi ustida "
-                                f"{self._tg_mention(victim.telegram_id, victim.display_name)} - {role_label(victim.role)} "
+                                f"{self._player_mention(victim)} - {role_label(victim.role)} "
                                 f"yonida {visitor} turganini ko'rdingiz.",
                             )
                         )
@@ -4756,22 +4785,22 @@ class GameEngine:
                         visitor_names = []
                         for visitor_id in visitor_ids:
                             visitor = player_map[visitor_id]
-                            visitor_text = self._tg_mention(visitor.telegram_id, visitor.display_name)
+                            visitor_text = self._player_mention(visitor)
                             if Role(visitor.role) != Role.COMMISSAR:
                                 visitor_text += f" - {role_label(visitor.role)}"
                             visitor_names.append(visitor_text)
                     else:
                         visitor_names = [
-                            self._tg_mention(visitor_id, player_map[visitor_id].display_name)
+                            self._player_mention(player_map[visitor_id])
                             for visitor_id in visitor_ids
                         ]
                     text = (
-                        f"🔎 Siz {self._tg_mention(watched_player.telegram_id, watched_player.display_name)}ni kuzatdingiz.\n"
+                        f"🔎 Siz {self._player_mention(watched_player)}ni kuzatdingiz.\n"
                         "Uning oldiga kelganlar: " + ", ".join(visitor_names)
                     )
                 else:
                     text = (
-                        f"🔎 Siz {self._tg_mention(watched_player.telegram_id, watched_player.display_name)}ni kuzatdingiz.\n"
+                        f"🔎 Siz {self._player_mention(watched_player)}ni kuzatdingiz.\n"
                         "Bu tunda uning oldiga hech kim kelmadi."
                     )
                 watcher_lines.append((watcher_id, text))
@@ -4876,7 +4905,7 @@ class GameEngine:
                     if attacker_player is not None:
                         night_event_lines.append(
                             f"{_ce('💣', SKULL_EMOJI_ID)} Afsungar uni o'ldirgan "
-                            f"{self._tg_mention(attacker_player.telegram_id, attacker_player.display_name)}ni "
+                            f"{self._player_mention(attacker_player)}ni "
                             "avtomatik jahannamga olib ketdi."
                         )
 
@@ -5106,9 +5135,10 @@ class GameEngine:
 
         for doctor_id, saved_id, saved_telegram_id, attacker_label in doctor_save_notices:
             saved_player = player_map.get(saved_id)
-            saved_name = self._tg_mention(
-                saved_telegram_id,
-                saved_player.display_name if saved_player else str(saved_telegram_id),
+            saved_name = (
+                self._player_mention(saved_player)
+                if saved_player is not None
+                else self._tg_mention(saved_telegram_id, str(saved_telegram_id))
             )
             try:
                 await bot.send_message(
@@ -5423,7 +5453,7 @@ class GameEngine:
                 timeout=await self.group_timeout(game.chat_id, "day_voting_timeout"),
             )
             await session.commit()
-            choices = [(p.telegram_id, p.display_name) for p in alive]
+            choices = [self._player_choice(p) for p in alive]
             lang = await self.get_group_language(game.chat_id)
             voting_timeout = await self.group_timeout(game.chat_id, "day_voting_timeout")
 
@@ -5515,8 +5545,9 @@ class GameEngine:
             self._add_game_log(session, game, "vote_cast", actor=voter, target=target)
             await session.commit()
             chat_id = game.chat_id
-            voter_name = self._tg_mention(voter.telegram_id, voter.display_name)
-            target_name = self._tg_mention(target.telegram_id, target_display_name)
+            voter_name = self._player_mention(voter)
+            target_name = self._player_mention(target)
+            target_display_name = self._player_button_label(target)
 
         await bot.send_message(chat_id, f"{voter_name} ovoz berdi {target_name} ga")
         return True, f"Siz {target_display_name} ni tanladingiz."
@@ -5565,7 +5596,7 @@ class GameEngine:
                 return False, "Siz ovoz berishni o'tkazib yuborgansiz."
             alive = await self._alive_players(session, game_id)
 
-        choices = [(p.telegram_id, p.display_name) for p in alive if p.telegram_id != voter_id]
+        choices = [self._player_choice(p) for p in alive if p.telegram_id != voter_id]
         sent = await self._safe_send_message(
             bot,
             voter_id,
@@ -5731,7 +5762,7 @@ class GameEngine:
             confirm_message = await self._safe_send_message(
                 bot,
                 chat_id,
-                f"Rostdan xam {self._tg_mention(target.telegram_id, target.display_name)}ni osmoqchimisiz?",
+                f"Rostdan xam {self._player_mention(target)}ni osmoqchimisiz?",
                 reply_markup=confirm_hang_keyboard(game_id, target.telegram_id),
             )
             scheduler.add_job(
@@ -5748,7 +5779,7 @@ class GameEngine:
                     await bot.send_message(
                         judge.telegram_id,
                         "🧑‍⚖️ <b>Sudya qarori</b>\n\n"
-                        f"Aholi {self._tg_mention(target.telegram_id, target.display_name)}ni osmoqchi. "
+                        f"Aholi {self._player_mention(target)}ni osmoqchi. "
                         "O'yinda bir marta bu hukmni bekor qilishingiz mumkin.",
                         reply_markup=judge_cancel_keyboard(
                             game_id,
@@ -6014,7 +6045,7 @@ class GameEngine:
                 )
             ).scalars().all()
             chat_id = game.chat_id
-            judge_name = self._tg_mention(judge.telegram_id, judge.display_name)
+            judge_name = self._player_mention(judge)
 
             await self._apply_inactivity_after_vote(bot, session, game, votes)
             winner = await self.check_winner(game_id)
@@ -6126,7 +6157,7 @@ class GameEngine:
                     await self._safe_send_message(
                         bot,
                         chat_id,
-                        f"⚖️ {self._tg_mention(target.telegram_id, target.display_name)} o'z himoyasini ishlatdi. Osishni bekor qildi.",
+                        f"⚖️ {self._player_mention(target)} o'z himoyasini ishlatdi. Osishni bekor qildi.",
                     )
                     try:
                         await bot.send_message(
@@ -6153,7 +6184,7 @@ class GameEngine:
                     vote_text = (
                         "<b>Ovoz berish natijalari:</b>\n"
                         f"{yes_votes} 👍  |  {no_confirm} 👎\n\n"
-                        f"{self._tg_mention(target.telegram_id, target.display_name)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
+                        f"{self._player_mention(target)} O'tkazilgan kunduzgi yiģilishda osildi!\n"
                         f"U edi {role_label(target.role)}.."
                     )
                     all_players_for_day_death = (
@@ -6181,7 +6212,7 @@ class GameEngine:
                         await self._safe_send_message(
                             bot,
                             chat_id,
-                            f"🎭 Masxaraboz {self._tg_mention(target.telegram_id, target.display_name)} "
+                            f"🎭 Masxaraboz {self._player_mention(target)} "
                             "o'z xohishiga yetdi va alohida g'olib bo'ldi!"
                         )
 
@@ -6205,7 +6236,7 @@ class GameEngine:
                     if Role(target.role) == Role.SORCERER:
                         extra_day_dead = set()
                         alive_now = await self._alive_players(session, game_id)
-                        candidates = [(p.telegram_id, p.display_name) for p in alive_now if p.telegram_id != target.telegram_id]
+                        candidates = [self._player_choice(p) for p in alive_now if p.telegram_id != target.telegram_id]
                         if candidates:
                             await session.commit()
                             await self._safe_send_message(
@@ -6221,7 +6252,7 @@ class GameEngine:
                             await self._safe_send_message(
                                 bot,
                                 chat_id,
-                                f"🧞‍♂️ {self._tg_mention(target.telegram_id, target.display_name)} qasos uchun nishon tanlayapti...",
+                                f"🧞‍♂️ {self._player_mention(target)} qasos uchun nishon tanlayapti...",
                             )
                     else:
                         extra_day_dead = set()
@@ -6335,7 +6366,7 @@ class GameEngine:
             await self._safe_send_message(
                 bot,
                 game.chat_id,
-                f"{_ce('💣', SKULL_EMOJI_ID)} Afsungar afsun qildi va {self._tg_mention(target.telegram_id, target.display_name)}ni jahannamga olib ketdi!\n\n"
+                f"{_ce('💣', SKULL_EMOJI_ID)} Afsungar afsun qildi va {self._player_mention(target)}ni jahannamga olib ketdi!\n\n"
                 f"U edi {role_label(target.role)}",
             )
             for line in couple_revenge_lines:
@@ -6425,7 +6456,7 @@ class GameEngine:
                 await self._safe_send_message(
                     bot,
                     chat_id,
-                    f"💀 Sehrgar {self._tg_mention(attacker.telegram_id, attacker.display_name)} "
+                    f"💀 Sehrgar {self._player_mention(attacker)} "
                     f"({role_label(attacker.role)}) xatosini kechirmadi, lekin u allaqachon o'lgan edi.",
                 )
                 return True, "Nishon allaqachon o'lgan."
@@ -6453,7 +6484,7 @@ class GameEngine:
             await self._safe_send_message(
                 bot,
                 chat_id,
-                f"💀 Sehrgar {self._tg_mention(attacker.telegram_id, attacker.display_name)} "
+                f"💀 Sehrgar {self._player_mention(attacker)} "
                 f"({role_label(attacker.role)}) xatosini kechirmadi va oldirdi!",
             )
             for line in couple_judgement_lines:
@@ -6577,10 +6608,10 @@ class GameEngine:
                     await bot.send_message(
                         actor_id,
                         (
-                            f"🃏 {self._tg_mention(target_id, target_player.display_name if target_player else str(target_id))} "
+                            f"🃏 {self._player_mention(target_player) if target_player else self._tg_mention(target_id, str(target_id))} "
                             f"{death_label} o'lim kartasini tanladi."
                         ) if is_dead else (
-                            f"🃏 {self._tg_mention(target_id, target_player.display_name if target_player else str(target_id))} omon qoldi."
+                            f"🃏 {self._player_mention(target_player) if target_player else self._tg_mention(target_id, str(target_id))} omon qoldi."
                         ),
                         reply_markup=await self.group_return_keyboard(bot, game.chat_id),
                     )
@@ -6874,7 +6905,7 @@ class GameEngine:
 
         def result_player_line(idx: int, player: GamePlayer) -> str:
             team_emoji = self._tournament_team_emoji(player.transformed_to_team) if (is_tournament or is_teamgame) else ""
-            name = self._tg_mention(player.telegram_id, player.display_name)
+            name = self._player_mention(player)
             if team_emoji:
                 name = f"{team_emoji} {name}"
             return f"{idx}. {name} - {role_label(player.role)}"
@@ -6891,6 +6922,22 @@ class GameEngine:
         winners_block = "\n".join(winner_lines) if winner_lines else "-"
         losers_block = "\n".join(loser_lines) if loser_lines else "-"
 
+        money_lines: list[str] = []
+        for idx, p in enumerate(list(winners) + list(losers), 1):
+            dollar_amt, diamond_amt, used_bonus = reward_by_user.get(p.telegram_id, (0, 0, False))
+            bonus_mark = " · 📰2x" if used_bonus else ""
+            diamond_part = (
+                f" · <tg-emoji emoji-id=\"{DIAMOND_EMOJI_ID}\">💎</tg-emoji> <b>{diamond_amt}</b>"
+                if diamond_amt
+                else ""
+            )
+            money_lines.append(
+                f"{idx}. {self._player_mention(p)} — "
+                f"<tg-emoji emoji-id=\"{DOLLAR_EMOJI_ID}\">💵</tg-emoji> <b>{dollar_amt}</b>"
+                f"{diamond_part}{bonus_mark}"
+            )
+        money_block = "\n".join(money_lines) if money_lines else "-"
+
         news_channel = self._news_bonus_channel_id()
         bonus_hint = f"\n\n📰 <i>{news_channel} kanaliga obuna bo'ling va 2x mukofot oling!</i>"
 
@@ -6900,6 +6947,8 @@ class GameEngine:
             f"{winners_block}\n\n"
             "Mag'lublar:\n"
             f"{losers_block}\n\n"
+            "💰 <b>Mukofotlar:</b>\n"
+            f"{money_block}\n\n"
             f"O'yin: {self._format_duration(duration_seconds)} davom etdi"
             f"{bonus_hint}"
         )
@@ -6977,9 +7026,17 @@ class GameEngine:
             except ValueError:
                 return value
 
-        display_name = GameEngine._tg_mention(user.telegram_id, user.display_name)
+        display_name = format_user_mention(user)
+        style = style_from_user(user)
+        if style.active:
+            days = vip_days_left(user.vip_until)
+            vip_line = f"\n👑 VIP: ✅ ({days} kun) · badge: {style.position}"
+            if style.nickname:
+                vip_line += f"\n🏷 VIP nik: <b>{escape(style.nickname)}</b>"
+        else:
+            vip_line = "\n👑 VIP: ❌"
         return (
-            f"👤 Nik: {display_name}\n"
+            f"👤 Nik: {display_name}{vip_line}\n"
             f"<tg-emoji emoji-id=\"{STAR_EMOJI_ID}\">⭐</tg-emoji> ID: <code>{user.telegram_id}</code>\n\n"
             f"<tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> Dollar: <b>{user.dollar}</b>\n"
             f"<tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> Olmos: <b>{user.diamonds}</b>\n\n"
@@ -7011,26 +7068,46 @@ class GameEngine:
             except ValueError:
                 return value
 
-        display_name = TextLink(user.display_name or "Unknown", url=f"tg://user?id={user.telegram_id}")
-        vip_status = ""
-        if user.vip_until:
-            now = datetime.now(timezone.utc)
-            vip_until = user.vip_until
-            if vip_until.tzinfo is None:
-                vip_until = vip_until.replace(tzinfo=timezone.utc)
-            else:
-                vip_until = vip_until.astimezone(timezone.utc)
-            if vip_until > now:
-                remaining = vip_until - now
-                days = remaining.days
-                vip_status = f"\n👑 VIP: ✅ ({days} kun qoldi)"
-            else:
-                vip_status = "\n👑 VIP: ❌ (muddati tugagan)"
+        style = style_from_user(user)
+        shown_name = style.nickname if (style.active and style.nickname) else (user.display_name or "Unknown")
+        display_name = TextLink(shown_name, url=f"tg://user?id={user.telegram_id}")
+        vip_parts: list[Any] = []
+        if style.active:
+            days = vip_days_left(user.vip_until)
+            vip_parts.extend(["\n👑 VIP: ✅ (", str(days), " kun)"])
+            if style.show_badge:
+                if style.badge_emoji_id and str(style.badge_emoji_id).isdigit():
+                    vip_parts.extend(
+                        [
+                            " · ",
+                            CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id)),
+                            f" ({style.position})",
+                        ]
+                    )
+                else:
+                    vip_parts.append(f" · {style.badge or '👑'} ({style.position})")
+            if style.nickname:
+                vip_parts.append(f"\n🏷 VIP nik: {style.nickname}")
+        else:
+            vip_parts.append("\n👑 VIP: ❌")
         return Text(
-            "👤 Nik: ", display_name, "\n",
+            "👤 Nik: ",
+            *(
+                [CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id)), " "]
+                if style.show_badge and style.badge_emoji_id and style.position != "after"
+                else ([f"{style.badge} "] if style.show_badge and style.position != "after" else [])
+            ),
+            display_name,
+            *(
+                [" ", CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id))]
+                if style.show_badge and style.badge_emoji_id and style.position == "after"
+                else ([f" {style.badge}"] if style.show_badge and style.position == "after" else [])
+            ),
+            *vip_parts,
+            "\n",
             CustomEmoji("⭐", custom_emoji_id=STAR_EMOJI_ID), " ID: ", Code(str(user.telegram_id)), "\n\n",
             CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID), " Dollar: ", Bold(str(user.dollar)), "\n",
-            CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), vip_status, "\n\n",
+            CustomEmoji("💎", custom_emoji_id=DIAMOND_EMOJI_ID), " Olmos: ", Bold(str(user.diamonds)), "\n\n",
             "🛡 Himoya: ", Bold(str(user.protection)), f" {state(user.use_protection)}\n",
             "🧿 Qotildan himoya: ", Bold(str(user.killer_protection)), f" {state(user.use_killer_protection)}\n",
             "⚖️ Ovoz berishni himoya qilish: ", Bold(str(user.vote_protection)), f" {state(user.use_vote_protection)}\n",
@@ -7749,7 +7826,7 @@ class GameEngine:
             for idx, player in enumerate(players, 1):
                 mark = " ☠️" if not player.alive or int(player.hero_hp or 0) <= 0 else ""
                 lines.append(
-                    f"{idx}. {self._tg_mention(player.telegram_id, player.display_name)} — "
+                    f"{idx}. {self._player_mention(player)} — "
                     f"♥️ {int(player.hero_hp or 0)}/{int(player.hero_max_hp or HERO_DEFAULT_HP)}{mark}"
                 )
             return True, "\n".join(lines)
@@ -7886,7 +7963,7 @@ class GameEngine:
                         player.alive = False
                         player.death_day = game.day_number
                 succession_events = self._apply_role_successions(all_players, hero_dead_ids)
-                target_name = self._tg_mention(target.telegram_id, target.display_name)
+                target_name = self._player_mention(target)
                 kill_text = (
                     f"⚰️ {role_label(target.role)} {target_name}ni {role_label(attacker.role)} "
                     "o'zining jasur geroyi bilan yer tishlatdi!"
@@ -10180,6 +10257,7 @@ class GameEngine:
             rows = (
                 await session.execute(
                     select(
+                        GamePlayer.telegram_id,
                         GamePlayer.display_name,
                         func.sum(case((GamePlayer.won.is_(True), 1), else_=0)).label("wins"),
                         func.count(GamePlayer.id).label("total"),
@@ -10191,7 +10269,20 @@ class GameEngine:
                     .limit(limit)
                 )
             ).all()
-            return [(name, int(wins or 0), int(total or 0)) for name, wins, total in rows]
+            tg_ids = [int(tg) for tg, *_ in rows]
+            users = {
+                u.telegram_id: u
+                for u in (
+                    await session.execute(select(User).where(User.telegram_id.in_(tg_ids)))
+                ).scalars().all()
+                if tg_ids
+            }
+            result: list[tuple[str, int, int]] = []
+            for tg, name, wins, total in rows:
+                user = users.get(int(tg))
+                label = format_user_mention(user) if user is not None else escape(str(name or tg))
+                result.append((label, int(wins or 0), int(total or 0)))
+            return result
 
     async def weekly_activity_top_text(
         self,

@@ -90,6 +90,11 @@ async def _ensure_lightweight_columns(conn) -> None:
             "total_games": "INTEGER DEFAULT 0",
             "play_locked_until": "DATETIME",
             "vip_until": "DATETIME",
+            "vip_badge": "VARCHAR(32) DEFAULT '👑'",
+            "vip_badge_emoji_id": "VARCHAR(64)",
+            "vip_badge_position": "VARCHAR(16) DEFAULT 'before'",
+            "vip_badge_hidden": "BOOLEAN DEFAULT FALSE",
+            "vip_nickname": "VARCHAR(64)",
         },
     )
     await add_missing_columns(
@@ -166,6 +171,10 @@ async def _ensure_lightweight_columns(conn) -> None:
             "killed_by_hero": "BOOLEAN DEFAULT FALSE",
             "sorcerer_revenge_used": "BOOLEAN DEFAULT FALSE",
             "left_game": "BOOLEAN DEFAULT FALSE",
+            "vip_badge": "VARCHAR(32)",
+            "vip_badge_emoji_id": "VARCHAR(64)",
+            "vip_badge_position": "VARCHAR(16) DEFAULT 'before'",
+            "vip_show_badge": "BOOLEAN DEFAULT FALSE",
         },
     )
     await add_missing_columns(
