@@ -7724,6 +7724,151 @@ class GameEngine:
                 pass
         return True, buyer_text
 
+    async def owner_heroes_page(
+        self,
+        page: int = 0,
+        per_page: int = 8,
+    ) -> tuple[str, list[tuple[int, str]], int, int]:
+        """Return (text, [(hero_id, button_label)], page, total_pages)."""
+        safe_page = max(0, int(page or 0))
+        safe_per = max(1, min(int(per_page or 8), 15))
+        async with self.session_factory() as session:
+            total = int(await session.scalar(select(func.count(Hero.id))) or 0)
+            total_pages = max(1, (total + safe_per - 1) // safe_per) if total else 1
+            if safe_page >= total_pages:
+                safe_page = total_pages - 1
+            offset = safe_page * safe_per
+            rows = (
+                await session.execute(
+                    select(Hero, User)
+                    .join(User, User.id == Hero.owner_user_id)
+                    .order_by(Hero.level.desc(), Hero.points.desc(), Hero.id.desc())
+                    .offset(offset)
+                    .limit(safe_per)
+                )
+            ).all()
+
+        if total == 0:
+            return "🥷 <b>Geroylar</b>\n\nHozircha hech kimda geroy yo'q.", [], 0, 1
+
+        lines = [
+            "🥷 <b>Geroylar ro'yxati</b>",
+            "",
+            f"Jami: <b>{total}</b> · Sahifa: <b>{safe_page + 1}/{total_pages}</b>",
+            "",
+        ]
+        buttons: list[tuple[int, str]] = []
+        for idx, (hero, user) in enumerate(rows, offset + 1):
+            self._sync_hero_level(hero)
+            owner_name = escape(user.display_name or str(user.telegram_id))
+            hname = safe_hero_name(hero.name)
+            sale = " · 🏷" if hero.is_for_sale else ""
+            lines.append(
+                f"{idx}. {hname} · Lv{int(hero.level or 1)} · "
+                f"{owner_name} (<code>{user.telegram_id}</code>){sale}"
+            )
+            label = f"{hname} · {user.telegram_id}"
+            if len(label) > 48:
+                label = label[:47] + "..."
+            buttons.append((int(hero.id), label))
+
+        lines.append("")
+        lines.append("Pastdan geroyni tanlab batafsil / olib qo'yish mumkin.")
+        return "\n".join(lines), buttons, safe_page, total_pages
+
+    async def owner_hero_detail_text(self, hero_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    select(Hero, User).join(User, User.id == Hero.owner_user_id).where(Hero.id == hero_id)
+                )
+            ).first()
+            if row is None:
+                return False, "❌ Geroy topilmadi."
+            hero, user = row
+            self._sync_hero_level(hero)
+            info = hero_level_for_points(int(hero.points or 0))
+            sale_line = (
+                f"🏷 Sotuvda: <tg-emoji emoji-id=\"{DIAMOND_EMOJI_ID}\">💎</tg-emoji> "
+                f"<b>{int(hero.sale_price_diamonds or 0)}</b>"
+                if hero.is_for_sale
+                else "🏷 Sotuvda: yo'q"
+            )
+            username_line = f"@{escape(user.username)}" if user.username else "-"
+            text = (
+                "🥷 <b>Geroy tafsiloti</b>\n\n"
+                f"ID: <code>{hero.id}</code>\n"
+                f"Ism: <b>{safe_hero_name(hero.name)}</b>\n"
+                f"Daraja: <b>{info.level}</b>\n"
+                f"Ball: <b>{int(hero.points or 0)}</b>\n"
+                f"Kuch: <b>{info.power_text}</b>\n"
+                f"Himoya: <b>{int(hero.current_defense or 0)}%</b> / max {HERO_FULL_DEFENSE_PERCENT}%\n"
+                f"Zaryad: <b>{int(hero.charge or 0)}</b>/{int(hero.max_charge or HERO_MAX_CHARGE)}\n"
+                f"{sale_line}\n\n"
+                f"👤 Egasi: {self._tg_mention(user.telegram_id, user.display_name or str(user.telegram_id))}\n"
+                f"Telegram ID: <code>{user.telegram_id}</code>\n"
+                f"Username: {username_line}"
+            )
+            return True, text
+
+    async def owner_remove_hero(self, bot: Bot, hero_id: int, *, notify_owner: bool = True) -> tuple[bool, str]:
+        channel_id = await self.get_hero_market_channel_id()
+        async with self.session_factory() as session:
+            row = (
+                await session.execute(
+                    select(Hero, User).join(User, User.id == Hero.owner_user_id).where(Hero.id == hero_id)
+                )
+            ).first()
+            if row is None:
+                return False, "❌ Geroy topilmadi (allaqachon o'chirilgan bo'lishi mumkin)."
+            hero, user = row
+            owner_tg = int(user.telegram_id)
+            owner_name = user.display_name or str(owner_tg)
+            hero_name = safe_hero_name(hero.name)
+            message_id = hero.sale_channel_message_id
+            was_sale = bool(hero.is_for_sale)
+            await session.delete(hero)
+            await session.commit()
+
+        if was_sale and channel_id and message_id:
+            try:
+                await bot.edit_message_text(
+                    "🚫 <b>Admin tomonidan olib tashlandi</b>",
+                    chat_id=channel_id,
+                    message_id=message_id,
+                )
+            except Exception:
+                try:
+                    await bot.delete_message(chat_id=channel_id, message_id=message_id)
+                except Exception:
+                    pass
+
+        if notify_owner:
+            try:
+                await bot.send_message(owner_tg, f"🚫 Admin sizning <b>{hero_name}</b> geroyingizni olib qo'ydi.")
+            except Exception:
+                pass
+
+        return (
+            True,
+            f"✅ Geroy olib tashlandi.\n\n"
+            f"🥷 {hero_name} (ID <code>{hero_id}</code>)\n"
+            f"👤 {escape(owner_name)} · <code>{owner_tg}</code>",
+        )
+
+    async def owner_remove_hero_by_telegram_id(self, bot: Bot, telegram_id: int) -> tuple[bool, str]:
+        async with self.session_factory() as session:
+            hero_id = (
+                await session.execute(
+                    select(Hero.id)
+                    .join(User, User.id == Hero.owner_user_id)
+                    .where(User.telegram_id == telegram_id)
+                )
+            ).scalar_one_or_none()
+        if hero_id is None:
+            return False, f"❌ <code>{telegram_id}</code> da geroy topilmadi."
+        return await self.owner_remove_hero(bot, int(hero_id), notify_owner=True)
+
     async def user_in_running_game(self, telegram_id: int) -> bool:
         async with self.session_factory() as session:
             player_id = (

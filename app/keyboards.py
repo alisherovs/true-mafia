@@ -911,8 +911,50 @@ def owner_hero_market_keyboard(has_channel: bool) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="➕ Qo'shish / o'zgartirish", callback_data="owner:hero_market_set")]]
     if has_channel:
         rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:hero_market_clear")])
+    rows.append([InlineKeyboardButton(text="🥷 Geroylar ro'yxati", callback_data="owner:heroes:0")])
     rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def owner_heroes_list_keyboard(
+    hero_buttons: list[tuple[int, str]],
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for hero_id, label in hero_buttons:
+        rows.append([InlineKeyboardButton(text=f"🥷 {label}", callback_data=f"owner:hero_view:{hero_id}")])
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"owner:heroes:{page - 1}"))
+    if page + 1 < total_pages:
+        nav.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"owner:heroes:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="🔎 ID orqali olib qo'yish", callback_data="owner:hero_remove_by_id")])
+    rows.append([InlineKeyboardButton(text="🔄 Yangilash", callback_data=f"owner:heroes:{page}")])
+    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def owner_hero_detail_keyboard(hero_id: int, page: int = 0) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Geroyni olib qo'yish", callback_data=f"owner:hero_remove_ask:{hero_id}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data=f"owner:heroes:{page}")],
+            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
+        ]
+    )
+
+
+def owner_hero_remove_confirm_keyboard(hero_id: int, page: int = 0) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Ha, olib tashla", callback_data=f"owner:hero_remove_do:{hero_id}")],
+            [InlineKeyboardButton(text="❌ Bekor", callback_data=f"owner:hero_view:{hero_id}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data=f"owner:heroes:{page}")],
+        ]
+    )
 
 
 def role_shop_keyboard() -> InlineKeyboardMarkup:
@@ -1016,6 +1058,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
             [InlineKeyboardButton(text="📺 Kanal sovg'a balansi", callback_data="owner:channel_gifts")],
             [InlineKeyboardButton(text="🥷 Geroy savdo kanali", callback_data="owner:hero_market_channel")],
+            [InlineKeyboardButton(text="🥷 Geroylar ro'yxati", callback_data="owner:heroes:0")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],

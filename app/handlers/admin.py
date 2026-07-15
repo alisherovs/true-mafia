@@ -18,7 +18,10 @@ from app.keyboards import (
     owner_diamond_top_keyboard,
     owner_dollar_top_keyboard,
     owner_gamble_keyboard,
+    owner_hero_detail_keyboard,
     owner_hero_market_keyboard,
+    owner_hero_remove_confirm_keyboard,
+    owner_heroes_list_keyboard,
     owner_invoice_after_keyboard,
     owner_invoice_delivery_keyboard,
     owner_invoice_menu_keyboard,
@@ -103,6 +106,7 @@ OWNER_COMMANDS_TEXT = (
     "Xarid admini - almaz xaridi uchun admin username sozlash\n"
     "Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqarish\n"
     "Geroy savdo kanali - geroy marketplace kanalini ulash\n"
+    "Geroylar ro'yxati - barcha geroylar va olib qo'yish\n"
     "Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqarish\n"
     "Userlarga reklama - barcha userlarga xabar yuborish\n"
     "Guruhlarga reklama - barcha guruhlarga xabar yuborish\n"
@@ -602,6 +606,104 @@ async def owner_news_clear_callback(callback: CallbackQuery, engine: GameEngine,
     text = await engine.clear_news_channel_url()
     await _safe_edit(callback, text, reply_markup=owner_news_channel_keyboard(False))
     await callback.answer("O'chirildi.")
+
+
+@router.callback_query(F.data.regexp(r"^owner:heroes:\d+$"))
+async def owner_heroes_list_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    try:
+        page = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        page = 0
+    text, buttons, page, total_pages = await engine.owner_heroes_page(page=page, per_page=8)
+    await _safe_edit(callback, text, reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages))
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^owner:hero_view:\d+$"))
+async def owner_hero_view_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    try:
+        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Noto'g'ri ID.", show_alert=True)
+        return
+    ok, text = await engine.owner_hero_detail_text(hero_id)
+    if not ok:
+        await callback.answer(text, show_alert=True)
+        text_list, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
+        await _safe_edit(callback, text_list, reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages))
+        return
+    await _safe_edit(callback, text, reply_markup=owner_hero_detail_keyboard(hero_id, page=0))
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^owner:hero_remove_ask:\d+$"))
+async def owner_hero_remove_ask_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    try:
+        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Noto'g'ri ID.", show_alert=True)
+        return
+    ok, detail = await engine.owner_hero_detail_text(hero_id)
+    if not ok:
+        await callback.answer(detail, show_alert=True)
+        return
+    text = (
+        f"{detail}\n\n"
+        "⚠️ <b>Geroyni butunlay olib tashlamoqchimisiz?</b>\n"
+        "Bu amal qaytarilmaydi. Egaga xabar yuboriladi."
+    )
+    await _safe_edit(callback, text, reply_markup=owner_hero_remove_confirm_keyboard(hero_id, page=0))
+    await callback.answer()
+
+
+@router.callback_query(F.data.regexp(r"^owner:hero_remove_do:\d+$"))
+async def owner_hero_remove_do_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    try:
+        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
+    except ValueError:
+        await callback.answer("Noto'g'ri ID.", show_alert=True)
+        return
+    ok, text = await engine.owner_remove_hero(callback.bot, hero_id, notify_owner=True)
+    if not ok:
+        await callback.answer(text, show_alert=True)
+    list_text, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
+    await _safe_edit(
+        callback,
+        f"{text}\n\n{list_text}",
+        reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages),
+    )
+    await callback.answer("✅ Bajarildi." if ok else "Xato", show_alert=not ok)
+
+
+@router.callback_query(F.data == "owner:hero_remove_by_id")
+async def owner_hero_remove_by_id_callback(callback: CallbackQuery, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS[callback.from_user.id] = "hero_remove_telegram_id"
+    await _safe_edit(
+        callback,
+        "🔎 <b>Geroy olib qo'yish</b>\n\n"
+        "Egasi Telegram ID sini yuboring.\n"
+        "Masalan: <code>123456789</code>\n\n"
+        "Bekor: /cancel yoki Admin panelga qayting.",
+        reply_markup=owner_wait_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(F.data == "owner:hero_market_channel")
@@ -1137,6 +1239,23 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
             await message.answer(text, reply_markup=owner_wait_keyboard())
             return True
         await message.answer(text, reply_markup=owner_hero_market_keyboard(True))
+        return True
+
+    if action == "hero_remove_telegram_id":
+        raw = (message.text or "").strip()
+        if not raw.isdigit():
+            PENDING_OWNER_ACTIONS[message.from_user.id] = "hero_remove_telegram_id"
+            await message.answer(
+                "Faqat Telegram ID (raqam) yuboring.\nMasalan: <code>123456789</code>",
+                reply_markup=owner_wait_keyboard(),
+            )
+            return True
+        ok, text = await engine.owner_remove_hero_by_telegram_id(message.bot, int(raw))
+        list_text, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
+        await message.answer(
+            f"{text}\n\n{list_text}",
+            reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages),
+        )
         return True
 
     if action == "channel_gifts_view":
