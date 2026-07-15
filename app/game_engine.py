@@ -148,6 +148,7 @@ POLICE_EMOJI_ID = "5377754411319698237"
 GUN_EMOJI_ID = "5222486447306602688"
 SKULL_EMOJI_ID = "5469654973308476699"
 VIP_STATUS_EMOJI_ID = "5438496463044752972"
+VIP_MONEY_STATS_EMOJI_ID = "5348070436343134224"
 
 
 def _ce(symbol: str, emoji_id: str) -> str:
@@ -279,12 +280,29 @@ class GameEngine:
         return format_player_mention(player)
 
     @staticmethod
+    def _stats_player_mention(player: GamePlayer, user: Optional[User] = None) -> str:
+        if user is not None:
+            style = style_from_user(user)
+            if style.active:
+                return format_user_mention(user)
+        return format_player_mention(player)
+
+    @staticmethod
     def _player_button_label(player: GamePlayer) -> str:
         return format_player_button(player)
 
     @staticmethod
     def _player_choice(player: GamePlayer) -> tuple[int, str]:
         return player_choice_tuple(player)
+
+    @staticmethod
+    def _money_stats_header(*, any_vip_earner: bool) -> str:
+        if any_vip_earner:
+            return (
+                f"<tg-emoji emoji-id=\"{VIP_MONEY_STATS_EMOJI_ID}\">💰</tg-emoji> "
+                "<b>Mukofotlar:</b>"
+            )
+        return "💰 <b>Mukofotlar:</b>"
 
     @staticmethod
     def _activity_now_text() -> str:
@@ -6904,9 +6922,17 @@ class GameEngine:
         self._cleanup_jobs(game_id)
         self._invalidate_game_cache(chat_id)
 
+        async with self.session_factory() as session:
+            users = {
+                u.telegram_id: u
+                for u in (
+                    await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
+                ).scalars().all()
+            }
+
         def result_player_line(idx: int, player: GamePlayer) -> str:
             team_emoji = self._tournament_team_emoji(player.transformed_to_team) if (is_tournament or is_teamgame) else ""
-            name = self._player_mention(player)
+            name = self._stats_player_mention(player, users.get(player.telegram_id))
             if team_emoji:
                 name = f"{team_emoji} {name}"
             return f"{idx}. {name} - {role_label(player.role)}"
@@ -6924,8 +6950,12 @@ class GameEngine:
         losers_block = "\n".join(loser_lines) if loser_lines else "-"
 
         money_lines: list[str] = []
+        any_vip_earner = False
         for idx, p in enumerate(list(winners) + list(losers), 1):
             dollar_amt, diamond_amt, used_bonus = reward_by_user.get(p.telegram_id, (0, 0, False))
+            user = users.get(p.telegram_id)
+            if dollar_amt > 0 and user is not None and style_from_user(user).active:
+                any_vip_earner = True
             bonus_mark = " · 📰2x" if used_bonus else ""
             diamond_part = (
                 f" · <tg-emoji emoji-id=\"{DIAMOND_EMOJI_ID}\">💎</tg-emoji> <b>{diamond_amt}</b>"
@@ -6933,11 +6963,12 @@ class GameEngine:
                 else ""
             )
             money_lines.append(
-                f"{idx}. {self._player_mention(p)} — "
+                f"{idx}. {self._stats_player_mention(p, user)} — "
                 f"<tg-emoji emoji-id=\"{DOLLAR_EMOJI_ID}\">💵</tg-emoji> <b>{dollar_amt}</b>"
                 f"{diamond_part}{bonus_mark}"
             )
         money_block = "\n".join(money_lines) if money_lines else "-"
+        money_header = self._money_stats_header(any_vip_earner=any_vip_earner)
 
         news_channel = self._news_bonus_channel_id()
         bonus_hint = f"\n\n📰 <i>{news_channel} kanaliga obuna bo'ling va 2x mukofot oling!</i>"
@@ -6948,20 +6979,12 @@ class GameEngine:
             f"{winners_block}\n\n"
             "Mag'lublar:\n"
             f"{losers_block}\n\n"
-            "💰 <b>Mukofotlar:</b>\n"
+            f"{money_header}\n"
             f"{money_block}\n\n"
             f"O'yin: {self._format_duration(duration_seconds)} davom etdi"
             f"{bonus_hint}"
         )
         await bot.send_message(chat_id, text)
-
-        async with self.session_factory() as session:
-            users = {
-                u.telegram_id: u
-                for u in (
-                    await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
-                ).scalars().all()
-            }
 
         player_ids = [p.telegram_id for p in players]
         news_url_task = self.get_news_channel_url()
@@ -7868,6 +7891,82 @@ class GameEngine:
         if hero_id is None:
             return False, f"❌ <code>{telegram_id}</code> da geroy topilmadi."
         return await self.owner_remove_hero(bot, int(hero_id), notify_owner=True)
+
+    async def last_game_stats_text(self, chat_id: int) -> str:
+        async with self.session_factory() as session:
+            game = (
+                await session.execute(
+                    select(Game)
+                    .where(Game.chat_id == chat_id, Game.status == GameStatus.COMPLETED.value)
+                    .order_by(Game.id.desc())
+                )
+            ).scalars().first()
+            if game is None:
+                return "📊 Hali bu guruhda tugagan o'yin yo'q."
+            players = (
+                await session.execute(
+                    select(GamePlayer).where(GamePlayer.game_id == game.id).order_by(GamePlayer.id.asc())
+                )
+            ).scalars().all()
+            if not players:
+                return "📊 Oxirgi o'yinda o'yinchi topilmadi."
+            users = {
+                u.telegram_id: u
+                for u in (
+                    await session.execute(select(User).where(User.telegram_id.in_([p.telegram_id for p in players])))
+                ).scalars().all()
+            }
+            is_tournament = await self._is_tournament_game_in_session(session, game.id)
+            is_teamgame = await self._is_team_game_in_session(session, game.id)
+            started_at = self._ensure_utc(game.started_at) if game.started_at else None
+            ended_at = self._ensure_utc(game.ended_at) if game.ended_at else None
+            duration_seconds = max(0, int((ended_at - started_at).total_seconds())) if started_at and ended_at else 0
+
+        winners = [p for p in players if p.won]
+        losers = [p for p in players if not p.won]
+
+        def result_line(idx: int, player: GamePlayer) -> str:
+            team_emoji = self._tournament_team_emoji(player.transformed_to_team) if (is_tournament or is_teamgame) else ""
+            name = self._stats_player_mention(player, users.get(player.telegram_id))
+            if team_emoji:
+                name = f"{team_emoji} {name}"
+            role = role_label(player.role) if player.role else "-"
+            return f"{idx}. {name} - {role}"
+
+        winner_lines = [result_line(i, p) for i, p in enumerate(winners, 1)]
+        loser_lines = [result_line(i, p) for i, p in enumerate(losers, len(winner_lines) + 1)]
+
+        any_vip_earner = False
+        money_lines: list[str] = []
+        for idx, p in enumerate(list(winners) + list(losers), 1):
+            user = users.get(p.telegram_id)
+            dollar_amt = self.settings.winner_reward_dollar if p.won else self.settings.loser_reward_dollar
+            diamond_amt = self.settings.winner_reward_diamond if p.won else self.settings.loser_reward_diamond
+            if dollar_amt > 0 and user is not None and style_from_user(user).active:
+                any_vip_earner = True
+            diamond_part = (
+                f" · <tg-emoji emoji-id=\"{DIAMOND_EMOJI_ID}\">💎</tg-emoji> <b>{diamond_amt}</b>"
+                if diamond_amt
+                else ""
+            )
+            money_lines.append(
+                f"{idx}. {self._stats_player_mention(p, user)} — "
+                f"<tg-emoji emoji-id=\"{DOLLAR_EMOJI_ID}\">💵</tg-emoji> <b>{dollar_amt}</b>"
+                f"{diamond_part}"
+            )
+
+        winner_team = game.winner_team or "-"
+        return (
+            "📊 <b>Oxirgi o'yin statistikasi</b>\n\n"
+            f"G'olib jamoa: <b>{escape(str(winner_team))}</b>\n"
+            f"O'yin: {self._format_duration(duration_seconds)}\n\n"
+            "G'oliblar:\n"
+            f"{chr(10).join(winner_lines) if winner_lines else '-'}\n\n"
+            "Mag'lublar:\n"
+            f"{chr(10).join(loser_lines) if loser_lines else '-'}\n\n"
+            f"{self._money_stats_header(any_vip_earner=any_vip_earner)}\n"
+            f"{chr(10).join(money_lines) if money_lines else '-'}"
+        )
 
     async def user_in_running_game(self, telegram_id: int) -> bool:
         async with self.session_factory() as session:

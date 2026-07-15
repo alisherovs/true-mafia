@@ -260,6 +260,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="gsend", description="Premium guruh reytingi"),
         BotCommand(command="roles", description="Rollar"),
         BotCommand(command="top", description="TOP reyting"),
+        BotCommand(command="stats", description="Oxirgi o'yin statistikasi"),
         BotCommand(command="commands", description="Buyruqlar"),
     ]
     await bot.set_my_commands(private_commands, scope=BotCommandScopeDefault())

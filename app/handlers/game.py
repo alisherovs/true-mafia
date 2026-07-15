@@ -199,6 +199,18 @@ async def cmd_lastwords(message: Message, command: CommandObject, engine: GameEn
     await message.answer(response)
 
 
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, engine: GameEngine) -> None:
+    if message.chat.type == "private":
+        if message.from_user is None:
+            return
+        lang = await engine.get_user_language(message.from_user.id)
+        await message.answer(t(lang, "command_in_group"))
+        return
+    text = await engine.last_game_stats_text(message.chat.id)
+    await message.answer(text)
+
+
 @router.message(Command("tep"))
 async def cmd_tep(message: Message, command: CommandObject, engine: GameEngine) -> None:
     if message.from_user is None:

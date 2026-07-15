@@ -58,10 +58,12 @@ LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
-BOXES_ENABLED = False
+BOXES_ENABLED = True
 TELEGRAM_GIFTS_ENABLED = True
 # In-memory VIP panel waits: "nick" | "badge_custom"
 PENDING_VIP_INPUT: dict[int, str] = {}
+# Active box open sessions: user_id -> payload (DB backup ham bor)
+BOX_SESSIONS: dict[int, dict] = {}
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
@@ -110,6 +112,92 @@ def _generate_box_rewards(box_type: str) -> list[dict[str, int | str]]:
                 amount = random.choices([1, 2, 3, 4], weights=[40, 30, 20, 10], k=1)[0]
             rewards.append({"type": "diamond", "amount": amount})
     return rewards
+
+
+async def _safe_edit_or_send(callback: CallbackQuery, text: str, reply_markup=None) -> None:
+    if callback.message is None:
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+        return
+    except TelegramBadRequest:
+        pass
+    except Exception:
+        pass
+    try:
+        await callback.message.answer(text, reply_markup=reply_markup)
+    except Exception:
+        if callback.from_user is not None:
+            try:
+                await callback.bot.send_message(callback.from_user.id, text, reply_markup=reply_markup)
+            except Exception:
+                pass
+
+
+async def _save_box_session(session, user_id: int, payload: dict) -> None:
+    BOX_SESSIONS[user_id] = payload
+    sess_key = _box_session_key(user_id)
+    raw = json.dumps(payload, ensure_ascii=True)
+    sess_row = (
+        await session.execute(select(BotSetting).where(BotSetting.key == sess_key))
+    ).scalar_one_or_none()
+    if sess_row is None:
+        session.add(BotSetting(key=sess_key, value=raw))
+    else:
+        sess_row.value = raw
+
+
+async def _load_box_session(session, user_id: int) -> dict | None:
+    mem = BOX_SESSIONS.get(user_id)
+    if isinstance(mem, dict) and mem.get("rewards"):
+        return mem
+    sess_row = (
+        await session.execute(select(BotSetting).where(BotSetting.key == _box_session_key(user_id)))
+    ).scalar_one_or_none()
+    if sess_row is None or not sess_row.value:
+        return None
+    try:
+        payload = json.loads(sess_row.value)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(payload, dict):
+        BOX_SESSIONS[user_id] = payload
+        return payload
+    return None
+
+
+async def _set_box_cooldown(session, box_type: str, user_id: int, now: datetime) -> None:
+    cooldown = {
+        "normal": BOX_NORMAL_COOLDOWN,
+        "super": BOX_SUPER_COOLDOWN,
+        "mega": BOX_MEGA_COOLDOWN,
+    }.get(box_type)
+    if cooldown is None:
+        return
+    cd_until = now + cooldown
+    cd_key = _box_cd_key(box_type, user_id)
+    cd_row = (
+        await session.execute(select(BotSetting).where(BotSetting.key == cd_key))
+    ).scalar_one_or_none()
+    if cd_row is None:
+        session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+    else:
+        cd_row.value = cd_until.isoformat()
+
+
+async def _get_box_cooldown_left(session, box_type: str, user_id: int, now: datetime) -> timedelta | None:
+    cd_row = (
+        await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user_id)))
+    ).scalar_one_or_none()
+    if not cd_row or not cd_row.value:
+        return None
+    try:
+        cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
+    except ValueError:
+        return None
+    if cd_until and cd_until > now:
+        return cd_until - now
+    return None
 
 
 def _user_link(user_id: int, name: str) -> str:
@@ -2108,18 +2196,9 @@ async def box_info(callback: CallbackQuery) -> None:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
         is_vip = _user_is_vip(user) if user else False
         if user is not None:
-            cd_row = (
-                await session.execute(
-                    select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id))
-                )
-            ).scalar_one_or_none()
-            if cd_row and cd_row.value:
-                try:
-                    cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
-                except ValueError:
-                    cd_until = None
-                if cd_until and cd_until > now:
-                    cd_left = f"\n\n⏳ Keyingi ochilish: <b>{_format_td(cd_until - now)}</b>"
+            left = await _get_box_cooldown_left(session, box_type, user.telegram_id, now)
+            if left is not None:
+                cd_left = f"\n\n⏳ Keyingi ochilish: <b>{_format_td(left)}</b>"
     if box_type == "normal":
         text = (
             "🎁 <b>Oddiy Keys</b> · aktiv\n\n"
@@ -2147,10 +2226,7 @@ async def box_info(callback: CallbackQuery) -> None:
             f"{cd_left}"
         )
         kb = box_info_keyboard(box_type, can_paid_open=is_vip, paid_open_cost=8000)
-    try:
-        await callback.message.edit_text(text, reply_markup=kb)
-    except TelegramBadRequest:
-        pass
+    await _safe_edit_or_send(callback, text, kb)
     await callback.answer()
 
 
@@ -2178,41 +2254,20 @@ async def box_open(callback: CallbackQuery) -> None:
         if box_type == "mega" and not _user_is_vip(user):
             await callback.answer("Mega quti faqat VIP user uchun.", show_alert=True)
             return
-        cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id)))).scalar_one_or_none()
-        if cd_row and cd_row.value:
-            try:
-                cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
-            except ValueError:
-                cd_until = None
-        else:
-            cd_until = None
-        cooldown = (
-            BOX_NORMAL_COOLDOWN if box_type == "normal"
-            else BOX_SUPER_COOLDOWN if box_type == "super"
-            else BOX_MEGA_COOLDOWN if box_type == "mega"
-            else timedelta(0)
-        )
-        if cooldown.total_seconds() > 0 and cd_until and cd_until > now:
-            await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(cd_until - now)}", show_alert=True)
+        left = await _get_box_cooldown_left(session, box_type, user.telegram_id, now)
+        if left is not None:
+            await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(left)}", show_alert=True)
             return
         rewards = _generate_box_rewards(box_type)
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": box_type, "session_id": session_id, "rewards": rewards, "claimed": False}
-        sess_key = _box_session_key(user.telegram_id)
-        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
-        if sess_row is None:
-            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
-            session.add(sess_row)
-        else:
-            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await _save_box_session(session, user.telegram_id, payload)
         await session.commit()
-    try:
-        await callback.message.edit_text(
-            "🎲 <b>Qutini ochish</b>\n\n4x4 kartadan bittasini tanlang:",
-            reply_markup=box_pick_keyboard(box_type, session_id),
-        )
-    except TelegramBadRequest:
-        pass
+    await _safe_edit_or_send(
+        callback,
+        "🎲 <b>Qutini ochish</b>\n\n4x4 kartadan bittasini tanlang:",
+        box_pick_keyboard(box_type, session_id),
+    )
     await callback.answer()
 
 
@@ -2247,21 +2302,13 @@ async def box_open_paid_super(callback: CallbackQuery) -> None:
         rewards = _generate_box_rewards("super")
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": "super", "session_id": session_id, "rewards": rewards, "claimed": False}
-        sess_key = _box_session_key(user.telegram_id)
-        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
-        if sess_row is None:
-            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
-            session.add(sess_row)
-        else:
-            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await _save_box_session(session, user.telegram_id, payload)
         await session.commit()
-    try:
-        await callback.message.edit_text(
-            "🎲 <b>Super keys</b>\n\n4x4 kartadan bittasini tanlang:",
-            reply_markup=box_pick_keyboard("super", session_id),
-        )
-    except TelegramBadRequest:
-        pass
+    await _safe_edit_or_send(
+        callback,
+        "🎲 <b>Super keys</b>\n\n4x4 kartadan bittasini tanlang:",
+        box_pick_keyboard("super", session_id),
+    )
     await callback.answer("✅ 5000 dollar yechildi, quti ochildi.", show_alert=True)
 
 
@@ -2296,21 +2343,13 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
         rewards = _generate_box_rewards("mega")
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": "mega", "session_id": session_id, "rewards": rewards, "claimed": False}
-        sess_key = _box_session_key(user.telegram_id)
-        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
-        if sess_row is None:
-            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
-            session.add(sess_row)
-        else:
-            sess_row.value = json.dumps(payload, ensure_ascii=True)
+        await _save_box_session(session, user.telegram_id, payload)
         await session.commit()
-    try:
-        await callback.message.edit_text(
-            "🎲 <b>Mega quti</b>\n\n4x4 kartadan bittasini tanlang:",
-            reply_markup=box_pick_keyboard("mega", session_id),
-        )
-    except TelegramBadRequest:
-        pass
+    await _safe_edit_or_send(
+        callback,
+        "🎲 <b>Mega quti</b>\n\n4x4 kartadan bittasini tanlang:",
+        box_pick_keyboard("mega", session_id),
+    )
     await callback.answer("✅ 8000 dollar yechildi, quti ochildi.", show_alert=True)
 
 
@@ -2341,14 +2380,9 @@ async def box_pick(callback: CallbackQuery) -> None:
         if user is None:
             await callback.answer("Avval /start bosing.", show_alert=True)
             return
-        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_session_key(user.telegram_id)))).scalar_one_or_none()
-        if sess_row is None or not sess_row.value:
+        payload = await _load_box_session(session, user.telegram_id)
+        if not payload:
             await callback.answer("Quti sessiyasi topilmadi.", show_alert=True)
-            return
-        try:
-            payload = json.loads(sess_row.value)
-        except (TypeError, ValueError):
-            await callback.answer("Quti sessiyasi buzilgan.", show_alert=True)
             return
         if payload.get("claimed"):
             await callback.answer("Bu quti allaqachon ochilgan.", show_alert=True)
@@ -2375,42 +2409,17 @@ async def box_pick(callback: CallbackQuery) -> None:
             _record_dollar_transaction(session, user, amount, f"{box_type}_box_reward", note=f"{box_type} qutidan mukofot")
             reward_text = f"💵 {amount} dollar"
         payload["claimed"] = True
-        sess_row.value = json.dumps(payload, ensure_ascii=True)
-        if box_type == "normal":
-            cd_until = now + BOX_NORMAL_COOLDOWN
-            cd_key = _box_cd_key("normal", user.telegram_id)
-            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
-            if cd_row is None:
-                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
-            else:
-                cd_row.value = cd_until.isoformat()
-        elif box_type == "super":
-            cd_until = now + BOX_SUPER_COOLDOWN
-            cd_key = _box_cd_key("super", user.telegram_id)
-            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
-            if cd_row is None:
-                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
-            else:
-                cd_row.value = cd_until.isoformat()
-        elif box_type == "mega":
-            cd_until = now + BOX_MEGA_COOLDOWN
-            cd_key = _box_cd_key("mega", user.telegram_id)
-            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
-            if cd_row is None:
-                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
-            else:
-                cd_row.value = cd_until.isoformat()
+        await _save_box_session(session, user.telegram_id, payload)
+        await _set_box_cooldown(session, box_type, user.telegram_id, now)
         await session.commit()
         is_vip = _user_is_vip(user)
     can_paid_open = (box_type == "super" and is_vip) or (box_type == "mega" and is_vip)
     paid_open_cost = 8000 if box_type == "mega" else 5000
-    try:
-        await callback.message.edit_text(
-            f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
-            reply_markup=box_info_keyboard(box_type, can_paid_open=can_paid_open, paid_open_cost=paid_open_cost),
-        )
-    except TelegramBadRequest:
-        pass
+    await _safe_edit_or_send(
+        callback,
+        f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
+        box_info_keyboard(box_type, can_paid_open=can_paid_open, paid_open_cost=paid_open_cost),
+    )
     await callback.answer("Mukofot berildi!", show_alert=True)
 
 
