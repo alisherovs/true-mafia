@@ -613,6 +613,11 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
             [dollar_icon_button("📦 Sirpanishdan himoya - 300", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
             [InlineKeyboardButton(text="👑 VIP User", callback_data="vip:open")],
+            [
+                InlineKeyboardButton(text="🎁 Keys", callback_data="box:info:normal"),
+                InlineKeyboardButton(text="🧰 Super", callback_data="box:info:super"),
+                InlineKeyboardButton(text="👑 Mega", callback_data="box:info:mega"),
+            ],
             [InlineKeyboardButton(text="🎁 Telegram sovg'asiga almashtirish", callback_data="shop:gifts")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
         ]
@@ -620,8 +625,16 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
 
 
 def vip_keyboard(*, is_active: bool = False, badge_hidden: bool = False) -> InlineKeyboardMarkup:
-    """VIP hub: status, cosmetics, boxes. Display-only options do not affect game rules."""
+    """VIP hub: cosmetics + active boxes. Display-only options do not affect game rules."""
     rows: list[list[InlineKeyboardButton]] = []
+    # Qutilar doim aktiv (yuqorida — asosiy bo'lim)
+    rows.extend(
+        [
+            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
+            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
+            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
+        ]
+    )
     if not is_active:
         rows.extend(
             [
@@ -632,32 +645,27 @@ def vip_keyboard(*, is_active: bool = False, badge_hidden: bool = False) -> Inli
     else:
         rows.extend(
             [
-                [InlineKeyboardButton(text="⏳ VIP ni uzaytirish (30💎)", callback_data="vip:buy:diamonds")],
-                [InlineKeyboardButton(text="⏳ VIP ni uzaytirish (190⭐)", callback_data="vip:buy:stars")],
-                [InlineKeyboardButton(text="🏷 Badge tanlash", callback_data="vip:badge:menu")],
+                [InlineKeyboardButton(text="⏳ Uzaytirish · 30💎", callback_data="vip:buy:diamonds")],
+                [InlineKeyboardButton(text="⏳ Uzaytirish · 190⭐", callback_data="vip:buy:stars")],
+                [InlineKeyboardButton(text="🏷 Badge", callback_data="vip:badge:menu")],
                 [
-                    InlineKeyboardButton(text="◀️ Badge oldinda", callback_data="vip:pos:before"),
-                    InlineKeyboardButton(text="Badge orqada ▶️", callback_data="vip:pos:after"),
+                    InlineKeyboardButton(text="◀️ Oldin", callback_data="vip:pos:before"),
+                    InlineKeyboardButton(text="Keyin ▶️", callback_data="vip:pos:after"),
                 ],
                 [
                     InlineKeyboardButton(
-                        text=("👁 Badge yashirish" if not badge_hidden else "👁 Badge ko'rsatish"),
+                        text=("🙈 Badge yashirish" if not badge_hidden else "👁 Badge ko'rsatish"),
                         callback_data="vip:badge:toggle_hide",
                     )
                 ],
-                [InlineKeyboardButton(text="✍️ VIP nickname", callback_data="vip:nick:set")],
-                [InlineKeyboardButton(text="🗑 Nickname tozalash", callback_data="vip:nick:clear")],
-                [InlineKeyboardButton(text="✨ Premium emoji badge", callback_data="vip:badge:custom")],
+                [
+                    InlineKeyboardButton(text="✍️ Nickname", callback_data="vip:nick:set"),
+                    InlineKeyboardButton(text="🗑 Tozalash", callback_data="vip:nick:clear"),
+                ],
+                [InlineKeyboardButton(text="✨ Premium emoji", callback_data="vip:badge:custom")],
             ]
         )
-    rows.extend(
-        [
-            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
-            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
-            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
-            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
-        ]
-    )
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -684,8 +692,17 @@ def box_info_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="🎁 Ochish", callback_data=f"box:open:{box_type}")]]
     if can_paid_open:
-        rows.append([dollar_icon_button(f"{paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
-    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="vip:open")])
+        rows.append(
+            [
+                dollar_icon_button(f"{paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")
+            ]
+        )
+    rows.append(
+        [
+            InlineKeyboardButton(text="👑 VIP", callback_data="vip:open"),
+            InlineKeyboardButton(text="◀️ Do'kon", callback_data="shop:open"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

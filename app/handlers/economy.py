@@ -1791,36 +1791,20 @@ def _vip_panel_text(user: User) -> str:
     preview = preview_line(style, sample_name=sample)
     if style.active:
         days = vip_days_left(user.vip_until)
-        status = f"✅ <b>Faol</b> · {days} kun qoldi"
-        pos = "ismdan <b>oldin</b>" if style.position == BADGE_POSITION_BEFORE else "ismdan <b>keyin</b>"
-        hide = "yashirilgan" if style.hidden else "ko'rinadi"
-        nick = escape(style.nickname) if style.nickname else "—"
         return (
             "👑 <b>VIP panel</b>\n\n"
-            f"Status: {status}\n"
-            f"Ko'rinish: {preview}\n"
-            f"Badge joylashuvi: {pos}\n"
-            f"Badge: {hide}\n"
-            f"VIP nickname: <b>{nick}</b>\n\n"
-            "<b>Imtiyozlar</b> (o'yin qoidasiga ta'sir qilmaydi):\n"
-            "• O'yinda ism yonida badge\n"
-            "• Shaxsiy VIP nickname\n"
-            "• Telegram sovg'a / Premium\n"
-            "• Super / Mega qutilar\n\n"
-            "📦 Qutilar va sozlamalar pastda."
+            f"Status: ✅ <b>Faol</b> · {days} kun\n"
+            f"O'yinda: {preview}\n\n"
+            "Sozlamalar va qutilar pastdagi tugmalarda."
         )
     return (
         "👑 <b>VIP panel</b>\n\n"
-        "Status: ❌ <b>Faol emas</b>\n\n"
-        "VIP bilan:\n"
-        "• O'yinda ism yonida badge (oldin/keyin)\n"
-        "• Shaxsiy VIP nickname\n"
-        "• Premium custom emoji badge\n"
-        "• Telegram sovg'a / Premium\n"
-        "• Super / Mega qutilar\n\n"
+        "VIP ochilmagan.\n\n"
+        "• O'yinda badge va maxsus ism\n"
+        "• Super / Mega qutilar\n"
+        "• Telegram sovg'a va Premium\n\n"
         "Muddat: <b>30 kun</b>\n"
-        "Narx: <b>30💎</b> yoki <b>190⭐</b>\n\n"
-        "⚠️ Badge va nickname faqat <b>ko'rinish</b> — ovoz, rol yoki yutishga ta'sir qilmaydi."
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
     )
 
 
@@ -2118,36 +2102,51 @@ async def box_info(callback: CallbackQuery) -> None:
     if box_type not in {"normal", "super", "mega"}:
         await callback.answer("Noto'g'ri quti.", show_alert=True)
         return
+    now = _utc_now()
+    cd_left = ""
     async with SessionLocal() as session:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
         is_vip = _user_is_vip(user) if user else False
+        if user is not None:
+            cd_row = (
+                await session.execute(
+                    select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id))
+                )
+            ).scalar_one_or_none()
+            if cd_row and cd_row.value:
+                try:
+                    cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
+                except ValueError:
+                    cd_until = None
+                if cd_until and cd_until > now:
+                    cd_left = f"\n\n⏳ Keyingi ochilish: <b>{_format_td(cd_until - now)}</b>"
     if box_type == "normal":
         text = (
-            "🎁 <b>Oddiy Keys</b>\n\n"
+            "🎁 <b>Oddiy Keys</b> · aktiv\n\n"
             "• Haftasiga 1 marta bepul\n"
-            "• Mukofot: 💵 100-200 yoki 💎 1-3"
+            "• Mukofot: 💵 100–200 yoki 💎 1–3"
+            f"{cd_left}"
         )
         kb = box_info_keyboard(box_type)
     elif box_type == "super":
         text = (
-            "🧰 <b>Super Keys</b>\n\n"
-            "• Faqat VIP user uchun\n"
-            "• Har 3 kunda 1 marta bepul\n"
-            "• Yoki 💵 5000 evaziga ochish\n"
-            "• Mukofot: 💵 1000-3000 yoki 💎 1-4"
+            "🧰 <b>Super Keys</b> · aktiv\n\n"
+            "• VIP: har 3 kunda 1 marta bepul\n"
+            "• Yoki 💵 5000 (VIP)\n"
+            "• Mukofot: 💵 1000–3000 yoki 💎 1–4"
+            f"{cd_left}"
         )
         kb = box_info_keyboard(box_type, can_paid_open=is_vip)
     else:
         text = (
-            "👑 <b>Mega Quti</b>\n\n"
-            "• Faqat VIP user uchun bepul ochiladi\n"
+            "👑 <b>Mega Quti</b> · aktiv\n\n"
+            "• Faqat VIP user\n"
             "• Har 14 kunda 1 marta bepul\n"
-            "• Yoki 💵 8000 evaziga ochish\n"
-            "• Faqat 💎 beradi\n"
-            "• Mukofot: 💎 1-8\n"
-            "• Yuqori olmoslar ehtimoli pasaytirilgan"
+            "• Yoki 💵 8000 (VIP)\n"
+            "• Faqat 💎 · mukofot: 1–8"
+            f"{cd_left}"
         )
-        kb = box_info_keyboard(box_type, can_paid_open=True, paid_open_cost=8000)
+        kb = box_info_keyboard(box_type, can_paid_open=is_vip, paid_open_cost=8000)
     try:
         await callback.message.edit_text(text, reply_markup=kb)
     except TelegramBadRequest:
@@ -2177,7 +2176,7 @@ async def box_open(callback: CallbackQuery) -> None:
             await callback.answer("Super keys faqat VIP user uchun.", show_alert=True)
             return
         if box_type == "mega" and not _user_is_vip(user):
-            await callback.answer("Mega quti bepul ochilishi faqat VIP user uchun.", show_alert=True)
+            await callback.answer("Mega quti faqat VIP user uchun.", show_alert=True)
             return
         cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id)))).scalar_one_or_none()
         if cd_row and cd_row.value:
@@ -2279,6 +2278,9 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
         if user is None:
             await callback.answer("Avval /start bosing.", show_alert=True)
+            return
+        if not _user_is_vip(user):
+            await callback.answer("Mega quti faqat VIP user uchun.", show_alert=True)
             return
         if (user.dollar or 0) < 8000:
             await callback.answer("Balans yetarli emas. Kerak: 💵 8000", show_alert=True)
@@ -2399,7 +2401,8 @@ async def box_pick(callback: CallbackQuery) -> None:
             else:
                 cd_row.value = cd_until.isoformat()
         await session.commit()
-    can_paid_open = box_type in {"super", "mega"}
+        is_vip = _user_is_vip(user)
+    can_paid_open = (box_type == "super" and is_vip) or (box_type == "mega" and is_vip)
     paid_open_cost = 8000 if box_type == "mega" else 5000
     try:
         await callback.message.edit_text(

@@ -147,6 +147,7 @@ ZOMBIE_EMOJI_ID = "5190680981824085932"
 POLICE_EMOJI_ID = "5377754411319698237"
 GUN_EMOJI_ID = "5222486447306602688"
 SKULL_EMOJI_ID = "5469654973308476699"
+VIP_STATUS_EMOJI_ID = "5438496463044752972"
 
 
 def _ce(symbol: str, emoji_id: str) -> str:
@@ -7028,13 +7029,14 @@ class GameEngine:
 
         display_name = format_user_mention(user)
         style = style_from_user(user)
+        # VIP faqat aktiv bo'lsa — sodda status (badge/position/nik matni yo'q)
+        vip_line = ""
         if style.active:
             days = vip_days_left(user.vip_until)
-            vip_line = f"\n👑 VIP: ✅ ({days} kun) · badge: {style.position}"
-            if style.nickname:
-                vip_line += f"\n🏷 VIP nik: <b>{escape(style.nickname)}</b>"
-        else:
-            vip_line = "\n👑 VIP: ❌"
+            vip_line = (
+                f"\n<tg-emoji emoji-id=\"{VIP_STATUS_EMOJI_ID}\">👑</tg-emoji> "
+                f"VIP · <b>{days}</b> kun"
+            )
         return (
             f"👤 Nik: {display_name}{vip_line}\n"
             f"<tg-emoji emoji-id=\"{STAR_EMOJI_ID}\">⭐</tg-emoji> ID: <code>{user.telegram_id}</code>\n\n"
@@ -7071,39 +7073,34 @@ class GameEngine:
         style = style_from_user(user)
         shown_name = style.nickname if (style.active and style.nickname) else (user.display_name or "Unknown")
         display_name = TextLink(shown_name, url=f"tg://user?id={user.telegram_id}")
-        vip_parts: list[Any] = []
+        # Badge ism yonida (o'yindagi kabi); statusda faqat muddat — VIP bo'lmasa hech narsa
+        name_prefix: list[Any] = []
+        name_suffix: list[Any] = []
+        if style.show_badge:
+            if style.badge_emoji_id and str(style.badge_emoji_id).isdigit():
+                badge_node = CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id))
+            else:
+                badge_node = style.badge or "👑"
+            if style.position == "after":
+                name_suffix = [" ", badge_node]
+            else:
+                name_prefix = [badge_node, " "]
+        vip_status: list[Any] = []
         if style.active:
             days = vip_days_left(user.vip_until)
-            vip_parts.extend(["\n👑 VIP: ✅ (", str(days), " kun)"])
-            if style.show_badge:
-                if style.badge_emoji_id and str(style.badge_emoji_id).isdigit():
-                    vip_parts.extend(
-                        [
-                            " · ",
-                            CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id)),
-                            f" ({style.position})",
-                        ]
-                    )
-                else:
-                    vip_parts.append(f" · {style.badge or '👑'} ({style.position})")
-            if style.nickname:
-                vip_parts.append(f"\n🏷 VIP nik: {style.nickname}")
-        else:
-            vip_parts.append("\n👑 VIP: ❌")
+            vip_status = [
+                "\n",
+                CustomEmoji("👑", custom_emoji_id=VIP_STATUS_EMOJI_ID),
+                " VIP · ",
+                Bold(str(days)),
+                " kun",
+            ]
         return Text(
             "👤 Nik: ",
-            *(
-                [CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id)), " "]
-                if style.show_badge and style.badge_emoji_id and style.position != "after"
-                else ([f"{style.badge} "] if style.show_badge and style.position != "after" else [])
-            ),
+            *name_prefix,
             display_name,
-            *(
-                [" ", CustomEmoji(style.badge or "👑", custom_emoji_id=str(style.badge_emoji_id))]
-                if style.show_badge and style.badge_emoji_id and style.position == "after"
-                else ([f" {style.badge}"] if style.show_badge and style.position == "after" else [])
-            ),
-            *vip_parts,
+            *name_suffix,
+            *vip_status,
             "\n",
             CustomEmoji("⭐", custom_emoji_id=STAR_EMOJI_ID), " ID: ", Code(str(user.telegram_id)), "\n\n",
             CustomEmoji("💵", custom_emoji_id=DOLLAR_EMOJI_ID), " Dollar: ", Bold(str(user.dollar)), "\n",
