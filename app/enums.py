@@ -82,6 +82,7 @@ class Role(str, Enum):
     JOKER = "joker"
     HOJIAKA = "hojiaka"
     MASHKA = "mashka"
+    FAIRY = "fairy"
 
 
 class ActionType(str, Enum):
@@ -106,6 +107,7 @@ class ActionType(str, Enum):
     PRANK = "prank"
     GRANT = "grant"
     STEAL = "steal"
+    REVIVE = "revive"
     SKIP = "skip"
 
 

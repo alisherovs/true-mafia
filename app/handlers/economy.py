@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Optional
 from aiogram import F, Router
-from aiogram.filters import BaseFilter, Command, CommandObject
+from aiogram.filters import Command, CommandObject
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery, LabeledPrice
 from aiogram.utils.formatting import CustomEmoji, Text, TextLink
@@ -31,24 +31,11 @@ from app.keyboards import (
     role_shop_keyboard,
     my_roles_keyboard,
     shop_keyboard,
-    vip_badge_presets_keyboard,
     vip_keyboard,
 )
 from app.models import DiamondGiveaway, DiamondTransaction, DollarTransaction, User
 from app.models import BotSetting
 from app.texts import t
-from app.vip_display import (
-    BADGE_POSITION_AFTER,
-    BADGE_POSITION_BEFORE,
-    DEFAULT_VIP_BADGE,
-    VIP_BADGE_PRESETS,
-    preview_line,
-    sanitize_vip_nickname,
-    style_from_user,
-    validate_badge_unicode,
-    validate_custom_emoji_id,
-    vip_days_left,
-)
 
 router = Router()
 DIAMOND_EMOJI_ID = "5427168083074628963"
@@ -58,12 +45,8 @@ LARGE_TRANSFER_THRESHOLD = 5000
 BOX_NORMAL_COOLDOWN = timedelta(days=7)
 BOX_SUPER_COOLDOWN = timedelta(days=3)
 BOX_MEGA_COOLDOWN = timedelta(days=14)
-BOXES_ENABLED = True
+BOXES_ENABLED = False
 TELEGRAM_GIFTS_ENABLED = True
-# In-memory VIP panel waits: "nick" | "badge_custom"
-PENDING_VIP_INPUT: dict[int, str] = {}
-# Active box open sessions: user_id -> payload (DB backup ham bor)
-BOX_SESSIONS: dict[int, dict] = {}
 
 
 def _box_cd_key(box_type: str, user_id: int) -> str:
@@ -112,92 +95,6 @@ def _generate_box_rewards(box_type: str) -> list[dict[str, int | str]]:
                 amount = random.choices([1, 2, 3, 4], weights=[40, 30, 20, 10], k=1)[0]
             rewards.append({"type": "diamond", "amount": amount})
     return rewards
-
-
-async def _safe_edit_or_send(callback: CallbackQuery, text: str, reply_markup=None) -> None:
-    if callback.message is None:
-        return
-    try:
-        await callback.message.edit_text(text, reply_markup=reply_markup)
-        return
-    except TelegramBadRequest:
-        pass
-    except Exception:
-        pass
-    try:
-        await callback.message.answer(text, reply_markup=reply_markup)
-    except Exception:
-        if callback.from_user is not None:
-            try:
-                await callback.bot.send_message(callback.from_user.id, text, reply_markup=reply_markup)
-            except Exception:
-                pass
-
-
-async def _save_box_session(session, user_id: int, payload: dict) -> None:
-    BOX_SESSIONS[user_id] = payload
-    sess_key = _box_session_key(user_id)
-    raw = json.dumps(payload, ensure_ascii=True)
-    sess_row = (
-        await session.execute(select(BotSetting).where(BotSetting.key == sess_key))
-    ).scalar_one_or_none()
-    if sess_row is None:
-        session.add(BotSetting(key=sess_key, value=raw))
-    else:
-        sess_row.value = raw
-
-
-async def _load_box_session(session, user_id: int) -> dict | None:
-    mem = BOX_SESSIONS.get(user_id)
-    if isinstance(mem, dict) and mem.get("rewards"):
-        return mem
-    sess_row = (
-        await session.execute(select(BotSetting).where(BotSetting.key == _box_session_key(user_id)))
-    ).scalar_one_or_none()
-    if sess_row is None or not sess_row.value:
-        return None
-    try:
-        payload = json.loads(sess_row.value)
-    except (TypeError, ValueError):
-        return None
-    if isinstance(payload, dict):
-        BOX_SESSIONS[user_id] = payload
-        return payload
-    return None
-
-
-async def _set_box_cooldown(session, box_type: str, user_id: int, now: datetime) -> None:
-    cooldown = {
-        "normal": BOX_NORMAL_COOLDOWN,
-        "super": BOX_SUPER_COOLDOWN,
-        "mega": BOX_MEGA_COOLDOWN,
-    }.get(box_type)
-    if cooldown is None:
-        return
-    cd_until = now + cooldown
-    cd_key = _box_cd_key(box_type, user_id)
-    cd_row = (
-        await session.execute(select(BotSetting).where(BotSetting.key == cd_key))
-    ).scalar_one_or_none()
-    if cd_row is None:
-        session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
-    else:
-        cd_row.value = cd_until.isoformat()
-
-
-async def _get_box_cooldown_left(session, box_type: str, user_id: int, now: datetime) -> timedelta | None:
-    cd_row = (
-        await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user_id)))
-    ).scalar_one_or_none()
-    if not cd_row or not cd_row.value:
-        return None
-    try:
-        cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
-    except ValueError:
-        return None
-    if cd_until and cd_until > now:
-        return cd_until - now
-    return None
 
 
 def _user_link(user_id: int, name: str) -> str:
@@ -490,7 +387,8 @@ async def shop_my_roles_callback(callback: CallbackQuery, engine: GameEngine) ->
     await callback.message.edit_text(
         f"🎒 <b>Mening rollarim</b> ({total} ta)\n\n"
         "Har bir sotib olingan rol — <b>bir martalik</b>.\n"
-        "O'yinda ishlatilgandan so'ng sumkadan o'chiriladi.\n\n"
+        "O'yinda ishlatilgandan so'ng sumkadan o'chiriladi.\n"
+        "<b>Konchi</b> esa sumkada qoladi va keyingi o'yinlarda ham ishlatilishi mumkin.\n\n"
         "Quyidan rol tanlasangiz, keyingi o'yinda shu rol birinchi navbatda qo'llanadi.",
         reply_markup=my_roles_keyboard(owned_roles, selected_role),
     )
@@ -1405,16 +1303,8 @@ async def process_successful_payment(message: Message, engine: GameEngine) -> No
                 user.vip_until = current_vip_until + timedelta(days=30)
             else:
                 user.vip_until = now + timedelta(days=30)
-            if not user.vip_badge:
-                user.vip_badge = DEFAULT_VIP_BADGE
-            if not user.vip_badge_position:
-                user.vip_badge_position = BADGE_POSITION_BEFORE
             await session.commit()
-        await message.answer(
-            "✅ <b>VIP User faollashtirildi!</b>\n\n"
-            "Muddat: <b>30 kun</b>\n"
-            "VIP panel: Do'kon → 👑 VIP yoki profil → VIP panel"
-        )
+        await message.answer("✅ <b>VIP User faollashtirildi!</b>\n\nMuddat: <b>30 kun</b>")
         return
 
     if not payload.startswith("diamonds:"):
@@ -1873,309 +1763,25 @@ def _user_is_vip(user: User) -> bool:
     return _vip_expires_after(user.vip_until, _utc_now())
 
 
-def _vip_panel_text(user: User) -> str:
-    style = style_from_user(user)
-    sample = style.nickname or user.display_name or "Ismingiz"
-    preview = preview_line(style, sample_name=sample)
-    if style.active:
-        days = vip_days_left(user.vip_until)
-        return (
-            "👑 <b>VIP panel</b>\n\n"
-            f"Status: ✅ <b>Faol</b> · {days} kun\n"
-            f"O'yinda: {preview}\n\n"
-            "Sozlamalar va qutilar pastdagi tugmalarda."
-        )
-    return (
-        "👑 <b>VIP panel</b>\n\n"
-        "VIP ochilmagan.\n\n"
-        "• O'yinda badge va maxsus ism\n"
-        "• Super / Mega qutilar\n"
-        "• Telegram sovg'a va Premium\n\n"
-        "Muddat: <b>30 kun</b>\n"
-        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
-    )
-
-
-async def _render_vip_panel(callback: CallbackQuery, user: User) -> None:
-    if callback.message is None:
-        return
-    style = style_from_user(user)
-    try:
-        await callback.message.edit_text(
-            _vip_panel_text(user),
-            reply_markup=vip_keyboard(is_active=style.active, badge_hidden=style.hidden),
-        )
-    except TelegramBadRequest:
-        pass
-
-
 @router.callback_query(F.data == "vip:open")
 async def vip_open(callback: CallbackQuery) -> None:
     if callback.from_user is None or callback.message is None:
         await callback.answer("Callback eskirgan.", show_alert=True)
         return
-    PENDING_VIP_INPUT.pop(callback.from_user.id, None)
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None:
-            await callback.answer("Avval /start bosing.", show_alert=True)
-            return
-        await _render_vip_panel(callback, user)
-    await callback.answer()
-
-
-@router.callback_query(F.data == "vip:badge:menu")
-async def vip_badge_menu(callback: CallbackQuery) -> None:
-    if callback.from_user is None or callback.message is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
     text = (
-        "🏷 <b>Badge tanlash</b>\n\n"
-        "Presetlardan birini bosing.\n"
-        "Premium emoji uchun VIP paneldan «✨ Premium emoji badge» ni tanlang.\n\n"
-        "Bu faqat ism yonida ko'rinadi — o'yin mantiqiga ta'sir qilmaydi."
+        "👑 <b>VIP User</b>\n\n"
+        "VIP User faollashtirish orqali siz:\n"
+        "• Telegram sovg'alarini sotib olish\n"
+        "• Telegram Premium sotib olish\n"
+        "imkoniyatiga ega bo'lasiz.\n\n"
+        "Muddat: <b>30 kun</b>\n"
+        "Narx: <b>30💎</b> yoki <b>190⭐</b>"
     )
     try:
-        await callback.message.edit_text(text, reply_markup=vip_badge_presets_keyboard())
+        await callback.message.edit_text(text, reply_markup=vip_keyboard())
     except TelegramBadRequest:
         pass
     await callback.answer()
-
-
-@router.callback_query(F.data.startswith("vip:badge:pick:"))
-async def vip_badge_pick(callback: CallbackQuery) -> None:
-    if callback.from_user is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    try:
-        idx = int(callback.data.rsplit(":", 1)[-1])
-        badge = VIP_BADGE_PRESETS[idx]
-    except (ValueError, IndexError):
-        await callback.answer("Noto'g'ri badge.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-        user.vip_badge = badge
-        user.vip_badge_emoji_id = None
-        await session.commit()
-        await session.refresh(user)
-        await _render_vip_panel(callback, user)
-    await callback.answer(f"Badge: {badge}", show_alert=True)
-
-
-@router.callback_query(F.data.in_({"vip:pos:before", "vip:pos:after"}))
-async def vip_badge_position(callback: CallbackQuery) -> None:
-    if callback.from_user is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    position = BADGE_POSITION_BEFORE if callback.data.endswith("before") else BADGE_POSITION_AFTER
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-        user.vip_badge_position = position
-        await session.commit()
-        await session.refresh(user)
-        await _render_vip_panel(callback, user)
-    await callback.answer(
-        "Badge ismdan oldinda." if position == BADGE_POSITION_BEFORE else "Badge ismdan keyin.",
-        show_alert=True,
-    )
-
-
-@router.callback_query(F.data == "vip:badge:toggle_hide")
-async def vip_badge_toggle_hide(callback: CallbackQuery) -> None:
-    if callback.from_user is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-        user.vip_badge_hidden = not bool(user.vip_badge_hidden)
-        await session.commit()
-        await session.refresh(user)
-        await _render_vip_panel(callback, user)
-    await callback.answer("Yangilandi.", show_alert=True)
-
-
-@router.callback_query(F.data == "vip:nick:set")
-async def vip_nick_set(callback: CallbackQuery) -> None:
-    if callback.from_user is None or callback.message is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-    PENDING_VIP_INPUT[callback.from_user.id] = "nick"
-    try:
-        await callback.message.edit_text(
-            "✍️ <b>VIP nickname</b>\n\n"
-            "O'yinda shu ism ishlatiladi (badge bilan).\n"
-            "2–24 belgi. <code>&lt; &gt; @ #</code> taqiqlangan.\n\n"
-            "Yangi nikingizni shu chatga yuboring.\n"
-            "Bekor: /cancel",
-            reply_markup=vip_keyboard(is_active=True, badge_hidden=bool(user.vip_badge_hidden)),
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer()
-
-
-@router.callback_query(F.data == "vip:nick:clear")
-async def vip_nick_clear(callback: CallbackQuery) -> None:
-    if callback.from_user is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-        user.vip_nickname = None
-        await session.commit()
-        await session.refresh(user)
-        await _render_vip_panel(callback, user)
-    await callback.answer("Nickname tozalandi. Telegram ismingiz ishlatiladi.", show_alert=True)
-
-
-@router.callback_query(F.data == "vip:badge:custom")
-async def vip_badge_custom_prompt(callback: CallbackQuery) -> None:
-    if callback.from_user is None or callback.message is None:
-        await callback.answer("Callback eskirgan.", show_alert=True)
-        return
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            await callback.answer("Faqat VIP User uchun.", show_alert=True)
-            return
-    PENDING_VIP_INPUT[callback.from_user.id] = "badge_custom"
-    try:
-        await callback.message.edit_text(
-            "✨ <b>Premium / custom badge</b>\n\n"
-            "Shu chatga <b>bitta</b> emoji yuboring:\n"
-            "• Oddiy Unicode emoji, yoki\n"
-            "• Premium custom emoji (Telegram Premium)\n\n"
-            "O'yin rollari bilan chalkashadigan belgilar rad etiladi.\n"
-            "Bekor: /cancel",
-            reply_markup=vip_keyboard(is_active=True, badge_hidden=bool(user.vip_badge_hidden)),
-        )
-    except TelegramBadRequest:
-        pass
-    await callback.answer()
-
-
-class _VipPendingFilter(BaseFilter):
-    """Only match private messages while user is configuring VIP nick/badge."""
-
-    async def __call__(self, message: Message) -> bool:
-        if message.chat.type != "private" or message.from_user is None:
-            return False
-        return message.from_user.id in PENDING_VIP_INPUT
-
-
-@router.message(Command("cancel"), F.chat.type == "private")
-async def vip_cancel_input(message: Message) -> None:
-    if message.from_user is None:
-        return
-    if PENDING_VIP_INPUT.pop(message.from_user.id, None):
-        await message.answer("Bekor qilindi. VIP panel: Do'kon → 👑 VIP yoki profil tugmasi.")
-
-
-@router.message(_VipPendingFilter(), F.chat.type == "private")
-async def vip_pending_input(message: Message) -> None:
-    """Handle VIP nickname / custom badge text."""
-    if message.from_user is None:
-        return
-    mode = PENDING_VIP_INPUT.get(message.from_user.id)
-    if not mode:
-        return
-    if message.text and message.text.startswith("/"):
-        return
-
-    async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.telegram_id == message.from_user.id))
-        ).scalar_one_or_none()
-        if user is None or not _user_is_vip(user):
-            PENDING_VIP_INPUT.pop(message.from_user.id, None)
-            await message.answer("VIP muddati tugagan yoki topilmadi.")
-            return
-
-        if mode == "nick":
-            ok, result = sanitize_vip_nickname(message.text or "")
-            if not ok:
-                await message.answer(f"❌ {result}")
-                return
-            user.vip_nickname = result
-            await session.commit()
-            PENDING_VIP_INPUT.pop(message.from_user.id, None)
-            await message.answer(
-                f"✅ VIP nickname saqlandi: <b>{escape(result)}</b>\n"
-                "Keyingi o'yinga qo'shilganingizda shu ism + badge ishlatiladi."
-            )
-            return
-
-        if mode == "badge_custom":
-            entities = list(message.entities or [])
-            custom = next((e for e in entities if e.type == "custom_emoji" and e.custom_emoji_id), None)
-            if custom is not None:
-                text = message.text or message.caption or DEFAULT_VIP_BADGE
-                try:
-                    fallback = text[custom.offset : custom.offset + custom.length] or DEFAULT_VIP_BADGE
-                except Exception:
-                    fallback = DEFAULT_VIP_BADGE
-                ok, eid, fb = validate_custom_emoji_id(str(custom.custom_emoji_id), fallback)
-                if not ok:
-                    await message.answer("❌ Premium emoji qabul qilinmadi.")
-                    return
-                user.vip_badge = fb
-                user.vip_badge_emoji_id = eid
-                await session.commit()
-                PENDING_VIP_INPUT.pop(message.from_user.id, None)
-                await message.answer(
-                    f"✅ Premium badge saqlandi.\n"
-                    f"Ko'rinish: <tg-emoji emoji-id=\"{escape(eid)}\">{escape(fb)}</tg-emoji>"
-                )
-                return
-            ok, badge = validate_badge_unicode(message.text or "")
-            if not ok:
-                await message.answer(f"❌ {badge}")
-                return
-            user.vip_badge = badge
-            user.vip_badge_emoji_id = None
-            await session.commit()
-            PENDING_VIP_INPUT.pop(message.from_user.id, None)
-            await message.answer(f"✅ Badge saqlandi: {badge}")
-            return
 
 
 @router.callback_query(F.data.startswith("box:info:"))
@@ -2190,43 +1796,40 @@ async def box_info(callback: CallbackQuery) -> None:
     if box_type not in {"normal", "super", "mega"}:
         await callback.answer("Noto'g'ri quti.", show_alert=True)
         return
-    now = _utc_now()
-    cd_left = ""
     async with SessionLocal() as session:
         user = (await session.execute(select(User).where(User.telegram_id == callback.from_user.id))).scalar_one_or_none()
         is_vip = _user_is_vip(user) if user else False
-        if user is not None:
-            left = await _get_box_cooldown_left(session, box_type, user.telegram_id, now)
-            if left is not None:
-                cd_left = f"\n\n⏳ Keyingi ochilish: <b>{_format_td(left)}</b>"
     if box_type == "normal":
         text = (
-            "🎁 <b>Oddiy Keys</b> · aktiv\n\n"
+            "🎁 <b>Oddiy Keys</b>\n\n"
             "• Haftasiga 1 marta bepul\n"
-            "• Mukofot: 💵 100–200 yoki 💎 1–3"
-            f"{cd_left}"
+            "• Mukofot: 💵 100-200 yoki 💎 1-3"
         )
         kb = box_info_keyboard(box_type)
     elif box_type == "super":
         text = (
-            "🧰 <b>Super Keys</b> · aktiv\n\n"
-            "• VIP: har 3 kunda 1 marta bepul\n"
-            "• Yoki 💵 5000 (VIP)\n"
-            "• Mukofot: 💵 1000–3000 yoki 💎 1–4"
-            f"{cd_left}"
+            "🧰 <b>Super Keys</b>\n\n"
+            "• Faqat VIP user uchun\n"
+            "• Har 3 kunda 1 marta bepul\n"
+            "• Yoki 💵 5000 evaziga ochish\n"
+            "• Mukofot: 💵 1000-3000 yoki 💎 1-4"
         )
         kb = box_info_keyboard(box_type, can_paid_open=is_vip)
     else:
         text = (
-            "👑 <b>Mega Quti</b> · aktiv\n\n"
-            "• Faqat VIP user\n"
+            "👑 <b>Mega Quti</b>\n\n"
+            "• Faqat VIP user uchun bepul ochiladi\n"
             "• Har 14 kunda 1 marta bepul\n"
-            "• Yoki 💵 8000 (VIP)\n"
-            "• Faqat 💎 · mukofot: 1–8"
-            f"{cd_left}"
+            "• Yoki 💵 8000 evaziga ochish\n"
+            "• Faqat 💎 beradi\n"
+            "• Mukofot: 💎 1-8\n"
+            "• Yuqori olmoslar ehtimoli pasaytirilgan"
         )
-        kb = box_info_keyboard(box_type, can_paid_open=is_vip, paid_open_cost=8000)
-    await _safe_edit_or_send(callback, text, kb)
+        kb = box_info_keyboard(box_type, can_paid_open=True, paid_open_cost=8000)
+    try:
+        await callback.message.edit_text(text, reply_markup=kb)
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 
@@ -2252,22 +1855,43 @@ async def box_open(callback: CallbackQuery) -> None:
             await callback.answer("Super keys faqat VIP user uchun.", show_alert=True)
             return
         if box_type == "mega" and not _user_is_vip(user):
-            await callback.answer("Mega quti faqat VIP user uchun.", show_alert=True)
+            await callback.answer("Mega quti bepul ochilishi faqat VIP user uchun.", show_alert=True)
             return
-        left = await _get_box_cooldown_left(session, box_type, user.telegram_id, now)
-        if left is not None:
-            await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(left)}", show_alert=True)
+        cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_cd_key(box_type, user.telegram_id)))).scalar_one_or_none()
+        if cd_row and cd_row.value:
+            try:
+                cd_until = _as_aware_utc(datetime.fromisoformat(cd_row.value))
+            except ValueError:
+                cd_until = None
+        else:
+            cd_until = None
+        cooldown = (
+            BOX_NORMAL_COOLDOWN if box_type == "normal"
+            else BOX_SUPER_COOLDOWN if box_type == "super"
+            else BOX_MEGA_COOLDOWN if box_type == "mega"
+            else timedelta(0)
+        )
+        if cooldown.total_seconds() > 0 and cd_until and cd_until > now:
+            await callback.answer(f"Hali ochib bo'lmaydi: {_format_td(cd_until - now)}", show_alert=True)
             return
         rewards = _generate_box_rewards(box_type)
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": box_type, "session_id": session_id, "rewards": rewards, "claimed": False}
-        await _save_box_session(session, user.telegram_id, payload)
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
         await session.commit()
-    await _safe_edit_or_send(
-        callback,
-        "🎲 <b>Qutini ochish</b>\n\n4x4 kartadan bittasini tanlang:",
-        box_pick_keyboard(box_type, session_id),
-    )
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Qutini ochish</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard(box_type, session_id),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 
@@ -2302,13 +1926,21 @@ async def box_open_paid_super(callback: CallbackQuery) -> None:
         rewards = _generate_box_rewards("super")
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": "super", "session_id": session_id, "rewards": rewards, "claimed": False}
-        await _save_box_session(session, user.telegram_id, payload)
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
         await session.commit()
-    await _safe_edit_or_send(
-        callback,
-        "🎲 <b>Super keys</b>\n\n4x4 kartadan bittasini tanlang:",
-        box_pick_keyboard("super", session_id),
-    )
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Super keys</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard("super", session_id),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer("✅ 5000 dollar yechildi, quti ochildi.", show_alert=True)
 
 
@@ -2326,9 +1958,6 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
         if user is None:
             await callback.answer("Avval /start bosing.", show_alert=True)
             return
-        if not _user_is_vip(user):
-            await callback.answer("Mega quti faqat VIP user uchun.", show_alert=True)
-            return
         if (user.dollar or 0) < 8000:
             await callback.answer("Balans yetarli emas. Kerak: 💵 8000", show_alert=True)
             return
@@ -2343,13 +1972,21 @@ async def box_open_paid_mega(callback: CallbackQuery) -> None:
         rewards = _generate_box_rewards("mega")
         session_id = f"{int(now.timestamp())}{random.randint(100,999)}"
         payload = {"box_type": "mega", "session_id": session_id, "rewards": rewards, "claimed": False}
-        await _save_box_session(session, user.telegram_id, payload)
+        sess_key = _box_session_key(user.telegram_id)
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == sess_key))).scalar_one_or_none()
+        if sess_row is None:
+            sess_row = BotSetting(key=sess_key, value=json.dumps(payload, ensure_ascii=True))
+            session.add(sess_row)
+        else:
+            sess_row.value = json.dumps(payload, ensure_ascii=True)
         await session.commit()
-    await _safe_edit_or_send(
-        callback,
-        "🎲 <b>Mega quti</b>\n\n4x4 kartadan bittasini tanlang:",
-        box_pick_keyboard("mega", session_id),
-    )
+    try:
+        await callback.message.edit_text(
+            "🎲 <b>Mega quti</b>\n\n4x4 kartadan bittasini tanlang:",
+            reply_markup=box_pick_keyboard("mega", session_id),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer("✅ 8000 dollar yechildi, quti ochildi.", show_alert=True)
 
 
@@ -2380,9 +2017,14 @@ async def box_pick(callback: CallbackQuery) -> None:
         if user is None:
             await callback.answer("Avval /start bosing.", show_alert=True)
             return
-        payload = await _load_box_session(session, user.telegram_id)
-        if not payload:
+        sess_row = (await session.execute(select(BotSetting).where(BotSetting.key == _box_session_key(user.telegram_id)))).scalar_one_or_none()
+        if sess_row is None or not sess_row.value:
             await callback.answer("Quti sessiyasi topilmadi.", show_alert=True)
+            return
+        try:
+            payload = json.loads(sess_row.value)
+        except (TypeError, ValueError):
+            await callback.answer("Quti sessiyasi buzilgan.", show_alert=True)
             return
         if payload.get("claimed"):
             await callback.answer("Bu quti allaqachon ochilgan.", show_alert=True)
@@ -2409,17 +2051,41 @@ async def box_pick(callback: CallbackQuery) -> None:
             _record_dollar_transaction(session, user, amount, f"{box_type}_box_reward", note=f"{box_type} qutidan mukofot")
             reward_text = f"💵 {amount} dollar"
         payload["claimed"] = True
-        await _save_box_session(session, user.telegram_id, payload)
-        await _set_box_cooldown(session, box_type, user.telegram_id, now)
+        sess_row.value = json.dumps(payload, ensure_ascii=True)
+        if box_type == "normal":
+            cd_until = now + BOX_NORMAL_COOLDOWN
+            cd_key = _box_cd_key("normal", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
+        elif box_type == "super":
+            cd_until = now + BOX_SUPER_COOLDOWN
+            cd_key = _box_cd_key("super", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
+        elif box_type == "mega":
+            cd_until = now + BOX_MEGA_COOLDOWN
+            cd_key = _box_cd_key("mega", user.telegram_id)
+            cd_row = (await session.execute(select(BotSetting).where(BotSetting.key == cd_key))).scalar_one_or_none()
+            if cd_row is None:
+                session.add(BotSetting(key=cd_key, value=cd_until.isoformat()))
+            else:
+                cd_row.value = cd_until.isoformat()
         await session.commit()
-        is_vip = _user_is_vip(user)
-    can_paid_open = (box_type == "super" and is_vip) or (box_type == "mega" and is_vip)
+    can_paid_open = box_type in {"super", "mega"}
     paid_open_cost = 8000 if box_type == "mega" else 5000
-    await _safe_edit_or_send(
-        callback,
-        f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
-        box_info_keyboard(box_type, can_paid_open=can_paid_open, paid_open_cost=paid_open_cost),
-    )
+    try:
+        await callback.message.edit_text(
+            f"🎉 <b>Tabriklaymiz!</b>\n\nSiz {reward_text} yutdingiz.\nMukofot real balansingizga qo'shildi.",
+            reply_markup=box_info_keyboard(box_type, can_paid_open=can_paid_open, paid_open_cost=paid_open_cost),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer("Mukofot berildi!", show_alert=True)
 
 
@@ -2445,10 +2111,6 @@ async def vip_buy_diamonds(callback: CallbackQuery) -> None:
             user.vip_until = current_vip_until + timedelta(days=30)
         else:
             user.vip_until = now + timedelta(days=30)
-        if not user.vip_badge:
-            user.vip_badge = DEFAULT_VIP_BADGE
-        if not user.vip_badge_position:
-            user.vip_badge_position = BADGE_POSITION_BEFORE
         _record_diamond_transaction(
             session,
             user,
@@ -2457,8 +2119,6 @@ async def vip_buy_diamonds(callback: CallbackQuery) -> None:
             note="VIP User 30 kun",
         )
         await session.commit()
-        await session.refresh(user)
-        await _render_vip_panel(callback, user)
     await callback.answer("✅ VIP User faollashtirildi!", show_alert=True)
 
 

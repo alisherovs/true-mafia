@@ -239,6 +239,7 @@ ROLE_INFO_ORDER: tuple[Role, ...] = (
     Role.GUARD,
     Role.HOJIAKA,
     Role.MASHKA,
+    Role.FAIRY,
 )
 
 
@@ -613,76 +614,20 @@ def shop_keyboard(has_hero: bool = False) -> InlineKeyboardMarkup:
             [dollar_icon_button("📦 Sirpanishdan himoya - 300", callback_data="shop:buy:miner_protection")],
             [InlineKeyboardButton(text="🃏 Keyingi rol tanlash", callback_data="shop:roles")],
             [InlineKeyboardButton(text="👑 VIP User", callback_data="vip:open")],
-            [
-                InlineKeyboardButton(text="🎁 Keys", callback_data="box:info:normal"),
-                InlineKeyboardButton(text="🧰 Super", callback_data="box:info:super"),
-                InlineKeyboardButton(text="👑 Mega", callback_data="box:info:mega"),
-            ],
             [InlineKeyboardButton(text="🎁 Telegram sovg'asiga almashtirish", callback_data="shop:gifts")],
             [InlineKeyboardButton(text="◀️ Orqaga", callback_data="profile:open")],
         ]
     )
 
 
-def vip_keyboard(*, is_active: bool = False, badge_hidden: bool = False) -> InlineKeyboardMarkup:
-    """VIP hub: cosmetics + active boxes. Display-only options do not affect game rules."""
-    rows: list[list[InlineKeyboardButton]] = []
-    # Qutilar doim aktiv (yuqorida — asosiy bo'lim)
-    rows.extend(
-        [
-            [InlineKeyboardButton(text="🎁 Oddiy Keys", callback_data="box:info:normal")],
-            [InlineKeyboardButton(text="🧰 Super Keys", callback_data="box:info:super")],
-            [InlineKeyboardButton(text="👑 Mega Quti", callback_data="box:info:mega")],
+def vip_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [diamond_icon_button("30 almaz bilan faollashtirish", callback_data="vip:buy:diamonds")],
+            [InlineKeyboardButton(text="⭐ 190 stars bilan faollashtirish", callback_data="vip:buy:stars")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")],
         ]
     )
-    if not is_active:
-        rows.extend(
-            [
-                [InlineKeyboardButton(text="💎 30 almaz — 30 kun VIP", callback_data="vip:buy:diamonds")],
-                [InlineKeyboardButton(text="⭐ 190 stars — 30 kun VIP", callback_data="vip:buy:stars")],
-            ]
-        )
-    else:
-        rows.extend(
-            [
-                [InlineKeyboardButton(text="⏳ Uzaytirish · 30💎", callback_data="vip:buy:diamonds")],
-                [InlineKeyboardButton(text="⏳ Uzaytirish · 190⭐", callback_data="vip:buy:stars")],
-                [InlineKeyboardButton(text="🏷 Badge", callback_data="vip:badge:menu")],
-                [
-                    InlineKeyboardButton(text="◀️ Oldin", callback_data="vip:pos:before"),
-                    InlineKeyboardButton(text="Keyin ▶️", callback_data="vip:pos:after"),
-                ],
-                [
-                    InlineKeyboardButton(
-                        text=("🙈 Badge yashirish" if not badge_hidden else "👁 Badge ko'rsatish"),
-                        callback_data="vip:badge:toggle_hide",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(text="✍️ Nickname", callback_data="vip:nick:set"),
-                    InlineKeyboardButton(text="🗑 Tozalash", callback_data="vip:nick:clear"),
-                ],
-                [InlineKeyboardButton(text="✨ Premium emoji", callback_data="vip:badge:custom")],
-            ]
-        )
-    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="shop:open")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def vip_badge_presets_keyboard() -> InlineKeyboardMarkup:
-    from app.vip_display import VIP_BADGE_PRESETS
-
-    rows: list[list[InlineKeyboardButton]] = []
-    row: list[InlineKeyboardButton] = []
-    for idx, badge in enumerate(VIP_BADGE_PRESETS, 1):
-        row.append(InlineKeyboardButton(text=badge, callback_data=f"vip:badge:pick:{idx - 1}"))
-        if len(row) == 4:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    rows.append([InlineKeyboardButton(text="◀️ VIP panel", callback_data="vip:open")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def box_info_keyboard(
@@ -692,17 +637,8 @@ def box_info_keyboard(
 ) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="🎁 Ochish", callback_data=f"box:open:{box_type}")]]
     if can_paid_open:
-        rows.append(
-            [
-                dollar_icon_button(f"{paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")
-            ]
-        )
-    rows.append(
-        [
-            InlineKeyboardButton(text="👑 VIP", callback_data="vip:open"),
-            InlineKeyboardButton(text="◀️ Do'kon", callback_data="shop:open"),
-        ]
-    )
+        rows.append([dollar_icon_button(f"{paid_open_cost} evaziga ochish", callback_data=f"box:open_paid:{box_type}")])
+    rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="vip:open")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -911,50 +847,8 @@ def owner_hero_market_keyboard(has_channel: bool) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(text="➕ Qo'shish / o'zgartirish", callback_data="owner:hero_market_set")]]
     if has_channel:
         rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data="owner:hero_market_clear")])
-    rows.append([InlineKeyboardButton(text="🥷 Geroylar ro'yxati", callback_data="owner:heroes:0")])
     rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def owner_heroes_list_keyboard(
-    hero_buttons: list[tuple[int, str]],
-    page: int,
-    total_pages: int,
-) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
-    for hero_id, label in hero_buttons:
-        rows.append([InlineKeyboardButton(text=f"🥷 {label}", callback_data=f"owner:hero_view:{hero_id}")])
-    nav: list[InlineKeyboardButton] = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️ Oldingi", callback_data=f"owner:heroes:{page - 1}"))
-    if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton(text="Keyingi ▶️", callback_data=f"owner:heroes:{page + 1}"))
-    if nav:
-        rows.append(nav)
-    rows.append([InlineKeyboardButton(text="🔎 ID orqali olib qo'yish", callback_data="owner:hero_remove_by_id")])
-    rows.append([InlineKeyboardButton(text="🔄 Yangilash", callback_data=f"owner:heroes:{page}")])
-    rows.append([InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def owner_hero_detail_keyboard(hero_id: int, page: int = 0) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🚫 Geroyni olib qo'yish", callback_data=f"owner:hero_remove_ask:{hero_id}")],
-            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data=f"owner:heroes:{page}")],
-            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
-        ]
-    )
-
-
-def owner_hero_remove_confirm_keyboard(hero_id: int, page: int = 0) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Ha, olib tashla", callback_data=f"owner:hero_remove_do:{hero_id}")],
-            [InlineKeyboardButton(text="❌ Bekor", callback_data=f"owner:hero_view:{hero_id}")],
-            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data=f"owner:heroes:{page}")],
-        ]
-    )
 
 
 def role_shop_keyboard() -> InlineKeyboardMarkup:
@@ -1053,12 +947,11 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [diamond_icon_button("Almaz loglari", callback_data="owner:diamond_audit")],
             [InlineKeyboardButton(text="🏠 Admin guruh", callback_data="owner:admin_group")],
             [InlineKeyboardButton(text="🎲 Premium guruhlar", callback_data="owner:premium_groups")],
-            [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:blocked_list")],
+            [InlineKeyboardButton(text="🚷 Blacklist", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text=" Xarid admini", callback_data="owner:purchase_admin")],
             [InlineKeyboardButton(text="📰 Yangiliklar kanali", callback_data="owner:news_channel")],
             [InlineKeyboardButton(text="📺 Kanal sovg'a balansi", callback_data="owner:channel_gifts")],
             [InlineKeyboardButton(text="🥷 Geroy savdo kanali", callback_data="owner:hero_market_channel")],
-            [InlineKeyboardButton(text="🥷 Geroylar ro'yxati", callback_data="owner:heroes:0")],
             [InlineKeyboardButton(text="📣 Userlarga reklama", callback_data="owner:broadcast_users")],
             [InlineKeyboardButton(text="🏘 Guruhlarga reklama", callback_data="owner:broadcast_groups")],
             [InlineKeyboardButton(text="🎁 Kredit berish", callback_data="owner:grant_help")],
@@ -1066,23 +959,6 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📋 Barcha buyruqlar", callback_data="owner:commands")],
             [InlineKeyboardButton(text="🧾 Yordam", callback_data="owner:help")],
             [InlineKeyboardButton(text="◀️ User panel", callback_data="start:back")],
-        ]
-    )
-
-
-def owner_blacklist_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
-                InlineKeyboardButton(text="✅ Userni ochish", callback_data="owner:premium_unblock_user"),
-            ],
-            [
-                InlineKeyboardButton(text="🏠 Guruhni bloklash", callback_data="owner:group_block"),
-                InlineKeyboardButton(text="🔓 Guruhni ochish", callback_data="owner:group_unblock"),
-            ],
-            [InlineKeyboardButton(text="🔄 Yangilash", callback_data="owner:blocked_list")],
-            [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )
 
@@ -1259,7 +1135,7 @@ def owner_premium_groups_keyboard(groups: list[object] | None = None) -> InlineK
                 InlineKeyboardButton(text="🚫 Userni bloklash", callback_data="owner:premium_block_user"),
                 InlineKeyboardButton(text="✅ Blokdan chiqarish", callback_data="owner:premium_unblock_user"),
             ],
-            [InlineKeyboardButton(text="🚷 Bloklanganlar", callback_data="owner:blocked_list")],
+            [InlineKeyboardButton(text="🚷 Bloklanganlar", callback_data="owner:premium_blocked_list")],
             [InlineKeyboardButton(text="◀️ Admin panel", callback_data="owner:panel")],
         ]
     )

@@ -43,12 +43,6 @@ class User(Base):
     total_games: Mapped[int] = mapped_column(Integer, default=0)
     play_locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     vip_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Cosmetic only — never used in game win/vote/role logic
-    vip_badge: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, default="👑")
-    vip_badge_emoji_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    vip_badge_position: Mapped[str] = mapped_column(String(16), default="before")
-    vip_badge_hidden: Mapped[bool] = mapped_column(Boolean, default=False)
-    vip_nickname: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -121,11 +115,6 @@ class GamePlayer(Base):
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     display_name: Mapped[str] = mapped_column(String(255))
-    # VIP cosmetic snapshot at join (display only)
-    vip_badge: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    vip_badge_emoji_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    vip_badge_position: Mapped[str] = mapped_column(String(16), default="before")
-    vip_show_badge: Mapped[bool] = mapped_column(Boolean, default=False)
 
     role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     team: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -430,8 +419,8 @@ class CoinFlipGame(Base):
     user_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     bet_amount: Mapped[int] = mapped_column(Integer)
-    choice: Mapped[str] = mapped_column(String(16))
-    result: Mapped[str] = mapped_column(String(16))
+    choice: Mapped[str] = mapped_column(String(16))  # heads | tails
+    result: Mapped[str] = mapped_column(String(16))  # heads | tails
     won: Mapped[bool] = mapped_column(Boolean, default=False)
     payout: Mapped[int] = mapped_column(Integer, default=0)
     profit: Mapped[int] = mapped_column(Integer, default=0)

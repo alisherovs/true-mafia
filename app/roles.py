@@ -304,6 +304,13 @@ ROLE_META: dict[Role, RoleMeta] = {
         "Mashka",
         "Har tunda bitta o'yinchidan pul o'g'irlaysiz: ko'proq dollar, kamdan-kam 1 ta olmos.",
     ),
+    Role.FAIRY: RoleMeta(
+        Role.FAIRY,
+        Team.CITY,
+        "👼",
+        "Farishta",
+        "Har o'yinda faqat bitta o'yinchini qayta tiriltira olasiz. O'lik o'yinchi tanlansa, u yana o'yinga qaytadi.",
+    ),
 }
 
 
@@ -331,6 +338,7 @@ SHOP_ROLE_CATALOG: tuple[RoleShopItem, ...] = (
     RoleShopItem(Role.SORCERER, 500, "dollar"),
     RoleShopItem(Role.HOJIAKA, 3, "diamonds"),
     RoleShopItem(Role.MASHKA, 2, "diamonds"),
+    RoleShopItem(Role.FAIRY, 3, "diamonds"),
     RoleShopItem(Role.WOLF, 500, "dollar"),
     RoleShopItem(Role.PRANKSTER, 500, "dollar"),
     RoleShopItem(Role.BUM, 400, "dollar"),
@@ -468,6 +476,19 @@ def _with_mashka(player_count: int, roles: list[Role]) -> list[Role]:
     return updated
 
 
+def _with_fairy(player_count: int, roles: list[Role], *, min_players: int) -> list[Role]:
+    if player_count < min_players or Role.FAIRY in roles:
+        return roles
+    updated = list(roles)
+    replacement_priority = [Role.CITIZEN, Role.JESTER, Role.LUCKY, Role.CROOK]
+    for role in replacement_priority:
+        if role in updated:
+            updated[updated.index(role)] = Role.FAIRY
+            return updated
+    updated[-1] = Role.FAIRY
+    return updated
+
+
 EXTENDED_ROLE_TABLE: dict[int, list[Role]] = {
     count: _with_mashka(
         count,
@@ -516,6 +537,7 @@ ROLE_MIN_PLAYERS: dict[str, int] = {
     "werewolf": 19,
     "prankster": 10,
     "joker": 17,
+    "fairy": 25,
 }
 
 ROLE_MIN_KEYS: dict[Role, str] = {
@@ -531,6 +553,7 @@ ROLE_MIN_KEYS: dict[Role, str] = {
     Role.HIRED_KILLER: "hired_killer",
     Role.PRANKSTER: "prankster",
     Role.JOKER: "joker",
+    Role.FAIRY: "fairy",
 }
 
 SUPER_ROLE_ORDER: tuple[Role, ...] = (
@@ -549,6 +572,7 @@ SUPER_ROLE_ORDER: tuple[Role, ...] = (
     Role.JOKER,
     Role.MAYOR,
     Role.HOJIAKA,
+    Role.FAIRY,
     Role.MASHKA,
     Role.ARSONIST,
     Role.SPY,
@@ -589,7 +613,9 @@ MEGA_ROLE_ORDER: tuple[Role, ...] = (
     Role.GUARD,
     Role.ARSONIST,
     Role.HOJIAKA,
+    Role.MINER,
     Role.MASHKA,
+    Role.FAIRY,
     Role.LAWYER,
     Role.PRANKSTER,
     Role.JOKER,
@@ -665,6 +691,7 @@ NON_MAFIA_ACTIVE_ROLES: tuple[Role, ...] = (
     Role.JOKER,
     Role.HOJIAKA,
     Role.MASHKA,
+    Role.FAIRY,
 )
 
 REPEATABLE_ACTIVE_ROLES: tuple[Role, ...] = (
@@ -740,6 +767,8 @@ def _build_super_roles(player_count: int, disabled_roles: set[Role]) -> list[Rol
     filler = [role for role in SUPER_FILLER_ORDER if role not in disabled_roles] or [Role.CITIZEN]
     if player_count < 12:
         roles = [role for role in roles if role != Role.JOKER]
+    if player_count >= 15 and Role.FAIRY not in disabled_roles and Role.FAIRY not in roles:
+        roles = _with_fairy(player_count, roles, min_players=15)
     idx = 0
     while len(roles) < player_count:
         roles.append(filler[idx % len(filler)])
@@ -752,6 +781,8 @@ def _build_mega_roles(player_count: int, disabled_roles: set[Role]) -> list[Role
     filler = [role for role in MEGA_FILLER_ORDER if role not in disabled_roles] or [Role.COMMISSAR]
     if player_count < 10:
         roles = [role for role in roles if role != Role.JOKER]
+    if player_count >= 12 and Role.FAIRY not in disabled_roles and Role.FAIRY not in roles:
+        roles = _with_fairy(player_count, roles, min_players=12)
     idx = 0
     while len(roles) < player_count:
         roles.append(filler[idx % len(filler)])
@@ -791,6 +822,9 @@ def _build_classic_role_set(player_count: int, disabled_roles: Optional[set[Role
         roles = EXTENDED_ROLE_TABLE.get(capped_count, EXTENDED_ROLE_TABLE[4]).copy()
     else:
         roles = EXTENDED_ROLE_TABLE[30].copy()
+
+    if player_count >= 25 and Role.FAIRY not in roles and Role.FAIRY not in disabled:
+        roles = _with_fairy(player_count, roles, min_players=25)
 
     if player_count > len(roles):
         extras = [Role.CITIZEN, Role.CITIZEN, Role.MAFIA, Role.CITIZEN]

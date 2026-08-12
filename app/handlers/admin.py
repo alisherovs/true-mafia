@@ -11,17 +11,13 @@ from app.config import Settings
 from app.game_engine import GameEngine
 from app.keyboards import (
     owner_admin_group_keyboard,
-    owner_blacklist_keyboard,
     owner_channel_gift_mode_keyboard,
     owner_channel_gifts_keyboard,
     owner_diamond_audit_keyboard,
     owner_diamond_top_keyboard,
     owner_dollar_top_keyboard,
     owner_gamble_keyboard,
-    owner_hero_detail_keyboard,
     owner_hero_market_keyboard,
-    owner_hero_remove_confirm_keyboard,
-    owner_heroes_list_keyboard,
     owner_invoice_after_keyboard,
     owner_invoice_delivery_keyboard,
     owner_invoice_menu_keyboard,
@@ -102,11 +98,10 @@ OWNER_COMMANDS_TEXT = (
     "💎 Almaz loglari - kim qancha oldi/sarfladi va nimalarga ketganini ko'rsatadi\n"
     "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulash\n"
     "🎲 Premium guruhlar - premium guruhlarni boshqarish\n"
-    "🚷 Blacklist - bloklangan foydalanuvchi va guruhlar bo'limi\n"
+    "🚷 Blacklist - bloklangan foydalanuvchilar bo'limi\n"
     "Xarid admini - almaz xaridi uchun admin username sozlash\n"
     "Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqarish\n"
     "Geroy savdo kanali - geroy marketplace kanalini ulash\n"
-    "Geroylar ro'yxati - barcha geroylar va olib qo'yish\n"
     "Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqarish\n"
     "Userlarga reklama - barcha userlarga xabar yuborish\n"
     "Guruhlarga reklama - barcha guruhlarga xabar yuborish\n"
@@ -480,7 +475,7 @@ async def owner_premium_block_user_callback(callback: CallbackQuery, settings: S
     PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_block_user"
     await _safe_edit(
         callback,
-        "🚫 <b>Userni bloklash</b>\n\n"
+        "🚫 <b>Premium user bloklash</b>\n\n"
         "Telegram ID, @username yoki username yuboring. Sabab yozish ixtiyoriy.\n\n"
         "Masalan:\n<code>123456789 reklama</code>",
         reply_markup=owner_wait_keyboard(),
@@ -496,8 +491,7 @@ async def owner_premium_unblock_user_callback(callback: CallbackQuery, settings:
     PENDING_OWNER_ACTIONS[callback.from_user.id] = "premium_unblock_user"
     await _safe_edit(
         callback,
-        "✅ <b>Userni blokdan chiqarish</b>\n\n"
-        "Premium/qimor bloki va kredit bloki shu yerdan ochiladi.\n"
+        "✅ <b>Premium userni blokdan chiqarish</b>\n\n"
         "Telegram ID, @username yoki username yuboring.\n\n"
         "Masalan:\n<code>123456789</code>",
         reply_markup=owner_wait_keyboard(),
@@ -505,45 +499,13 @@ async def owner_premium_unblock_user_callback(callback: CallbackQuery, settings:
     await callback.answer()
 
 
-@router.callback_query(F.data.in_({"owner:blocked_list", "owner:premium_blocked_list"}))
+@router.callback_query(F.data == "owner:premium_blocked_list")
 async def owner_premium_blocked_list_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
         await callback.answer("Ruxsat yo'q.", show_alert=True)
         return
-    await _safe_edit(callback, await engine.premium_blocked_users_text(), reply_markup=owner_blacklist_keyboard())
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner:group_block")
-async def owner_group_block_callback(callback: CallbackQuery, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS[callback.from_user.id] = "group_block"
-    await _safe_edit(
-        callback,
-        "🏠 <b>Guruhni bloklash</b>\n\n"
-        "Guruh ID yuboring. Sabab yozish ixtiyoriy.\n\n"
-        "Masalan:\n<code>-1001234567890 qoida buzildi</code>\n\n"
-        "Bloklangan guruhda bot buyruqlari ishlamaydi va guruhga cheklov xabari chiqadi.",
-        reply_markup=owner_wait_keyboard(),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "owner:group_unblock")
-async def owner_group_unblock_callback(callback: CallbackQuery, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS[callback.from_user.id] = "group_unblock"
-    await _safe_edit(
-        callback,
-        "🔓 <b>Guruhni blokdan chiqarish</b>\n\n"
-        "Guruh ID yuboring.\n\n"
-        "Masalan:\n<code>-1001234567890</code>",
-        reply_markup=owner_wait_keyboard(),
-    )
+    groups = await engine.premium_groups(include_inactive=True)
+    await _safe_edit(callback, await engine.premium_blocked_users_text(), reply_markup=owner_premium_groups_keyboard(groups))
     await callback.answer()
 
 
@@ -606,104 +568,6 @@ async def owner_news_clear_callback(callback: CallbackQuery, engine: GameEngine,
     text = await engine.clear_news_channel_url()
     await _safe_edit(callback, text, reply_markup=owner_news_channel_keyboard(False))
     await callback.answer("O'chirildi.")
-
-
-@router.callback_query(F.data.regexp(r"^owner:heroes:\d+$"))
-async def owner_heroes_list_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    try:
-        page = int((callback.data or "").rsplit(":", 1)[-1])
-    except ValueError:
-        page = 0
-    text, buttons, page, total_pages = await engine.owner_heroes_page(page=page, per_page=8)
-    await _safe_edit(callback, text, reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages))
-    await callback.answer()
-
-
-@router.callback_query(F.data.regexp(r"^owner:hero_view:\d+$"))
-async def owner_hero_view_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
-    try:
-        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
-    except ValueError:
-        await callback.answer("Noto'g'ri ID.", show_alert=True)
-        return
-    ok, text = await engine.owner_hero_detail_text(hero_id)
-    if not ok:
-        await callback.answer(text, show_alert=True)
-        text_list, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
-        await _safe_edit(callback, text_list, reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages))
-        return
-    await _safe_edit(callback, text, reply_markup=owner_hero_detail_keyboard(hero_id, page=0))
-    await callback.answer()
-
-
-@router.callback_query(F.data.regexp(r"^owner:hero_remove_ask:\d+$"))
-async def owner_hero_remove_ask_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    try:
-        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
-    except ValueError:
-        await callback.answer("Noto'g'ri ID.", show_alert=True)
-        return
-    ok, detail = await engine.owner_hero_detail_text(hero_id)
-    if not ok:
-        await callback.answer(detail, show_alert=True)
-        return
-    text = (
-        f"{detail}\n\n"
-        "⚠️ <b>Geroyni butunlay olib tashlamoqchimisiz?</b>\n"
-        "Bu amal qaytarilmaydi. Egaga xabar yuboriladi."
-    )
-    await _safe_edit(callback, text, reply_markup=owner_hero_remove_confirm_keyboard(hero_id, page=0))
-    await callback.answer()
-
-
-@router.callback_query(F.data.regexp(r"^owner:hero_remove_do:\d+$"))
-async def owner_hero_remove_do_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    try:
-        hero_id = int((callback.data or "").rsplit(":", 1)[-1])
-    except ValueError:
-        await callback.answer("Noto'g'ri ID.", show_alert=True)
-        return
-    ok, text = await engine.owner_remove_hero(callback.bot, hero_id, notify_owner=True)
-    if not ok:
-        await callback.answer(text, show_alert=True)
-    list_text, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
-    await _safe_edit(
-        callback,
-        f"{text}\n\n{list_text}",
-        reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages),
-    )
-    await callback.answer("✅ Bajarildi." if ok else "Xato", show_alert=not ok)
-
-
-@router.callback_query(F.data == "owner:hero_remove_by_id")
-async def owner_hero_remove_by_id_callback(callback: CallbackQuery, settings: Settings) -> None:
-    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
-        await callback.answer("Ruxsat yo'q.", show_alert=True)
-        return
-    PENDING_OWNER_ACTIONS[callback.from_user.id] = "hero_remove_telegram_id"
-    await _safe_edit(
-        callback,
-        "🔎 <b>Geroy olib qo'yish</b>\n\n"
-        "Egasi Telegram ID sini yuboring.\n"
-        "Masalan: <code>123456789</code>\n\n"
-        "Bekor: /cancel yoki Admin panelga qayting.",
-        reply_markup=owner_wait_keyboard(),
-    )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "owner:hero_market_channel")
@@ -918,7 +782,7 @@ async def owner_help_callback(callback: CallbackQuery, settings: Settings) -> No
             "🏠 Admin guruh - almaz loglari avtomatik yuboriladigan guruhni ulaydi.\n"
             "🎲 Premium guruhlar - nom, link va olmos narxi bilan premium guruh ulaydi.\n"
             "⏱ Premium timer - premium guruh balansini avtomatik 0 qilish vaqtini sozlaydi.\n"
-            "🚷 Blacklist - user va guruh bloklarini boshqarish.\n"
+            "🚷 Blacklist - premium user bloklash va blokdan chiqarish.\n"
             " Xarid admini - almaz xaridi uchun admin username sozlaydi.\n"
             "📰 Yangiliklar kanali - user paneldagi yangiliklar tugmasini boshqaradi.\n"
             "📺 Kanal sovg'a balansi - kanal uchun /send va /change balansini boshqaradi.\n"
@@ -1241,23 +1105,6 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
         await message.answer(text, reply_markup=owner_hero_market_keyboard(True))
         return True
 
-    if action == "hero_remove_telegram_id":
-        raw = (message.text or "").strip()
-        if not raw.isdigit():
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "hero_remove_telegram_id"
-            await message.answer(
-                "Faqat Telegram ID (raqam) yuboring.\nMasalan: <code>123456789</code>",
-                reply_markup=owner_wait_keyboard(),
-            )
-            return True
-        ok, text = await engine.owner_remove_hero_by_telegram_id(message.bot, int(raw))
-        list_text, buttons, page, total_pages = await engine.owner_heroes_page(page=0, per_page=8)
-        await message.answer(
-            f"{text}\n\n{list_text}",
-            reply_markup=owner_heroes_list_keyboard(buttons, page, total_pages),
-        )
-        return True
-
     if action == "channel_gifts_view":
         raw = (message.text or "").strip()
         if not raw.lstrip("-").isdigit():
@@ -1390,30 +1237,18 @@ async def _handle_pending_owner_message(message: Message, engine: GameEngine, se
 
     if action == "premium_block_user":
         ok, text = await engine.block_premium_user(message.text or "", blocked_by=message.from_user.id)
-        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
+        groups = await engine.premium_groups(include_inactive=True) if ok else []
+        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_block_user"
         return True
 
     if action == "premium_unblock_user":
         ok, text = await engine.unblock_premium_user(message.text or "")
-        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
+        groups = await engine.premium_groups(include_inactive=True) if ok else []
+        await message.answer(text, reply_markup=owner_premium_groups_keyboard(groups) if ok else owner_wait_keyboard())
         if not ok:
             PENDING_OWNER_ACTIONS[message.from_user.id] = "premium_unblock_user"
-        return True
-
-    if action == "group_block":
-        ok, text = await engine.block_group(message.text or "", blocked_by=message.from_user.id)
-        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
-        if not ok:
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "group_block"
-        return True
-
-    if action == "group_unblock":
-        ok, text = await engine.unblock_group(message.text or "")
-        await message.answer(text, reply_markup=owner_blacklist_keyboard() if ok else owner_wait_keyboard())
-        if not ok:
-            PENDING_OWNER_ACTIONS[message.from_user.id] = "group_unblock"
         return True
 
     if action in {"broadcast_users", "broadcast_groups"}:
