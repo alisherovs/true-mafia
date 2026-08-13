@@ -4318,7 +4318,7 @@ class GameEngine:
             hojiaka_grants: list[tuple[int, int]] = []
             mashka_steals: list[tuple[int, int]] = []
             joker_actions: list[NightAction] = []
-            mine_actions: list[tuple[int, int]] = []
+            mine_actions: list[tuple[NightAction, int]] = []
             miner_protectors: set[int] = set()
             arson_actions: list[tuple[int, int]] = []
             night_activity_lines: list[str] = []
@@ -4416,7 +4416,7 @@ class GameEngine:
                         await session.execute(
                             select(User).where(
                                 User.telegram_id.in_(
-                                    [actor_id for actor_id, _ in mine_actions] + list(miner_protectors)
+                                    [act.actor_telegram_id for act, _ in mine_actions] + list(miner_protectors)
                                 )
                             )
                         )
@@ -4424,7 +4424,8 @@ class GameEngine:
                 }
                 for actor_id in miner_protectors:
                     miner_result_notices.append((actor_id, "⚜️ Siz bu tunda himoyalandingiz va konga bormadingiz."))
-                for actor_id, mine_number in mine_actions:
+                for mine_action, mine_number in mine_actions:
+                    actor_id = mine_action.actor_telegram_id
                     miner = player_map.get(actor_id)
                     if miner is None or not miner.alive:
                         continue
@@ -4435,45 +4436,41 @@ class GameEngine:
                     user = miner_users.get(actor_id)
                     if result == "diamond":
                         amount = 1
-                        if act is not None:
-                            act.details = json.dumps({
-                                "result": "diamond",
-                                "amount": amount,
-                                "mine_number": mine_number,
-                            })
+                        mine_action.details = json.dumps({
+                            "result": "diamond",
+                            "amount": amount,
+                            "mine_number": mine_number,
+                        })
                         miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan <tg-emoji emoji-id=\"5427168083074628963\">💎</tg-emoji> {amount} olmos topdingiz."))
                         miner_group_lines.append(
                             f"👷🏻‍♂️ Konchi konda {amount} <tg-emoji emoji-id=\"5427168083074628968963\">💎</tg-emoji> olmos topdi!"
                         )
                     elif result == "dollar":
                         amount = 50
-                        if act is not None:
-                            act.details = json.dumps({
-                                "result": "dollar",
-                                "amount": amount,
-                                "mine_number": mine_number,
-                            })
+                        mine_action.details = json.dumps({
+                            "result": "dollar",
+                            "amount": amount,
+                            "mine_number": mine_number,
+                        })
                         miner_result_notices.append((actor_id, f"👷🏻‍♂️ {mine_number:02d}-kondan <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> {amount} dollar topdingiz."))
                         miner_group_lines.append(
                             f"👷🏻‍♂️ Konchi konda {amount} <tg-emoji emoji-id=\"5409048419211682843\">💵</tg-emoji> topdi!"
                         )
                     elif user and user.use_miner_protection is not False and (user.miner_protection or 0) > 0:
                         user.miner_protection -= 1
-                        if act is not None:
-                            act.details = json.dumps({
-                                "result": "protected",
-                                "mine_number": mine_number,
-                            })
+                        mine_action.details = json.dumps({
+                            "result": "protected",
+                            "mine_number": mine_number,
+                        })
                         miner_result_notices.append(
                             (actor_id, f"👷🏻‍♂️ {mine_number:02d}-o'lim koniga tushdingiz, lekin Konchi himoyasi sizni qutqardi.")
                         )
                         miner_group_lines.append("👷🏻‍♂️ Konchi o'lim konida sirpanib ketdi, lekin himoyasi uni qutqardi!")
                     else:
-                        if act is not None:
-                            act.details = json.dumps({
-                                "result": "death",
-                                "mine_number": mine_number,
-                            })
+                        mine_action.details = json.dumps({
+                            "result": "death",
+                            "mine_number": mine_number,
+                        })
                         dead.add(actor_id)
                         death_causes[actor_id] = "miner"
                         death_visitors[actor_id] = role_label(Role.MINER)
@@ -6827,6 +6824,61 @@ class GameEngine:
                 await self.finish_game(bot, game_id, winner)
         return True, "Karta tanlandi."
 
+    @staticmethod
+    def _winner_from_alive_snapshot(alive: list[GamePlayer]) -> Optional[Team]:
+        if not alive:
+            return Team.CITY
+
+        mafia_count = sum(1 for p in alive if p.team == Team.MAFIA.value)
+        killer_count = sum(1 for p in alive if p.team == Team.KILLER.value)
+        neutral_count = sum(1 for p in alive if p.team == Team.NEUTRAL.value)
+        city_count = len(alive) - mafia_count - killer_count - neutral_count
+        passive_survivor_count = sum(1 for p in alive if p.role in {Role.HOJIAKA.value, Role.MINER.value})
+        singleton_count = killer_count + neutral_count
+        blocking_singleton_count = max(0, singleton_count - passive_survivor_count)
+
+        if city_count == 0 and mafia_count == 0 and singleton_count > 0:
+            return Team.KILLER if neutral_count == 0 else Team.NEUTRAL
+
+        if mafia_count == 0 and blocking_singleton_count == 0:
+            return Team.CITY
+
+        if len(alive) == 1 and alive[0].team == Team.KILLER.value:
+            return Team.KILLER
+
+        if len(alive) == 1 and alive[0].team == Team.NEUTRAL.value:
+            return Team.NEUTRAL
+
+        if len(alive) == 2 and mafia_count == 1 and killer_count == 0:
+            return Team.MAFIA
+
+        if city_count == 0 and mafia_count > 0:
+            other_players = killer_count + neutral_count
+            if other_players == 0:
+                return Team.MAFIA
+            if killer_count > 0 and neutral_count == 0:
+                return Team.KILLER if killer_count >= mafia_count else Team.MAFIA
+            if neutral_count > 0 and killer_count == 0:
+                return Team.MAFIA if mafia_count >= neutral_count else Team.NEUTRAL
+            if killer_count > 0 and neutral_count > 0:
+                if killer_count >= mafia_count and killer_count >= neutral_count:
+                    return Team.KILLER
+                if neutral_count >= mafia_count and neutral_count >= killer_count:
+                    return Team.NEUTRAL
+                return Team.MAFIA
+
+        if city_count == 1 and mafia_count == 1 and blocking_singleton_count == 1:
+            return None
+
+        if city_count == 0 and mafia_count >= 2 and blocking_singleton_count == 1 and killer_count == 0:
+            return Team.MAFIA
+
+        non_mafia_fighting = city_count + max(0, neutral_count - passive_survivor_count)
+        if mafia_count > 0 and mafia_count >= non_mafia_fighting and killer_count == 0:
+            return Team.MAFIA
+
+        return None
+
     async def check_winner(self, game_id: int) -> Optional[Team]:
         """
         O'yin xulosasini tekshiradi - kim yutdi?
@@ -6845,7 +6897,7 @@ class GameEngine:
             alive = (
                 await session.execute(select(GamePlayer).where(GamePlayer.game_id == game_id, GamePlayer.alive.is_(True)))
             ).scalars().all()
-            
+
             if not alive:
                 return Team.CITY
 
@@ -6858,61 +6910,7 @@ class GameEngine:
                     return Team.ZOMBIE
                 return None
 
-            teams = [p.team for p in alive]
-            
-            mafia_count = sum(1 for t in teams if t == Team.MAFIA.value)
-            killer_count = sum(1 for t in teams if t == Team.KILLER.value)
-            neutral_count = sum(1 for t in teams if t == Team.NEUTRAL.value)
-            city_count = len(alive) - mafia_count - killer_count - neutral_count
-            passive_survivor_count = sum(
-                1
-                for p in alive
-                if p.role in {Role.HOJIAKA.value, Role.MINER.value}
-            )
-            
-            singleton_count = killer_count + neutral_count
-            blocking_singleton_count = max(0, singleton_count - passive_survivor_count)
-
-            # Oxirida faqat singleton rollar qolsa, o'yin shu yerda tugaydi.
-            # finish_game() bunday finalda tirik qolgan barcha singletonlarni g'olib qiladi,
-            # shuning uchun bu yerda faqat qaysi umumiy winner_team bilan yopishni tanlaymiz.
-            if city_count == 0 and mafia_count == 0 and singleton_count > 0:
-                return Team.KILLER if neutral_count == 0 else Team.NEUTRAL
-
-            # Hojiaka/Konchi kabi survival singletonlar o'yinni cho'zmaydi;
-            # faol singletonlar bor ekan, mafia yo'q bo'lsa ham o'yin davom etadi.
-            if mafia_count == 0 and blocking_singleton_count == 0:
-                return Team.CITY
-            
-            # Qotil o'z qolsa → Qotil yutadi
-            if len(alive) == 1 and alive[0].team == Team.KILLER.value:
-                return Team.KILLER
-            
-            # Suidsid o'ldirilib ketsa → Suidsid yutadi (lekin bu bajarilgan deb hisob qilamiz)
-            if len(alive) == 1 and alive[0].team == Team.NEUTRAL.value:
-                return Team.NEUTRAL
-            
-            # Final duel: 2 kishi qolsa va 1 ta mafia bo'lsa → Mafia wins
-            # (Don/Mafia vs. istalgan boshqa)
-            if len(alive) == 2 and mafia_count == 1 and killer_count == 0:
-                return Team.MAFIA
-
-            # 1 ta shahar + 1 ta mafia + 1 ta singleton bo'lsa o'yin davom etadi.
-            if city_count == 1 and mafia_count == 1 and blocking_singleton_count == 1:
-                return None
-
-            # 2 ta mafia + 1 ta neutral bo'lsa (qotil yo'q) mafia tomoni yutadi.
-            if city_count == 0 and mafia_count >= 2 and blocking_singleton_count == 1 and killer_count == 0:
-                return Team.MAFIA
-            
-            # Asosiy qaror: Mafia soni ≥ city + neutral soni bo'lsa → Mafia yutadi
-            # (Qotil hisob bo'lmaydi, u o'zining o'yinini o'ynaydi)
-            non_mafia_fighting = city_count + max(0, neutral_count - passive_survivor_count)
-            if mafia_count > 0 and mafia_count >= non_mafia_fighting and killer_count == 0:
-                return Team.MAFIA
-            
-            # O'yin davom ettirish
-            return None
+            return self._winner_from_alive_snapshot(alive)
 
     async def finish_game(self, bot: Bot, game_id: int, winner_team: Team) -> None:
         async with self.session_factory() as session:
