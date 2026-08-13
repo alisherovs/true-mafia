@@ -283,6 +283,18 @@ async def owner_diamond_audit_callback(callback: CallbackQuery, engine: GameEngi
     await callback.answer()
 
 
+@router.callback_query(F.data == "owner:server")
+async def owner_server_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
+    if callback.from_user is None or not _is_owner(callback.from_user.id, settings):
+        await callback.answer("Ruxsat yo'q.", show_alert=True)
+        return
+    PENDING_OWNER_ACTIONS.pop(callback.from_user.id, None)
+    # Get status text and recent logs
+    status_text = await engine.owner_server_status_text()
+    await _safe_edit(callback, status_text, reply_markup=owner_panel_keyboard())
+    await callback.answer()
+
+
 @router.callback_query(F.data == "owner:diamond_audit:download")
 async def owner_diamond_audit_download_callback(callback: CallbackQuery, engine: GameEngine, settings: Settings) -> None:
     if callback.from_user is None or not _is_owner(callback.from_user.id, settings):

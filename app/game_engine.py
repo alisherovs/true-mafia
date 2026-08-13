@@ -219,6 +219,59 @@ class GameEngine:
     def _monotonic(self) -> float:
         return asyncio.get_running_loop().time()
 
+    async def owner_recent_logs(self, limit: int = 30) -> list[GameLog]:
+        async with self.session_factory() as session:
+            result = await session.execute(
+                select(GameLog).order_by(GameLog.id.desc()).limit(limit)
+            )
+            rows = result.scalars().all()
+        return rows
+
+    async def owner_server_status_text(self) -> str:
+        import os
+        import platform
+        import time
+
+        pid = os.getpid()
+        py = platform.python_version()
+        uname = platform.uname()
+        now = datetime.now(timezone.utc)
+
+        # simple DB connectivity check
+        db_ok = False
+        db_msg = "ok"
+        try:
+            async with self.session_factory() as session:
+                await session.execute(select(func.count(Game.id)).limit(1))
+            db_ok = True
+        except Exception as exc:  # pragma: no cover - best-effort
+            db_ok = False
+            db_msg = str(exc)
+
+        # recent logs
+        logs = await self.owner_recent_logs(limit=10)
+        logs_text = []
+        for log in logs:
+            ts = getattr(log, "created_at", None)
+            ts_text = ts.strftime("%Y-%m-%d %H:%M:%S") if ts is not None else "?"
+            payload = (getattr(log, "payload", "") or "")
+            small = payload.replace("\n", " ")[:180]
+            logs_text.append(f"[{ts_text}] ({log.game_id}) {log.event_type}: {small}")
+
+        text = (
+            f"📡 <b>Server status</b>\n\n"
+            f"PID: <code>{pid}</code>\n"
+            f"Python: <code>{py}</code>\n"
+            f"System: <code>{uname.system} {uname.release} {uname.version}</code>\n"
+            f"Time (UTC): <code>{now.strftime('%Y-%m-%d %H:%M:%S')}</code>\n"
+            f"DB: <b>{'OK' if db_ok else 'ERROR'}</b> {escape(db_msg)}\n"
+            f"Scheduled jobs: <b>{len(scheduler.get_jobs())}</b>\n"
+            "\n"
+            "🧾 <b>Recent logs</b>\n"
+            + ("\n".join(logs_text) if logs_text else "(none)")
+        )
+        return text
+
     def _prune_cache_if_needed(self, cache: dict[int, tuple[float, object]]) -> None:
         if len(cache) < self._cache_limit:
             return

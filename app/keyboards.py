@@ -940,6 +940,7 @@ def owner_panel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="owner:stats")],
+            [InlineKeyboardButton(text="📡 Server holati va loglar", callback_data="owner:server")],
             [InlineKeyboardButton(text="🎰 Qimor sozlamalari", callback_data="owner:gamble")],
             [InlineKeyboardButton(text="👑 VIP aktiv userlar", callback_data="owner:vip")],
             [diamond_icon_button("TOP 30 almaz", callback_data="owner:diamond_top")],
